@@ -1,0 +1,34 @@
+models:
+  - name: "Claude Sonnet 4.5"
+    provider: "bedrock"
+    type: "claude"
+    model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    max_tokens: 1024
+    temperature: 0.7
+    top_p: 0.9
+    top_k: 50
+
+  - name: "Claude Opus 4.6"
+    provider: "bedrock"
+    type: "claude"
+    model_id: "global.anthropic.claude-opus-4-6-v1"
+    max_tokens: 2048
+    temperature: 0.7
+    top_p: 0.9
+    top_k: 50
+
+  - name: "Amazon Nova Pro"
+    provider: "bedrock"
+    type: "nova"
+    model_id: "apac.amazon.nova-pro-v1:0"
+    max_tokens: 1024
+    temperature: 0.7
+    top_p: 0.9
+
+  - name: "Amazon Nova Lite"
+    provider: "bedrock"
+    type: "nova"
+    model_id: "apac.amazon.nova-lite-v1:0"
+    max_tokens: 1024
+    temperature: 0.7
+    top_p: 0.9
