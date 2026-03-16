@@ -1,0 +1,17 @@
+[project]
+name = "wellbot"
+version = "0.1.0"
+description = "A Modular chatbot system built on AWS Bedrock, evolving from simple chat to RAG and agent capabilities with Reflex."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiomysql>=0.3.2",
+    "boto3>=1.42.68",
+    "cryptography>=46.0.5",
+    "passlib[bcrypt]>=1.7.4",
+    "pymysql>=1.1.2",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "reflex>=0.8.27",
+    "sqlmodel>=0.0.37",
+]
