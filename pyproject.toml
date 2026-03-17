@@ -12,6 +12,6 @@ dependencies = [
     "pymysql>=1.1.2",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
-    "reflex>=0.8.27",
+    "reflex>=0.8.28",
     "sqlmodel>=0.0.37",
 ]
