@@ -13,7 +13,6 @@ _DEFAULT_CONFIG = {
         {
             "name": "Claude Sonnet 4.5",
             "provider": "bedrock",
-            "type": "claude",
             "model_id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
             "max_tokens": 1024,
             "temperature": 0.7,
@@ -51,3 +50,8 @@ def get_model_names() -> list[str]:
 def get_models_map() -> dict[str, dict]:
     """모델명 → 설정 dict 매핑 반환"""
     return {m["name"]: m for m in get_models_config()}
+
+
+def get_system_prompt() -> str | None:
+    """글로벌 시스템 프롬프트 반환"""
+    return load_config().get("system_prompt")

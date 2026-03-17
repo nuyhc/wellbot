@@ -1,10 +1,11 @@
 """채팅 상태 관리 모듈"""
 import reflex as rx
-from ..config.loader import get_models_map, get_model_names
+from ..config.loader import get_models_map, get_model_names, get_system_prompt
 from ..services.llm import stream_converse
 
 MODEL_NAMES = get_model_names()
 MODELS_MAP = get_models_map()
+GLOBAL_SYSTEM_PROMPT = get_system_prompt()
 
 
 class ChatState(rx.State):
@@ -39,7 +40,7 @@ class ChatState(rx.State):
                 max_tokens=model_cfg.get("max_tokens", 1024),
                 temperature=model_cfg.get("temperature", 0.7),
                 top_p=model_cfg.get("top_p"),
-                system_prompt=model_cfg.get("system_prompt"),
+                system_prompt=model_cfg.get("system_prompt") or GLOBAL_SYSTEM_PROMPT,
             ):
                 q, current = self.chat_history[-1]
                 self.chat_history[-1] = (q, current + token)
