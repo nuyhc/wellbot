@@ -17,20 +17,24 @@ _DEFAULT_CONFIG = {
             "model_id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
             "max_tokens": 1024,
             "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 50
         }
     ]
 }
 
+_cached_config: dict | None = None
+
 
 def load_config() -> dict:
-    """config.yaml을 파싱하여 반환"""
+    """config.yaml을 파싱하여 반환 (캐싱)"""
+    global _cached_config
+    if _cached_config is not None:
+        return _cached_config
     try:
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            _cached_config = yaml.safe_load(f)
     except FileNotFoundError:
-        return _DEFAULT_CONFIG
+        _cached_config = _DEFAULT_CONFIG
+    return _cached_config
 
 
 def get_models_config() -> list[dict]:

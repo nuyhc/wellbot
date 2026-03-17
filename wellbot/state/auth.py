@@ -46,7 +46,7 @@ class AuthState(rx.State):
             if user and verify_password(self.password, user.password_hash):
                 self.is_authenticated = True
                 self.current_username = user.username
-                self.is_admin = user.is_auth
+                self.is_admin = user.is_admin
                 self.clear_form()
                 return rx.redirect("/")
             else:
@@ -68,5 +68,5 @@ class AuthState(rx.State):
     def check_admin(self):
         if not self.is_authenticated:
             return rx.redirect("/login")
-        if not self.is_authenticated:
+        if not self.is_admin:
             return rx.redirect("/")
