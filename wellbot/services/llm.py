@@ -9,8 +9,6 @@ def invoke_claude(
     model_id: str,
     max_tokens: int = 1024,
     temperature: float = 0.7,
-    top_p: float = 0.9,
-    top_k: int = 50
 ) -> str:
     api_messages = []
     for q, a in messages:
@@ -31,8 +29,6 @@ def invoke_claude(
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "top_p": top_p,
-        "top_k": top_k,
         "messages": api_messages
     })
 

@@ -41,8 +41,6 @@ class ChatState(rx.State):
                     model_id=model_cfg["model_id"],
                     max_tokens=model_cfg.get("max_tokens", 1024),
                     temperature=model_cfg.get("temperature", 0.7),
-                    top_p=model_cfg.get("top_p", 0.9),
-                    top_k=model_cfg.get("top_k", 50)
                 )
             elif model_type == "nova":
                 answer = invoke_nova(
