@@ -16,6 +16,15 @@ class AdminState(AuthState):
     error_message: str = ""
     success_message: str = ""
 
+    def set_new_username(self, value: str):
+        self.new_username = value
+
+    def set_new_password(self, value: str):
+        self.new_password = value
+
+    def set_new_is_admin(self, value: bool):
+        self.new_is_admin = value
+
     def load_users(self):
         """전체 사용자 목록 로드"""
         self.error_message = ""
@@ -28,7 +37,7 @@ class AdminState(AuthState):
             self.users = session.query(User).all()
 
     def add_user(self):
-        if not self.new_username or self.new_password:
+        if not self.new_username or not self.new_password:
             self.error_message = "아이디와 비밀번호를 모두 입력해 주세요."
             self.success_message = ""
             return
@@ -47,7 +56,7 @@ class AdminState(AuthState):
                 is_admin=self.new_is_admin
             )
 
-            sessoin.add(new_user)
+            session.add(new_user)
             session.commit()
 
         self.success_message = f"사용자 '{self.new_username}'이(가) 추가되었습니다."
@@ -55,7 +64,7 @@ class AdminState(AuthState):
         self.new_username = ""
         self.new_password = ""
         self.new_is_admin = False
-        self.laod_users()
+        self.load_users()
 
     def delete_user(self, username: str):
         if username == self.current_username:
@@ -63,11 +72,11 @@ class AdminState(AuthState):
             self.success_message = ""
             return
 
-        with rx.session() as sessoin:
+        with rx.session() as session:
             user = session.query(User).filter(User.username == username).first()
             if user:
-                sessoin.delete(user)
-                sessoin.commit()
+                session.delete(user)
+                session.commit()
                 self.success_message = f"사용자 '{username}'이(가) 삭제되었습니다."
                 self.error_message = ""
         self.load_users()
@@ -79,7 +88,7 @@ class AdminState(AuthState):
             self.success_message = ""
             return
 
-        with rx.sessoin() as session:
+        with rx.session() as session:
             user = session.query(User).filter(User.username == username).first()
             if user:
                 user.is_admin = not user.is_admin
