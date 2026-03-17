@@ -1,7 +1,7 @@
 """채팅 상태 관리 모듈"""
 import reflex as rx
 from ..config.loader import get_models_map, get_model_names
-from ..services.llm import invoke_claude, invoke_nova
+from ..services.llm import stream_claude, stream_nova
 
 MODEL_NAMES = get_model_names()
 MODELS_MAP = get_models_map()
@@ -35,27 +35,30 @@ class ChatState(rx.State):
             model_type = model_cfg.get("type", "claude")
 
             if model_type == "claude":
-                answer = invoke_claude(
+                for token in stream_claude(
                     messages=self.chat_history[:-1],
                     current_question=current_question,
                     model_id=model_cfg["model_id"],
                     max_tokens=model_cfg.get("max_tokens", 1024),
                     temperature=model_cfg.get("temperature", 0.7),
-                )
+                ):
+                    q, current = self.chat_history[-1]
+                    self.chat_history[-1] = (q, current + token)
+                    yield
             elif model_type == "nova":
-                answer = invoke_nova(
+                for token in stream_nova(
                     messages=self.chat_history[:-1],
                     current_question=current_question,
                     model_id=model_cfg["model_id"],
                     max_tokens=model_cfg.get("max_tokens", 1024),
                     temperature=model_cfg.get("temperature", 0.7),
-                    top_p=model_cfg.get("top_p", 0.9)
-                )
+                    top_p=model_cfg.get("top_p", 0.9),
+                ):
+                    q, current = self.chat_history[-1]
+                    self.chat_history[-1] = (q, current + token)
+                    yield
             else:
-                raise ValueError("Unsupported model type: {model_type}")
-
-            self.chat_history[-1] = (self.chat_history[-1][0], answer)
-            yield
+                raise ValueError(f"Unsupported model type: {model_type}")
 
         except Exception as e:
             import traceback
