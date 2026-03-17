@@ -1,7 +1,7 @@
 """사이드바 컴포넌트"""
 import reflex as rx
-from ..state.auth import AuthState
-from ..state.chat import ChatState, MODEL_NAMES
+from wellbot.state.auth import AuthState
+from wellbot.state.chat import ChatState, MODEL_NAMES
 
 
 def sidebar() -> rx.Component:

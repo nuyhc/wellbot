@@ -1,7 +1,7 @@
 """인증 상태 관리 모듈"""
 import reflex as rx
 import bcrypt
-from ..models import User
+from wellbot.models import User
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

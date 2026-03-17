@@ -1,9 +1,9 @@
 """메인 채팅 페이지"""
 import reflex as rx
-from ..state.auth import AuthState
-from ..components.sidebar import sidebar
-from ..components.chat_area import chat_area
-from ..components.base_input_bar import base_input_bar
+from wellbot.state.auth import AuthState
+from wellbot.components.sidebar import sidebar
+from wellbot.components.chat_area import chat_area
+from wellbot.components.base_input_bar import base_input_bar
 
 
 @rx.page(route="/", on_load=AuthState.check_auth)

@@ -1,7 +1,7 @@
 """채팅 상태 관리 모듈"""
 import reflex as rx
-from ..config.loader import get_models_map, get_model_names, get_system_prompt
-from ..services.llm import stream_converse, trim_history
+from wellbot.config.loader import get_models_map, get_model_names, get_system_prompt
+from wellbot.services.llm import stream_converse, trim_history
 
 MODEL_NAMES = get_model_names()
 MODELS_MAP = get_models_map()

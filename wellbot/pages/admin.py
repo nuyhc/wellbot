@@ -1,7 +1,7 @@
 """관리자 대시보드 페이지"""
 import reflex as rx
-from ..models import User
-from ..state.admin import AdminState
+from wellbot.models import User
+from wellbot.state.admin import AdminState
 
 
 def user_row(user: User) -> rx.Component:

@@ -1,6 +1,6 @@
 """메시지 입력 컴포넌트"""
 import reflex as rx
-from ..state.chat import ChatState
+from wellbot.state.chat import ChatState
 
 _UPLOAD_ID = "file_upload_zone"
 _BTN_UPLOAD_ID = "btn_upload_zone"

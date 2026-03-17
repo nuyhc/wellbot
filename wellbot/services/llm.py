@@ -1,6 +1,6 @@
 """LLM API 호출 모듈 (Bedrock Converse API)"""
 from collections.abc import Generator
-from ..config.settings import bedrock_client
+from wellbot.config.settings import bedrock_client
 
 # tiktoken 미설치 환경용 간이 토큰 추정 (문자 수 / 3)
 def _estimate_tokens(text: str) -> int:

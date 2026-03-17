@@ -1,6 +1,6 @@
 """로그인 페이지"""
 import reflex as rx
-from ..state.auth import AuthState
+from wellbot.state.auth import AuthState
 
 
 def login_page() -> rx.Component:

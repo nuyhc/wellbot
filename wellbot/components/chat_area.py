@@ -1,6 +1,6 @@
 """채팅 영역 컴포넌트"""
 import reflex as rx
-from ..state.chat import ChatState
+from wellbot.state.chat import ChatState
 
 
 def message(qa: tuple[str, str]) -> rx.Component:

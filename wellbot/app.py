@@ -1,10 +1,10 @@
 """WellBot App. Entrypoint"""
 import reflex as rx
 
-from .pages.index import index
-from .pages.login import login_page
-from .pages.admin import admin_page
-from .state.admin import AdminState
+from wellbot.pages.index import index
+from wellbot.pages.login import login_page
+from wellbot.pages.admin import admin_page
+from wellbot.state.admin import AdminState
 
 
 app = rx.App()

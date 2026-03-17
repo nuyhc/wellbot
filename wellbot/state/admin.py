@@ -1,7 +1,7 @@
 """admin 상태 관리 모듈"""
 import reflex as rx
-from ..models import User
-from .auth import AuthState, get_password_hash
+from wellbot.models import User
+from wellbot.state.auth import AuthState, get_password_hash
 
 
 class AdminState(AuthState):
