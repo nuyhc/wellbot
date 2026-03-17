@@ -4,6 +4,7 @@ models:
   - name: "Claude Sonnet 4.5"
     provider: "bedrock"
     model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    context_window: 200000
     max_tokens: 1024
     temperature: 0.7
     # system_prompt:
@@ -11,6 +12,7 @@ models:
   - name: "Claude Opus 4.6"
     provider: "bedrock"
     model_id: "global.anthropic.claude-opus-4-6-v1"
+    context_window: 1000000
     max_tokens: 2048
     temperature: 0.7
     # system_prompt:
@@ -18,6 +20,7 @@ models:
   - name: "Amazon Nova Pro"
     provider: "bedrock"
     model_id: "apac.amazon.nova-pro-v1:0"
+    context_window: 300000
     max_tokens: 1024
     temperature: 0.7
     top_p: 0.9
@@ -26,6 +29,7 @@ models:
   - name: "Amazon Nova Lite"
     provider: "bedrock"
     model_id: "apac.amazon.nova-lite-v1:0"
+    context_window: 300000
     max_tokens: 1024
     temperature: 0.7
     top_p: 0.9

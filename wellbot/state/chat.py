@@ -1,7 +1,7 @@
 """채팅 상태 관리 모듈"""
 import reflex as rx
 from ..config.loader import get_models_map, get_model_names, get_system_prompt
-from ..services.llm import stream_converse
+from ..services.llm import stream_converse, trim_history
 
 MODEL_NAMES = get_model_names()
 MODELS_MAP = get_models_map()
@@ -33,14 +33,22 @@ class ChatState(rx.State):
             if not model_cfg:
                 model_cfg = list(MODELS_MAP.values())[0]
 
+            system_prompt = model_cfg.get("system_prompt") or GLOBAL_SYSTEM_PROMPT
+            history = trim_history(
+                history=self.chat_history[:-1],
+                current_question=current_question,
+                context_window=model_cfg.get("context_window", 200000),
+                system_prompt=system_prompt,
+            )
+
             for token in stream_converse(
-                messages=self.chat_history[:-1],
+                messages=history,
                 current_question=current_question,
                 model_id=model_cfg["model_id"],
                 max_tokens=model_cfg.get("max_tokens", 1024),
                 temperature=model_cfg.get("temperature", 0.7),
                 top_p=model_cfg.get("top_p"),
-                system_prompt=model_cfg.get("system_prompt") or GLOBAL_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
             ):
                 q, current = self.chat_history[-1]
                 self.chat_history[-1] = (q, current + token)
