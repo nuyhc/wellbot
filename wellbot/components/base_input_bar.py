@@ -44,7 +44,7 @@ def base_input_bar() -> rx.Component:
                 padding="0.5em 0.5em 0.5em 1.5em",
                 background="rgba(30, 32, 40, 0.8)",
                 border_radius="30px",
-                border="1px solid rgba(2255, 255, 255, 0.1)",
+                border="1px solid rgba(255, 255, 255, 0.1)",
                 box_shadow="0 4px 20px rgba(0, 0, 0, 0.3)",
                 align_items="center"
             ),
