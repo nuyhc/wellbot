@@ -14,12 +14,21 @@ class ChatState(rx.State):
     chat_history: list[tuple[str, str]] = []
     processing: bool = False
     selected_model: str = MODEL_NAMES[0] if MODEL_NAMES else ""
+    attached_files: list[str] = []
 
     def set_question(self, value: str):
         self.question = value
 
     def set_selected_model(self, value: str):
         self.selected_model = value
+
+    async def handle_upload(self, files: list[rx.UploadFile]):
+        for file in files:
+            if file.filename and file.filename not in self.attached_files:
+                self.attached_files.append(file.filename)
+
+    def remove_file(self, filename: str):
+        self.attached_files = [f for f in self.attached_files if f != filename]
 
     async def answer(self):
         if not self.question.strip():
