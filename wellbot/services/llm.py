@@ -51,6 +51,8 @@ def stream_converse(
     temperature: float = 0.7,
     top_p: float | None = None,
     system_prompt: str | None = None,
+    thinking_enabled: bool = False,
+    thinking_budget: int = 5000,
 ) -> Generator[str, None, None]:
     api_messages = []
     for q, a in messages:
@@ -59,9 +61,16 @@ def stream_converse(
             api_messages.append({"role": "assistant", "content": [{"text": a}]})
     api_messages.append({"role": "user", "content": [{"text": current_question}]})
 
-    inference_config: dict = {"maxTokens": max_tokens, "temperature": temperature}
-    if top_p is not None:
-        inference_config["topP"] = top_p
+    if thinking_enabled:
+        # thinking 요구사항: temperature=1.0, topP 사용 불가, maxTokens >= budget + 출력
+        inference_config: dict = {
+            "maxTokens": max_tokens + thinking_budget,
+            "temperature": 1.0,
+        }
+    else:
+        inference_config = {"maxTokens": max_tokens, "temperature": temperature}
+        if top_p is not None:
+            inference_config["topP"] = top_p
 
     kwargs: dict = {
         "modelId": model_id,
@@ -70,6 +79,10 @@ def stream_converse(
     }
     if system_prompt:
         kwargs["system"] = [{"text": system_prompt}]
+    if thinking_enabled:
+        kwargs["additionalModelRequestFields"] = {
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+        }
 
     response = bedrock_client.converse_stream(**kwargs)
 
@@ -78,3 +91,4 @@ def stream_converse(
             delta = event["contentBlockDelta"]["delta"]
             if "text" in delta:
                 yield delta["text"]
+            # thinking_delta는 무시 (내부 추론 과정)

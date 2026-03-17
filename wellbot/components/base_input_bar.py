@@ -25,6 +25,88 @@ def _file_chip(filename: str) -> rx.Component:
     )
 
 
+def _plus_button() -> rx.Component:
+    """+ 버튼 → popover 메뉴 (파일 첨부 / Extended Thinking 토글)"""
+    return rx.popover.root(
+        rx.popover.trigger(
+            rx.icon_button(
+                rx.icon("plus", size=18),
+                variant="ghost",
+                color=rx.cond(
+                    ChatState.thinking_enabled,
+                    "#a855f7",            # thinking ON → 보라색
+                    "rgba(255,255,255,0.6)",
+                ),
+                width="36px",
+                height="36px",
+                border_radius="50%",
+                cursor="pointer",
+                _hover={"background": "rgba(255,255,255,0.1)", "color": "white"},
+            ),
+        ),
+        rx.popover.content(
+            rx.vstack(
+                # 파일 첨부
+                rx.upload(
+                    rx.hstack(
+                        rx.icon("paperclip", size=15, color="rgba(255,255,255,0.7)"),
+                        rx.text("파일 첨부", size="2", color="rgba(255,255,255,0.9)"),
+                        width="100%",
+                        align_items="center",
+                        gap="0.5em",
+                        padding="0.4em 0.6em",
+                        border_radius="8px",
+                        cursor="pointer",
+                        _hover={"background": "rgba(255,255,255,0.08)"},
+                    ),
+                    id=_BTN_UPLOAD_ID,
+                    on_drop=ChatState.handle_upload(
+                        rx.upload_files(upload_id=_BTN_UPLOAD_ID)
+                    ),
+                    multiple=True,
+                    no_drag=True,
+                    border="none",
+                    padding="0",
+                    width="100%",
+                ),
+
+                # Extended Thinking 토글 (지원 모델만 표시)
+                rx.cond(
+                    ChatState.current_model_supports_thinking,
+                    rx.hstack(
+                        rx.icon("brain", size=15, color="rgba(255,255,255,0.7)"),
+                        rx.text(
+                            "Extended Thinking",
+                            size="2",
+                            color="rgba(255,255,255,0.9)",
+                        ),
+                        rx.spacer(),
+                        rx.switch(
+                            checked=ChatState.thinking_enabled,
+                            on_change=ChatState.toggle_thinking,
+                            color_scheme="violet",
+                        ),
+                        width="100%",
+                        align_items="center",
+                        gap="0.5em",
+                        padding="0.4em 0.6em",
+                    ),
+                ),
+
+                gap="0.2em",
+                min_width="200px",
+            ),
+            background="rgba(20, 22, 30, 0.97)",
+            border="1px solid rgba(255,255,255,0.1)",
+            border_radius="12px",
+            padding="0.4em",
+            box_shadow="0 8px 32px rgba(0,0,0,0.5)",
+            side="top",
+            align="start",
+        ),
+    )
+
+
 def base_input_bar() -> rx.Component:
     return rx.box(
         # 첨부 파일 칩 목록
@@ -42,30 +124,7 @@ def base_input_bar() -> rx.Component:
         rx.upload(
             rx.form(
                 rx.hstack(
-                    # + 버튼 (클릭 업로드)
-                    rx.upload(
-                        rx.icon_button(
-                            rx.icon("plus", size=18),
-                            variant="ghost",
-                            color="rgba(255,255,255,0.6)",
-                            width="36px",
-                            height="36px",
-                            border_radius="50%",
-                            cursor="pointer",
-                            _hover={
-                                "background": "rgba(255,255,255,0.1)",
-                                "color": "white",
-                            },
-                        ),
-                        id=_BTN_UPLOAD_ID,
-                        on_drop=ChatState.handle_upload(
-                            rx.upload_files(upload_id=_BTN_UPLOAD_ID)
-                        ),
-                        multiple=True,
-                        no_drag=True,
-                        border="none",
-                        padding="0",
-                    ),
+                    _plus_button(),
 
                     rx.input(
                         value=ChatState.question,

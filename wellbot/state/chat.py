@@ -15,12 +15,23 @@ class ChatState(rx.State):
     processing: bool = False
     selected_model: str = MODEL_NAMES[0] if MODEL_NAMES else ""
     attached_files: list[str] = []
+    thinking_enabled: bool = False
+
+    @rx.var
+    def current_model_supports_thinking(self) -> bool:
+        return bool(MODELS_MAP.get(self.selected_model, {}).get("thinking", False))
 
     def set_question(self, value: str):
         self.question = value
 
     def set_selected_model(self, value: str):
         self.selected_model = value
+        # 모델 변경 시 thinking 지원 안 하면 자동 off
+        if not MODELS_MAP.get(value, {}).get("thinking", False):
+            self.thinking_enabled = False
+
+    def toggle_thinking(self, value: bool):
+        self.thinking_enabled = value
 
     async def handle_upload(self, files: list[rx.UploadFile]):
         for file in files:
@@ -61,6 +72,8 @@ class ChatState(rx.State):
                 temperature=model_cfg.get("temperature", 0.7),
                 top_p=model_cfg.get("top_p"),
                 system_prompt=system_prompt,
+                thinking_enabled=self.thinking_enabled,
+                thinking_budget=model_cfg.get("thinking_budget", 5000),
             ):
                 q, current = self.chat_history[-1]
                 self.chat_history[-1] = (q, current + token)
