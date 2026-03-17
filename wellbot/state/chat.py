@@ -15,6 +15,9 @@ class ChatState(rx.State):
     processing: bool = False
     selected_model: str = MODEL_NAMES[0] if MODEL_NAMES else ""
 
+    def set_question(self, value: str):
+        self.question = value
+
     def set_selected_model(self, value: str):
         self.selected_model = value
 
