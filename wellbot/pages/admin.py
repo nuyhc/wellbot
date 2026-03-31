@@ -116,7 +116,7 @@ def admin_page() -> rx.Component:
             padding="2em",
             width="100%",
             max_width="1000px",
-            margin="0 auth"
+            margin="0 auto"
         ),
 
         width="100vw",

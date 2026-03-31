@@ -24,6 +24,6 @@ def index() -> rx.Component:
         spacing="0",
         margin="0",
         padding="0",
-        background="#0f11a",
+        background="#0f111a",
         style={"font_family": "Inter, sans-serif"}
     )

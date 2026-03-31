@@ -13,7 +13,7 @@ def message(qa: tuple[str, str]) -> rx.Component:
             padding="1em 1.2em",
             border_radius="18px 18px 4px, 18px",
             margin_bottom="1.5em",
-            align_self="felx-end",
+            align_self="flex-end",
             display="inline-block",
             max_width="75%",
             box_shadow="0 4px 15px rgba(107, 33, 168, 0.2)"

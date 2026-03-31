@@ -59,7 +59,7 @@ def sidebar() -> rx.Component:
         rx.vstack(
             rx.text("History", size="2", color="gray", weight="bold", margin_bottom="0.5em"),
             rx.text("Previous conversations will appear here.", size="1", color="gray"),
-            widht="100%",
+            width="100%",
             padding_top="2em",
             border_top="1px solid rgba(255, 255, 255, 0.05)",
         ),

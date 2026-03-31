@@ -20,7 +20,7 @@ def login_page() -> rx.Component:
                         rx.text("아이디", color="gray", size="2", font_weight="bold"),
                         rx.input(
                             placeholder="Enter Username",
-                            valude=AuthState.username,
+                            value=AuthState.username,
                             on_change=AuthState.set_username,
                             background="rgba(30, 32, 40, 0.8)",
                             border="1px solid rgba(255, 255, 255, 0.1)",
