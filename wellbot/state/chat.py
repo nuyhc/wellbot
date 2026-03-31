@@ -2,6 +2,8 @@
 import reflex as rx
 from wellbot.config.loader import get_models_map, get_model_names, get_system_prompt
 from wellbot.services.llm import stream_converse, trim_history
+from wellbot.services.file_validator import classify_file, validate_file
+from wellbot.services.content_block_builder import AttachedFile, build_content_blocks
 
 # 하단으로 스크롤
 _SCROLL_DOWN = """
@@ -20,7 +22,12 @@ class ChatState(rx.State):
     chat_history: list[tuple[str, str]] = []
     processing: bool = False
     selected_model: str = MODEL_NAMES[0] if MODEL_NAMES else ""
-    attached_files: list[str] = []
+    # 첨부 파일 메타데이터 (UI 렌더링용, 직렬화 가능)
+    attached_files: list[dict] = []
+    # 파일 바이트 데이터 (언더스코어 접두사로 Reflex 직렬화에서 자동 제외)
+    _file_data: dict[str, bytes] = {}
+    # 업로드 에러 메시지
+    upload_error: str = ""
     thinking_enabled: bool = False
 
     @rx.var
@@ -40,24 +47,100 @@ class ChatState(rx.State):
         self.thinking_enabled = value
 
     async def handle_upload(self, files: list[rx.UploadFile]):
+        """파일 업로드 처리 — 검증 후 바이트 데이터를 메모리에 저장"""
+        # 에러 초기화 (루프 전체에서 마지막 에러만 남지 않도록 루프 밖에서 초기화)
+        self.upload_error = ""
+
         for file in files:
-            if file.filename and file.filename not in self.attached_files:
-                self.attached_files.append(file.filename)
+            if not file.filename:
+                continue
+
+            try:
+                # 파일 바이트를 메모리에서 읽기 (디스크 저장 없음)
+                file_bytes = await file.read()
+
+                # 파일 타입 분류
+                file_type = classify_file(file.filename)
+
+                # 현재 이미지/문서 개수 계산 — 동일 파일명은 교체 대상이므로 제외
+                current_image_count = sum(
+                    1 for f in self.attached_files
+                    if f["file_type"] == "image" and f["filename"] != file.filename
+                )
+                current_document_count = sum(
+                    1 for f in self.attached_files
+                    if f["file_type"] == "document" and f["filename"] != file.filename
+                )
+
+                # 크기 및 개수 검증
+                validate_file(
+                    filename=file.filename,
+                    file_size=len(file_bytes),
+                    current_image_count=current_image_count,
+                    current_document_count=current_document_count,
+                )
+
+                # 중복 파일명 처리 (덮어쓰기)
+                self.attached_files = [
+                    f for f in self.attached_files if f["filename"] != file.filename
+                ]
+
+                # 검증 성공: 메타데이터 및 바이트 저장
+                self.attached_files.append(
+                    {"filename": file.filename, "file_type": file_type}
+                )
+                self._file_data[file.filename] = file_bytes
+
+            except ValueError as e:
+                # 검증 실패: 에러 메시지 설정
+                self.upload_error = str(e)
 
     def remove_file(self, filename: str):
-        self.attached_files = [f for f in self.attached_files if f != filename]
+        """첨부 파일 제거 — 메타데이터와 바이트 데이터 모두 삭제"""
+        self.attached_files = [
+            f for f in self.attached_files if f["filename"] != filename
+        ]
+        self._file_data.pop(filename, None)
 
     async def answer(self):
-        if not self.question.strip():
+        if not self.question.strip() and not self.attached_files:
             return
 
-        self.chat_history.append((self.question, ""))
-        current_question = self.question
+        current_question = self.question.strip()
+
+        # 문서만 첨부하고 텍스트가 비어있으면 기본 텍스트 삽입
+        has_document = any(
+            f["file_type"] == "document" for f in self.attached_files
+        )
+        if not current_question and has_document:
+            current_question = "첨부된 파일을 분석해주세요."
+
+        self.chat_history.append((current_question, ""))
         self.question = ""
         self.processing = True
         yield rx.call_script(_SCROLL_DOWN)
 
         try:
+            # 첨부 파일이 있으면 content block 빌드
+            file_blocks: list[dict] | None = None
+            if self.attached_files and self._file_data:
+                attached = [
+                    AttachedFile(
+                        filename=f["filename"],
+                        data=self._file_data[f["filename"]],
+                        file_type=f["file_type"],
+                    )
+                    for f in self.attached_files
+                    if f["filename"] in self._file_data
+                ]
+                blocks, failed = build_content_blocks(attached)
+                if blocks:
+                    file_blocks = blocks
+                if failed:
+                    self.upload_error = (
+                        "일부 파일(" + ", ".join(failed) + ")을 처리할 수 없어 제외되었습니다."
+                    )
+
             model_cfg = MODELS_MAP.get(self.selected_model)
             if not model_cfg:
                 model_cfg = list(MODELS_MAP.values())[0]
@@ -80,6 +163,7 @@ class ChatState(rx.State):
                 system_prompt=system_prompt,
                 thinking_enabled=self.thinking_enabled,
                 thinking_budget=model_cfg.get("thinking_budget", 5000),
+                file_blocks=file_blocks,
             ):
                 q, current = self.chat_history[-1]
                 self.chat_history[-1] = (q, current + token)
@@ -96,5 +180,8 @@ class ChatState(rx.State):
             yield rx.call_script(_SCROLL_DOWN)
 
         finally:
+            # 전송 완료 후 첨부 파일 초기화 (메모리 해제)
+            self.attached_files = []
+            self._file_data = {}
             self.processing = False
             yield

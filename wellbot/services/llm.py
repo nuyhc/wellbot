@@ -53,13 +53,20 @@ def stream_converse(
     system_prompt: str | None = None,
     thinking_enabled: bool = False,
     thinking_budget: int = 5000,
+    file_blocks: list[dict] | None = None,
 ) -> Generator[str, None, None]:
     api_messages = []
     for q, a in messages:
         api_messages.append({"role": "user", "content": [{"text": q}]})
         if a:
             api_messages.append({"role": "assistant", "content": [{"text": a}]})
-    api_messages.append({"role": "user", "content": [{"text": current_question}]})
+
+    # 현재 user 메시지 content 배열 구성: 파일 블록이 있으면 텍스트 + 파일 블록 포함
+    if file_blocks:
+        content = [{"text": current_question}] + file_blocks
+    else:
+        content = [{"text": current_question}]
+    api_messages.append({"role": "user", "content": content})
 
     if thinking_enabled:
         # thinking 요구사항: temperature=1.0, topP 사용 불가, maxTokens >= budget + 출력

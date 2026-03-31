@@ -6,22 +6,27 @@ _UPLOAD_ID = "file_upload_zone"
 _BTN_UPLOAD_ID = "btn_upload_zone"
 
 
-def _file_chip(filename: str) -> rx.Component:
-    return rx.hstack(
-        rx.icon("paperclip", size=12, color="rgba(255,255,255,0.6)"),
-        rx.text(filename, size="1", color="rgba(255,255,255,0.8)", max_width="150px",
-                overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
-        rx.icon(
-            "x", size=12, color="rgba(255,255,255,0.5)", cursor="pointer",
-            on_click=ChatState.remove_file(filename),
-            _hover={"color": "white"},
+def _file_chip(file_info: dict) -> rx.Component:
+    """첨부 파일 칩 — attached_files의 dict 항목을 받아 파일명 표시"""
+    return rx.tooltip(
+        rx.hstack(
+            rx.icon("paperclip", size=12, color="rgba(255,255,255,0.6)"),
+            rx.text(file_info["filename"], size="1", color="rgba(255,255,255,0.8)",
+                    max_width="150px", overflow="hidden", text_overflow="ellipsis",
+                    white_space="nowrap"),
+            rx.icon(
+                "x", size=12, color="rgba(255,255,255,0.5)", cursor="pointer",
+                on_click=ChatState.remove_file(file_info["filename"]),
+                _hover={"color": "white"},
+            ),
+            background="rgba(107, 33, 168, 0.3)",
+            border="1px solid rgba(107, 33, 168, 0.5)",
+            border_radius="12px",
+            padding="0.2em 0.6em",
+            align_items="center",
+            gap="0.3em",
         ),
-        background="rgba(107, 33, 168, 0.3)",
-        border="1px solid rgba(107, 33, 168, 0.5)",
-        border_radius="12px",
-        padding="0.2em 0.6em",
-        align_items="center",
-        gap="0.3em",
+        content=file_info["filename"],
     )
 
 
@@ -109,6 +114,17 @@ def _plus_button() -> rx.Component:
 
 def base_input_bar() -> rx.Component:
     return rx.box(
+        # 업로드 에러 메시지 (파일 칩 목록 위에 표시)
+        rx.cond(
+            ChatState.upload_error != "",
+            rx.text(
+                ChatState.upload_error,
+                color="red",
+                size="2",
+                padding="0 1.5em 0.5em 1.5em",
+            ),
+        ),
+
         # 첨부 파일 칩 목록
         rx.cond(
             ChatState.attached_files.length() > 0,
