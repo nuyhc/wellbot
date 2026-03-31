@@ -72,14 +72,29 @@ def thinking_indicator() -> rx.Component:
 def chat_area() -> rx.Component:
     """메인 채팅 영역"""
     return rx.box(
-        rx.foreach(ChatState.chat_history, message),
+        rx.box(
+            rx.foreach(ChatState.chat_history, message),
 
-        thinking_indicator(),
-        
+            thinking_indicator(),
+
+            # 모든 콘텐츠의 overflow-anchor를 비활성화
+            style={"overflow_anchor": "none"},
+        ),
+
+        # 스크롤 앵커: 브라우저가 이 요소를 기준으로 스크롤 위치를 자동 유지
+        rx.el.div(
+            id="chat-bottom",
+            style={
+                "overflow_anchor": "auto",
+                "height": "1px",
+            },
+        ),
+
         padding="2em 4em",
         width="100%",
         max_width="1200px",
         margin="0 auto",
         flex="1",
-        overflow_y="auto"
+        overflow_y="auto",
+        id="chat-area",
     )

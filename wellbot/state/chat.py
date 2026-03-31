@@ -3,6 +3,12 @@ import reflex as rx
 from wellbot.config.loader import get_models_map, get_model_names, get_system_prompt
 from wellbot.services.llm import stream_converse, trim_history
 
+# 하단으로 스크롤
+_SCROLL_DOWN = """
+const el = document.getElementById("chat-area");
+if (el) { el.scrollTop = el.scrollHeight; }
+"""
+
 MODEL_NAMES = get_model_names()
 MODELS_MAP = get_models_map()
 GLOBAL_SYSTEM_PROMPT = get_system_prompt()
@@ -49,7 +55,7 @@ class ChatState(rx.State):
         current_question = self.question
         self.question = ""
         self.processing = True
-        yield
+        yield rx.call_script(_SCROLL_DOWN)
 
         try:
             model_cfg = MODELS_MAP.get(self.selected_model)
@@ -87,7 +93,7 @@ class ChatState(rx.State):
                 self.chat_history[-1][0],
                 f"오류가 발생했습니다: {e}"
             )
-            yield
+            yield rx.call_script(_SCROLL_DOWN)
 
         finally:
             self.processing = False
