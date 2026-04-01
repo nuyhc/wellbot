@@ -48,10 +48,11 @@ def thinking_indicator() -> rx.Component:
         rx.box(
             rx.hstack(
                 rx.spinner(size="2", color="#a855f7"),
-                rx.vstack(
-                    rx.text(ChatState.selected_model, size="1", color="#a855f7", weight="bold"),
-                    rx.text("Thinking...", size="2", color="gray"),
-                    spacing="0"
+                rx.hstack(
+                    rx.text(ChatState.selected_model, size="2", color="#a855f7", weight="bold"),
+                    rx.text("Generating...", size="2", color="gray"),
+                    spacing="0",
+                    align_items="center"
                 ),
                 spacing="2",
                 align_items="center"
