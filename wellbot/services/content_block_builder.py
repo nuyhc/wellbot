@@ -6,18 +6,36 @@
 """
 
 import os
+import re
 from dataclasses import dataclass
 
 # jpg → jpeg 매핑 (Converse API는 jpeg만 지원)
 _FORMAT_MAP: dict[str, str] = {"jpg": "jpeg"}
+
+# DocumentBlock name 허용 패턴: 영문자·숫자·공백·하이픈·괄호·대괄호, 최대 200자
+_DOC_NAME_ALLOWED = re.compile(r"[^a-zA-Z0-9\s\-()\[\]]")
+_DOC_NAME_MULTI_SPACE = re.compile(r"\s+")
+
+
+def _normalize_document_name(stem: str) -> str:
+    """파일명 stem을 Bedrock DocumentBlock name 제약에 맞게 정규화한다.
+
+    허용: 영문자, 숫자, 공백(연속 불가), 하이픈, 괄호, 대괄호 / 최대 200자.
+    한글·특수문자 등 비허용 문자는 제거하고, 밑줄·점은 공백으로 변환한다.
+    정규화 후 빈 문자열이면 "document"를 반환한다.
+    """
+    name = stem.replace("_", " ").replace(".", " ")
+    name = _DOC_NAME_ALLOWED.sub("", name)
+    name = _DOC_NAME_MULTI_SPACE.sub(" ", name).strip()
+    return name[:200] or "document"
 
 
 @dataclass
 class AttachedFile:
     """첨부 파일 데이터를 표현하는 데이터클래스."""
 
-    filename: str  # 원본 파일명 (예: "photo.png")
-    data: bytes  # 파일 바이트 데이터
+    filename: str   # 원본 파일명 (예: "photo.png")
+    data: bytes     # 파일 바이트 데이터
     file_type: str  # 'image' 또는 'document'
 
 
@@ -77,11 +95,10 @@ def _convert_file(file: AttachedFile) -> dict:
         }
 
     if file.file_type == "document":
-        # 문서 이름은 확장자를 제거한 파일명(stem)
         stem = os.path.splitext(file.filename)[0]
         return {
             "document": {
-                "name": stem,
+                "name": _normalize_document_name(stem),
                 "format": fmt,
                 "source": {"bytes": file.data},
             }
