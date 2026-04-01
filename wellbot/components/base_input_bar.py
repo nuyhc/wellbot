@@ -142,16 +142,22 @@ def base_input_bar() -> rx.Component:
                 rx.hstack(
                     _plus_button(),
 
-                    rx.input(
+                    rx.text_area(
                         value=ChatState.question,
                         placeholder="WellBot에게 질문하세요!",
                         on_change=ChatState.set_question,
+                        enter_key_submit=True,
+                        auto_height=True,
                         style={
                             "flex": "1",
                             "background": "transparent",
                             "border": "none",
                             "color": "white",
                             "outline": "none",
+                            "resize": "none",
+                            "min_height": "40px",
+                            "max_height": "200px",
+                            "overflow_y": "auto",
                         },
                         id="message_input",
                     ),
