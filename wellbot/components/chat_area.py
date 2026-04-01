@@ -8,7 +8,7 @@ def message(qa: tuple[str, str]) -> rx.Component:
     return rx.box(
         # User
         rx.box(
-            rx.text(qa[0], style={"color": "white", "font_size": "0.95em"}),
+            rx.text(qa[0], style={"color": "white", "font_size": "0.95em", "white_space": "pre-wrap"}),
             background="linear-gradient(135deg, #6b21a8, #3b82f6)",
             padding="1em 1.2em",
             border_radius="18px 18px 4px, 18px",
@@ -51,7 +51,7 @@ def thinking_indicator() -> rx.Component:
                 rx.hstack(
                     rx.text(ChatState.selected_model, size="2", color="#a855f7", weight="bold"),
                     rx.text("Generating...", size="2", color="gray"),
-                    spacing="0",
+                    spacing="1",
                     align_items="center"
                 ),
                 spacing="2",
