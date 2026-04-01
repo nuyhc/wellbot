@@ -5,10 +5,19 @@ from wellbot.services.llm import stream_converse, trim_history
 from wellbot.services.file_validator import classify_file, validate_file
 from wellbot.services.content_block_builder import AttachedFile, build_content_blocks
 
-# 하단으로 스크롤
+# 하단으로 강제 스크롤 (메시지 전송 시)
 _SCROLL_DOWN = """
 const el = document.getElementById("chat-area");
 if (el) { el.scrollTop = el.scrollHeight; }
+"""
+
+# 하단 근처일 때만 스크롤 (스트리밍 중 — 사용자가 위로 스크롤했으면 방해하지 않음)
+_SCROLL_IF_NEAR_BOTTOM = """
+const el = document.getElementById("chat-area");
+if (el) {
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (isNearBottom) { el.scrollTop = el.scrollHeight; }
+}
 """
 
 MODEL_NAMES = get_model_names()
@@ -167,7 +176,7 @@ class ChatState(rx.State):
             ):
                 q, current = self.chat_history[-1]
                 self.chat_history[-1] = (q, current + token)
-                yield
+                yield rx.call_script(_SCROLL_IF_NEAR_BOTTOM)
 
         except Exception as e:
             import traceback
