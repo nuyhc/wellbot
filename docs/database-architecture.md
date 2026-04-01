@@ -224,8 +224,9 @@ with rx.session() as session:
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 챗봇대화요약ID | CHTB_TLK_SMRY_ID | VARCHAR(50) | PK | | | 대화 세션 아이디 |
-| 챗봇대화아이디 | CHTB_TLK_ID | VARCHAR(50) | | | | 메시지 아이디 |
+| 챗봇대화요약아이디 | CHTB_TLK_SMRY_ID | VARCHAR(50) | PK | | | 대화 세션 아이디 |
+| 챗봇대화아이디 | CHTB_TLK_ID | VARCHAR(50) | PK | | | 메시지 아이디 |
+| 챗봇대화순번 | CHTB_TLK_SEQ | NUMERIC(10) | PK | | | |
 | 에이전트아이디 | AGNT_ID | VARCHAR(50) | | | | |
 | 메시지역할명 | MSG_ROLE_NM | VARCHAR(50) | | | | user / assistant / system |
 | 챗봇메시지내용 | CHTB_MSG_CNTT | MEDIUMTEXT | | | | |
