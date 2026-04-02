@@ -45,6 +45,7 @@ def build_content_blocks(files: list[AttachedFile]) -> tuple[list[dict], list[st
     - 이미지 → ImageBlock 형식
     - 문서 → DocumentBlock 형식
     - 변환 실패한 파일은 건너뛰고 나머지만 반환
+    - 정규화 후 중복된 document name에는 접미사(-2, -3, …)를 붙여 고유성 보장
 
     Args:
         files: 변환할 AttachedFile 목록
@@ -56,10 +57,20 @@ def build_content_blocks(files: list[AttachedFile]) -> tuple[list[dict], list[st
     """
     blocks: list[dict] = []
     failed: list[str] = []
+    used_names: dict[str, int] = {}
 
     for file in files:
         try:
             block = _convert_file(file)
+            # 문서 블록의 name 중복 방지
+            if "document" in block:
+                name = block["document"]["name"]
+                if name in used_names:
+                    used_names[name] += 1
+                    unique = f"{name}-{used_names[name]}"
+                    block["document"]["name"] = unique[:200]
+                else:
+                    used_names[name] = 1
             blocks.append(block)
         except Exception:
             failed.append(file.filename)

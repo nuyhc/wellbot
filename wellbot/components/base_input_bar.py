@@ -10,21 +10,21 @@ def _file_chip(file_info: dict) -> rx.Component:
     """첨부 파일 칩 — attached_files의 dict 항목을 받아 파일명 표시"""
     return rx.tooltip(
         rx.hstack(
-            rx.icon("paperclip", size=12, color="rgba(255,255,255,0.6)"),
-            rx.text(file_info["filename"], size="1", color="rgba(255,255,255,0.8)",
-                    max_width="150px", overflow="hidden", text_overflow="ellipsis",
+            rx.icon("paperclip", size=14, color="rgba(255,255,255,0.6)"),
+            rx.text(file_info["filename"], size="2", color="rgba(255,255,255,0.8)",
+                    max_width="200px", overflow="hidden", text_overflow="ellipsis",
                     white_space="nowrap"),
             rx.icon(
-                "x", size=12, color="rgba(255,255,255,0.5)", cursor="pointer",
+                "x", size=14, color="rgba(255,255,255,0.5)", cursor="pointer",
                 on_click=ChatState.remove_file(file_info["filename"]),
                 _hover={"color": "white"},
             ),
             background="rgba(107, 33, 168, 0.3)",
             border="1px solid rgba(107, 33, 168, 0.5)",
-            border_radius="12px",
-            padding="0.2em 0.6em",
+            border_radius="14px",
+            padding="0.3em 0.8em",
             align_items="center",
-            gap="0.3em",
+            gap="0.4em",
         ),
         content=file_info["filename"],
     )
