@@ -1,7 +1,7 @@
 """사이드바 컴포넌트"""
 import reflex as rx
 from wellbot.state.auth import AuthState
-from wellbot.state.chat import ChatState, MODEL_NAMES
+from wellbot.state.chat import ChatState
 
 
 def _conversation_item(conv: dict) -> rx.Component:
@@ -74,20 +74,6 @@ def sidebar() -> rx.Component:
             rx.icon("user", color="gray"),
             rx.text(AuthState.current_username, color="white", weight="bold"),
             align_items="center",
-            margin_bottom="1em"
-        ),
-
-        # 모델 선택 드롭다운
-        rx.vstack(
-            rx.text("Selected Model", size="2", color="gray", weight="bold", margin_bottom="0.3em"),
-            rx.select(
-                MODEL_NAMES,
-                value=ChatState.selected_model,
-                on_change=ChatState.set_selected_model,
-                width="100%",
-                size="2"
-            ),
-            width="100%",
             margin_bottom="1em"
         ),
 
