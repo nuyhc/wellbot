@@ -1,4 +1,5 @@
 """채팅 상태 관리 모듈"""
+import uuid
 import reflex as rx
 from wellbot.config.loader import get_models_map, get_model_names, get_system_prompt
 from wellbot.services.llm import stream_converse, trim_history
@@ -39,9 +40,128 @@ class ChatState(rx.State):
     upload_error: str = ""
     thinking_enabled: bool = False
 
+    # 대화 관리 (인메모리)
+    current_conversation_id: str = ""
+    conversations: dict[str, dict] = {}  # {id: {title, history, model}}
+    conversation_order: list[str] = []   # 최신순 ID 목록 (rx.foreach용)
+
     @rx.var
     def current_model_supports_thinking(self) -> bool:
         return bool(MODELS_MAP.get(self.selected_model, {}).get("thinking", False))
+
+    @rx.var
+    def conversation_list(self) -> list[dict[str, str]]:
+        """사이드바 렌더링용 대화 목록"""
+        result = []
+        for conv_id in self.conversation_order:
+            conv = self.conversations.get(conv_id, {})
+            result.append({
+                "id": conv_id,
+                "title": conv.get("title", "New Chat"),
+                "is_active": "true" if conv_id == self.current_conversation_id else "false",
+            })
+        return result
+
+    def _ensure_conversation(self):
+        """대화 ID가 없으면 자동 생성 (lazy init)"""
+        if not self.current_conversation_id:
+            new_id = str(uuid.uuid4())
+            self.current_conversation_id = new_id
+            self.conversations[new_id] = {
+                "title": "New Chat",
+                "history": [],
+                "model": self.selected_model,
+            }
+            self.conversation_order.insert(0, new_id)
+
+    def new_chat(self):
+        """현재 대화 저장 → 새 빈 대화 생성"""
+        if self.processing:
+            return
+
+        # 현재 대화 히스토리를 레지스트리에 저장
+        if self.current_conversation_id and self.chat_history:
+            self.conversations[self.current_conversation_id]["history"] = [
+                list(pair) for pair in self.chat_history
+            ]
+            self.conversations[self.current_conversation_id]["model"] = self.selected_model
+
+        # 현재 대화가 비어있으면 새로 만들지 않음 (중복 방지)
+        if self.current_conversation_id and not self.chat_history:
+            return
+
+        # 새 대화 생성
+        new_id = str(uuid.uuid4())
+        self.current_conversation_id = new_id
+        self.conversations[new_id] = {
+            "title": "New Chat",
+            "history": [],
+            "model": self.selected_model,
+        }
+        self.conversation_order.insert(0, new_id)
+
+        # 활성 채팅 상태 초기화
+        self.chat_history = []
+        self.question = ""
+        self.attached_files = []
+        self._file_data = {}
+        self.upload_error = ""
+
+    def switch_conversation(self, conv_id: str):
+        """기존 대화로 전환"""
+        if self.processing:
+            return
+        if conv_id == self.current_conversation_id:
+            return
+
+        # 현재 대화 저장
+        if self.current_conversation_id:
+            self.conversations[self.current_conversation_id]["history"] = [
+                list(pair) for pair in self.chat_history
+            ]
+            self.conversations[self.current_conversation_id]["model"] = self.selected_model
+
+        # 대상 대화 로드
+        conv = self.conversations.get(conv_id)
+        if not conv:
+            return
+
+        self.current_conversation_id = conv_id
+        self.chat_history = [tuple(pair) for pair in conv["history"]]
+        self.selected_model = conv.get("model", self.selected_model)
+
+        # 임시 상태 초기화
+        self.question = ""
+        self.attached_files = []
+        self._file_data = {}
+        self.upload_error = ""
+
+    def delete_conversation(self, conv_id: str):
+        """대화 삭제"""
+        if self.processing:
+            return
+
+        self.conversations.pop(conv_id, None)
+        if conv_id in self.conversation_order:
+            self.conversation_order.remove(conv_id)
+
+        # 활성 대화를 삭제한 경우 다음 대화로 전환
+        if conv_id == self.current_conversation_id:
+            if self.conversation_order:
+                next_id = self.conversation_order[0]
+                next_conv = self.conversations.get(next_id, {})
+                self.current_conversation_id = next_id
+                self.chat_history = [tuple(pair) for pair in next_conv.get("history", [])]
+                self.selected_model = next_conv.get("model", self.selected_model)
+            else:
+                self.current_conversation_id = ""
+                self.chat_history = []
+                self._ensure_conversation()
+
+            self.question = ""
+            self.attached_files = []
+            self._file_data = {}
+            self.upload_error = ""
 
     def set_question(self, value: str):
         self.question = value
@@ -115,6 +235,8 @@ class ChatState(rx.State):
         if not self.question.strip() and not self.attached_files:
             return
 
+        self._ensure_conversation()
+
         current_question = self.question.strip()
 
         # 문서만 첨부하고 텍스트가 비어있으면 기본 텍스트 삽입
@@ -123,6 +245,14 @@ class ChatState(rx.State):
         )
         if not current_question and has_document:
             current_question = "첨부된 파일을 분석해주세요."
+
+        # 첫 메시지일 때 대화 제목 자동 설정
+        if not self.chat_history and self.current_conversation_id:
+            title = current_question[:30]
+            if len(current_question) > 30:
+                title += "..."
+            self.conversations[self.current_conversation_id]["title"] = title
+            self.conversations = dict(self.conversations)  # re-render 보장
 
         self.chat_history.append((current_question, ""))
         self.question = ""
@@ -193,4 +323,10 @@ class ChatState(rx.State):
             self.attached_files = []
             self._file_data = {}
             self.processing = False
+
+            # 대화 레지스트리에 히스토리 동기화
+            if self.current_conversation_id:
+                self.conversations[self.current_conversation_id]["history"] = [
+                    list(pair) for pair in self.chat_history
+                ]
             yield

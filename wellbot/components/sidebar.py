@@ -4,6 +4,61 @@ from wellbot.state.auth import AuthState
 from wellbot.state.chat import ChatState, MODEL_NAMES
 
 
+def _conversation_item(conv: dict) -> rx.Component:
+    """사이드바 대화 항목"""
+    return rx.hstack(
+        rx.icon(
+            "message-square",
+            size=14,
+            color=rx.cond(
+                conv["is_active"] == "true",
+                "#a855f7",
+                "rgba(255, 255, 255, 0.4)",
+            ),
+        ),
+        rx.text(
+            conv["title"],
+            size="2",
+            color=rx.cond(
+                conv["is_active"] == "true",
+                "white",
+                "rgba(255, 255, 255, 0.6)",
+            ),
+            weight=rx.cond(
+                conv["is_active"] == "true",
+                "bold",
+                "regular",
+            ),
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+            flex="1",
+        ),
+        rx.icon(
+            "x",
+            size=12,
+            color="rgba(255, 255, 255, 0.3)",
+            cursor="pointer",
+            on_click=ChatState.delete_conversation(conv["id"]),
+            _hover={"color": "rgba(255, 255, 255, 0.8)"},
+        ),
+        width="100%",
+        padding="0.6em 0.8em",
+        border_radius="8px",
+        cursor="pointer",
+        background=rx.cond(
+            conv["is_active"] == "true",
+            "rgba(168, 85, 247, 0.15)",
+            "transparent",
+        ),
+        _hover={
+            "background": "rgba(255, 255, 255, 0.05)",
+        },
+        on_click=ChatState.switch_conversation(conv["id"]),
+        align_items="center",
+    )
+
+
 def sidebar() -> rx.Component:
     return rx.vstack(
         # 로고
@@ -36,10 +91,12 @@ def sidebar() -> rx.Component:
             margin_bottom="1em"
         ),
 
-        # TODO: New Chat
+        # New Chat 버튼
         rx.button(
             rx.icon("plus", size=10),
             rx.text("New Chat"),
+            on_click=ChatState.new_chat,
+            disabled=ChatState.processing,
             width="100%",
             background="linear-gradient(135deg, rgba(107, 33, 168, 0.2), rgba(59, 130, 246, 0.2))",
             color="white",
@@ -53,15 +110,23 @@ def sidebar() -> rx.Component:
             }
         ),
 
-        rx.spacer(),
-
-        # TODO: Chat History
+        # 대화 히스토리 목록
         rx.vstack(
             rx.text("History", size="2", color="gray", weight="bold", margin_bottom="0.5em"),
-            rx.text("Previous conversations will appear here.", size="1", color="gray"),
+            rx.cond(
+                ChatState.conversation_list.length() > 0,
+                rx.vstack(
+                    rx.foreach(ChatState.conversation_list, _conversation_item),
+                    width="100%",
+                    spacing="1",
+                ),
+                rx.text("No conversations yet.", size="1", color="gray"),
+            ),
             width="100%",
-            padding_top="2em",
+            padding_top="1em",
             border_top="1px solid rgba(255, 255, 255, 0.05)",
+            flex="1",
+            overflow_y="auto",
         ),
 
         # 하단 컨트롤 (Admin / Logout)
