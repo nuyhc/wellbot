@@ -5,6 +5,15 @@ from wellbot.state.chat import ChatState
 _UPLOAD_ID = "file_upload_zone"
 _BTN_UPLOAD_ID = "btn_upload_zone"
 
+# popover 메뉴에서 숨겨진 upload 컴포넌트의 file input을 트리거하는 JS
+_CLICK_BTN_UPLOAD = f"""
+const el = document.getElementById("{_BTN_UPLOAD_ID}");
+if (el) {{
+    const input = el.querySelector("input[type=file]");
+    if (input) input.click();
+}}
+"""
+
 
 def _file_chip(file_info: dict) -> rx.Component:
     """첨부 파일 칩 — attached_files의 dict 항목을 받아 파일명 표시"""
@@ -51,28 +60,18 @@ def _plus_button() -> rx.Component:
         ),
         rx.popover.content(
             rx.vstack(
-                # 파일 첨부
-                rx.upload(
-                    rx.hstack(
-                        rx.icon("paperclip", size=15, color="rgba(255,255,255,0.7)"),
-                        rx.text("파일 첨부", size="2", color="rgba(255,255,255,0.9)"),
-                        width="100%",
-                        align_items="center",
-                        gap="0.5em",
-                        padding="0.4em 0.6em",
-                        border_radius="8px",
-                        cursor="pointer",
-                        _hover={"background": "rgba(255,255,255,0.08)"},
-                    ),
-                    id=_BTN_UPLOAD_ID,
-                    on_drop=ChatState.handle_upload(
-                        rx.upload_files(upload_id=_BTN_UPLOAD_ID)
-                    ),
-                    multiple=True,
-                    no_drag=True,
-                    border="none",
-                    padding="0",
+                # 파일 첨부 — JS로 숨겨진 upload input을 트리거 (popover 언마운트 문제 방지)
+                rx.hstack(
+                    rx.icon("paperclip", size=15, color="rgba(255,255,255,0.7)"),
+                    rx.text("파일 첨부", size="2", color="rgba(255,255,255,0.9)"),
                     width="100%",
+                    align_items="center",
+                    gap="0.5em",
+                    padding="0.4em 0.6em",
+                    border_radius="8px",
+                    cursor="pointer",
+                    _hover={"background": "rgba(255,255,255,0.08)"},
+                    on_click=rx.call_script(_CLICK_BTN_UPLOAD),
                 ),
 
                 # Extended Thinking 토글 (지원 모델만 표시)
@@ -114,6 +113,22 @@ def _plus_button() -> rx.Component:
 
 def base_input_bar() -> rx.Component:
     return rx.box(
+        # 숨겨진 파일 업로드 컴포넌트 (popover 밖에서 항상 마운트 — 파일 선택 대화상자용)
+        rx.upload(
+            rx.box(display="none"),
+            id=_BTN_UPLOAD_ID,
+            on_drop=ChatState.handle_upload(
+                rx.upload_files(upload_id=_BTN_UPLOAD_ID)
+            ),
+            multiple=True,
+            no_drag=True,
+            position="absolute",
+            width="1px",
+            height="1px",
+            overflow="hidden",
+            opacity="0",
+        ),
+
         # 업로드 에러 메시지 (파일 칩 목록 위에 표시)
         rx.cond(
             ChatState.upload_error != "",
