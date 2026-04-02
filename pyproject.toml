@@ -8,6 +8,7 @@ dependencies = [
     "aiomysql>=0.3.2",
     "boto3>=1.42.68",
     "cryptography>=46.0.5",
+    "httpx>=0.28.0",
     "passlib[bcrypt]>=1.7.4",
     "pymysql>=1.1.2",
     "python-dotenv>=1.2.2",
