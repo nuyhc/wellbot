@@ -5,6 +5,7 @@ from wellbot.config.loader import get_models_map, get_model_names, get_system_pr
 from wellbot.services.llm import stream_converse, trim_history
 from wellbot.services.file_validator import classify_file, validate_file
 from wellbot.services.content_block_builder import AttachedFile, build_content_blocks
+from wellbot.services.upstage_dp import parse_document
 
 # 하단으로 강제 스크롤 (메시지 전송 시)
 _SCROLL_DOWN = """
@@ -198,7 +199,8 @@ class ChatState(rx.State):
                 )
                 current_document_count = sum(
                     1 for f in self.attached_files
-                    if f["file_type"] == "document" and f["filename"] != file.filename
+                    if f["file_type"] in ("document", "presentation", "parsed_text")
+                    and f["filename"] != file.filename
                 )
 
                 # 크기 및 개수 검증
@@ -208,6 +210,12 @@ class ChatState(rx.State):
                     current_image_count=current_image_count,
                     current_document_count=current_document_count,
                 )
+
+                # 프레젠테이션 파일은 Upstage DP로 파싱하여 텍스트로 변환
+                if file_type == "presentation":
+                    parsed_text = await parse_document(file_bytes, file.filename)
+                    file_bytes = parsed_text.encode("utf-8")
+                    file_type = "parsed_text"
 
                 # 중복 파일명 처리 (덮어쓰기)
                 self.attached_files = [
@@ -241,7 +249,7 @@ class ChatState(rx.State):
 
         # 문서만 첨부하고 텍스트가 비어있으면 기본 텍스트 삽입
         has_document = any(
-            f["file_type"] == "document" for f in self.attached_files
+            f["file_type"] in ("document", "parsed_text") for f in self.attached_files
         )
         if not current_question and has_document:
             current_question = "첨부된 파일을 분석해주세요."

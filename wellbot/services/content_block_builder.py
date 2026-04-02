@@ -115,4 +115,9 @@ def _convert_file(file: AttachedFile) -> dict:
             }
         }
 
+    if file.file_type == "parsed_text":
+        return {
+            "text": f"[첨부 파일: {file.filename}]\n\n{file.data.decode('utf-8')}"
+        }
+
     raise ValueError(f"알 수 없는 파일 타입: {file.file_type}")

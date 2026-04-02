@@ -9,14 +9,17 @@ import os
 # 지원 확장자 집합
 IMAGE_EXTENSIONS: set[str] = {"png", "jpeg", "jpg", "gif", "webp"}
 DOCUMENT_EXTENSIONS: set[str] = {"pdf", "csv", "doc", "docx", "xls", "xlsx", "html", "txt", "md"}
+PRESENTATION_EXTENSIONS: set[str] = {"ppt", "pptx"}
 
 # 파일 크기 제한 (바이트)
-IMAGE_MAX_SIZE: int = 3_932_160    # 3.75 MB
-DOCUMENT_MAX_SIZE: int = 4_718_592  # 4.5 MB
+IMAGE_MAX_SIZE: int = 3_932_160      # 3.75 MB
+DOCUMENT_MAX_SIZE: int = 4_718_592   # 4.5 MB
+PRESENTATION_MAX_SIZE: int = 52_428_800  # 50 MB (Upstage DP 제한)
 
 # 파일 개수 제한
 IMAGE_MAX_COUNT: int = 20
 DOCUMENT_MAX_COUNT: int = 5
+PRESENTATION_MAX_COUNT: int = 5
 
 def classify_file(filename: str) -> str:
     """파일 확장자를 기반으로 파일 타입을 분류한다.
@@ -36,10 +39,12 @@ def classify_file(filename: str) -> str:
         return "image"
     if ext in DOCUMENT_EXTENSIONS:
         return "document"
+    if ext in PRESENTATION_EXTENSIONS:
+        return "presentation"
 
     raise ValueError(
         "지원되지 않는 파일 형식입니다. "
-        "지원 형식: png, jpeg, jpg, gif, webp, pdf, csv, doc, docx, xls, xlsx, html, txt, md"
+        "지원 형식: png, jpeg, jpg, gif, webp, pdf, csv, doc, docx, xls, xlsx, html, txt, md, ppt, pptx"
     )
 
 
@@ -78,12 +83,21 @@ def validate_file(
             f"문서 파일은 최대 4.5MB까지 업로드할 수 있습니다. ({filename}: {size_mb}MB)"
         )
 
+    if file_type == "presentation" and file_size > PRESENTATION_MAX_SIZE:
+        size_mb = round(file_size / (1024 * 1024), 2)
+        raise ValueError(
+            f"프레젠테이션 파일은 최대 50MB까지 업로드할 수 있습니다. ({filename}: {size_mb}MB)"
+        )
+
     # 3. 개수 검증
     if file_type == "image" and current_image_count >= IMAGE_MAX_COUNT:
         raise ValueError("이미지 파일은 최대 20개까지 첨부할 수 있습니다.")
 
     if file_type == "document" and current_document_count >= DOCUMENT_MAX_COUNT:
         raise ValueError("문서 파일은 최대 5개까지 첨부할 수 있습니다.")
+
+    if file_type == "presentation" and current_document_count >= PRESENTATION_MAX_COUNT:
+        raise ValueError("프레젠테이션 파일은 최대 5개까지 첨부할 수 있습니다.")
 
 
 def _extract_extension(filename: str) -> str:
@@ -102,7 +116,7 @@ def _extract_extension(filename: str) -> str:
     if not ext:
         raise ValueError(
             "지원되지 않는 파일 형식입니다. "
-            "지원 형식: png, jpeg, jpg, gif, webp, pdf, csv, doc, docx, xls, xlsx, html, txt, md"
+            "지원 형식: png, jpeg, jpg, gif, webp, pdf, csv, doc, docx, xls, xlsx, html, txt, md, ppt, pptx"
         )
     # 점(.) 제거 후 소문자 변환
     return ext[1:].lower()
