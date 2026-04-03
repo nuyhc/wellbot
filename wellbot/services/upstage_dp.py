@@ -7,8 +7,12 @@
 import os
 
 import httpx
+from dotenv import load_dotenv
 
-_API_URL = "https://api.upstage.ai/v1/document-ai/document-parse"
+load_dotenv()
+
+_API_URL = os.getenv("UPSTAGE_API_URL", "")
+_API_KEY = os.getenv("UPSTAGE_API_KEY", "")
 _TIMEOUT = 120.0  # 대용량 파일 처리를 위한 넉넉한 타임아웃
 
 
@@ -25,14 +29,13 @@ async def parse_document(file_bytes: bytes, filename: str) -> str:
     Raises:
         ValueError: API 키 미설정, API 에러, 또는 100페이지 초과 시
     """
-    api_key = os.getenv("UPSTAGE_API_KEY", "")
-    if not api_key:
+    if not _API_KEY:
         raise ValueError("UPSTAGE_API_KEY가 설정되지 않았습니다.")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         resp = await client.post(
             _API_URL,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {_API_KEY}"},
             files={"document": (filename, file_bytes)},
         )
 
