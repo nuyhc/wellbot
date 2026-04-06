@@ -179,63 +179,65 @@ class ChatState(rx.State):
 
     async def handle_upload(self, files: list[rx.UploadFile]):
         """파일 업로드 처리 — 검증 후 바이트 데이터를 메모리에 저장"""
-        # 에러 초기화 (루프 전체에서 마지막 에러만 남지 않도록 루프 밖에서 초기화)
+        # 에러 초기화
         self.upload_error = ""
         self.uploading = True
         yield
 
-        for file in files:
-            if not file.filename:
-                continue
+        try:
+            for file in files:
+                if not file.filename:
+                    continue
 
-            try:
-                # 파일 바이트를 메모리에서 읽기 (디스크 저장 없음)
-                file_bytes = await file.read()
+                try:
+                    # 파일 바이트를 메모리에서 읽기 (디스크 저장 없음)
+                    file_bytes = await file.read()
 
-                # 파일 타입 분류
-                file_type = classify_file(file.filename)
+                    # 파일 타입 분류
+                    file_type = classify_file(file.filename)
 
-                # 현재 이미지/문서 개수 계산 — 동일 파일명은 교체 대상이므로 제외
-                current_image_count = sum(
-                    1 for f in self.attached_files
-                    if f["file_type"] == "image" and f["filename"] != file.filename
-                )
-                current_document_count = sum(
-                    1 for f in self.attached_files
-                    if f["file_type"] in ("document", "presentation", "parsed_text")
-                    and f["filename"] != file.filename
-                )
+                    # 현재 이미지/문서 개수 계산 — 동일 파일명은 교체 대상이므로 제외
+                    current_image_count = sum(
+                        1 for f in self.attached_files
+                        if f["file_type"] == "image" and f["filename"] != file.filename
+                    )
+                    current_document_count = sum(
+                        1 for f in self.attached_files
+                        if f["file_type"] in ("document", "presentation", "parsed_text")
+                        and f["filename"] != file.filename
+                    )
 
-                # 크기 및 개수 검증
-                validate_file(
-                    filename=file.filename,
-                    file_size=len(file_bytes),
-                    current_image_count=current_image_count,
-                    current_document_count=current_document_count,
-                )
+                    # 크기 및 개수 검증
+                    validate_file(
+                        filename=file.filename,
+                        file_size=len(file_bytes),
+                        current_image_count=current_image_count,
+                        current_document_count=current_document_count,
+                    )
 
-                # 프레젠테이션 파일은 Upstage DP로 파싱하여 텍스트로 변환
-                if file_type == "presentation":
-                    parsed_text = await parse_document(file_bytes, file.filename)
-                    file_bytes = parsed_text.encode("utf-8")
-                    file_type = "parsed_text"
+                    # 프레젠테이션 파일은 Upstage DP로 파싱하여 텍스트로 변환
+                    if file_type == "presentation":
+                        parsed_text = await parse_document(file_bytes, file.filename)
+                        file_bytes = parsed_text.encode("utf-8")
+                        file_type = "parsed_text"
 
-                # 중복 파일명 처리 (덮어쓰기)
-                self.attached_files = [
-                    f for f in self.attached_files if f["filename"] != file.filename
-                ]
+                    # 중복 파일명 처리 (덮어쓰기)
+                    self.attached_files = [
+                        f for f in self.attached_files if f["filename"] != file.filename
+                    ]
 
-                # 검증 성공: 메타데이터 및 바이트 저장
-                self.attached_files.append(
-                    {"filename": file.filename, "file_type": file_type}
-                )
-                self._file_data[file.filename] = file_bytes
+                    # 검증 성공: 메타데이터 및 바이트 저장
+                    self.attached_files.append(
+                        {"filename": file.filename, "file_type": file_type}
+                    )
+                    self._file_data[file.filename] = file_bytes
 
-            except ValueError as e:
-                # 검증 실패: 에러 메시지 설정
-                self.upload_error = str(e)
-
-        self.uploading = False
+                except ValueError as e:
+                    # 검증 실패: 에러 메시지 설정
+                    self.upload_error = str(e)
+        finally:
+            self.uploading = False
+            yield
 
     def remove_file(self, filename: str):
         """첨부 파일 제거 — 메타데이터와 바이트 데이터 모두 삭제"""
