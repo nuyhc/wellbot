@@ -108,6 +108,8 @@ def _plus_button() -> rx.Component:
             side="top",
             align="start",
         ),
+        open=ChatState.plus_menu_open,
+        on_open_change=ChatState.set_plus_menu_open,
     )
 
 
@@ -121,6 +123,7 @@ def base_input_bar() -> rx.Component:
                 rx.upload_files(upload_id=_BTN_UPLOAD_ID)
             ),
             multiple=True,
+            max_size=52_428_800,
             no_drag=True,
             no_click=True,
             position="absolute",
@@ -231,6 +234,7 @@ def base_input_bar() -> rx.Component:
                         rx.upload_files(upload_id=_UPLOAD_ID)
                     ),
                     multiple=True,
+                    max_size=52_428_800,
                     no_click=True,
                     flex="1",
                     border="none",

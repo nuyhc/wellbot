@@ -40,6 +40,7 @@ class ChatState(rx.State):
     # 업로드 에러 메시지
     upload_error: str = ""
     uploading: bool = False
+    plus_menu_open: bool = False
     thinking_enabled: bool = False
 
     # 대화 관리 (인메모리)
@@ -182,6 +183,7 @@ class ChatState(rx.State):
         # 에러 초기화
         self.upload_error = ""
         self.uploading = True
+        self.plus_menu_open = False
         yield
 
         try:
