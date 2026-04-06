@@ -39,6 +39,7 @@ class ChatState(rx.State):
     _file_data: dict[str, bytes] = {}
     # 업로드 에러 메시지
     upload_error: str = ""
+    uploading: bool = False
     thinking_enabled: bool = False
 
     # 대화 관리 (인메모리)
@@ -180,6 +181,8 @@ class ChatState(rx.State):
         """파일 업로드 처리 — 검증 후 바이트 데이터를 메모리에 저장"""
         # 에러 초기화 (루프 전체에서 마지막 에러만 남지 않도록 루프 밖에서 초기화)
         self.upload_error = ""
+        self.uploading = True
+        yield
 
         for file in files:
             if not file.filename:
@@ -231,6 +234,8 @@ class ChatState(rx.State):
             except ValueError as e:
                 # 검증 실패: 에러 메시지 설정
                 self.upload_error = str(e)
+
+        self.uploading = False
 
     def remove_file(self, filename: str):
         """첨부 파일 제거 — 메타데이터와 바이트 데이터 모두 삭제"""

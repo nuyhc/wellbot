@@ -131,6 +131,18 @@ def base_input_bar() -> rx.Component:
             pointer_events="none",
         ),
 
+        # 업로드 진행 중 스피너
+        rx.cond(
+            ChatState.uploading,
+            rx.hstack(
+                rx.spinner(size="2"),
+                rx.text("파일 처리 중...", size="2", color="rgba(255,255,255,0.6)"),
+                align_items="center",
+                gap="0.5em",
+                padding="0 1.5em 0.5em 1.5em",
+            ),
+        ),
+
         # 업로드 에러 메시지 (파일 칩 목록 위에 표시)
         rx.cond(
             ChatState.upload_error != "",
@@ -239,7 +251,7 @@ def base_input_bar() -> rx.Component:
         ),
 
         rx.text(
-            "WellBot은 실수를 할 수 있습니다. 결과를 검증하고 활용하세요.",
+            "WellBot은 실수를 할 수 있습니다. 생성형 AI의 출력 결과를 검증하고 활용하세요.",
             size="1",
             color="rgba(255, 255, 255, 0.35)",
             text_align="center",
