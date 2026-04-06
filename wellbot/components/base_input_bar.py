@@ -71,7 +71,10 @@ def _plus_button() -> rx.Component:
                     border_radius="8px",
                     cursor="pointer",
                     _hover={"background": "rgba(255,255,255,0.08)"},
-                    on_click=rx.call_script(_CLICK_BTN_UPLOAD),
+                    on_click=[
+                        ChatState.set_plus_menu_open(False),
+                        rx.call_script(_CLICK_BTN_UPLOAD),
+                    ],
                 ),
 
                 # Extended Thinking 토글 (지원 모델만 표시)

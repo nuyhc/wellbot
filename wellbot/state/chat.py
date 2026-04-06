@@ -237,6 +237,9 @@ class ChatState(rx.State):
                 except ValueError as e:
                     # 검증 실패: 에러 메시지 설정
                     self.upload_error = str(e)
+                except Exception as e:
+                    # 예상치 못한 오류 (네트워크 에러 등)
+                    self.upload_error = f"파일 처리 중 오류가 발생했습니다: {e}"
         finally:
             self.uploading = False
             yield

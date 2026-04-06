@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_API_URL = os.getenv("UPSTAGE_API_URL", "")
+_API_URL = os.getenv("UPSTAGE_API_URL", "https://api.upstage.ai/v1/document-ai/document-parse")
 _API_KEY = os.getenv("UPSTAGE_API_KEY", "")
 _TIMEOUT = 300.0  # API 서버 타임아웃(5분)에 맞춤
 
@@ -29,8 +29,6 @@ async def parse_document(file_bytes: bytes, filename: str) -> str:
     Raises:
         ValueError: API URL/키 미설정, API 에러, 또는 100페이지 초과 시
     """
-    if not _API_URL:
-        raise ValueError("UPSTAGE_API_URL이 설정되지 않았습니다.")
     if not _API_KEY:
         raise ValueError("UPSTAGE_API_KEY가 설정되지 않았습니다.")
 
