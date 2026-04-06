@@ -178,6 +178,12 @@ class ChatState(rx.State):
     def toggle_thinking(self, value: bool):
         self.thinking_enabled = value
 
+    def handle_upload_rejected(self, rejections: list):
+        """클라이언트 측에서 거부된 파일 처리 (max_size 초과 등)"""
+        if not rejections:
+            return
+        self.upload_error = "파일 크기가 50MB를 초과하여 업로드할 수 없습니다."
+
     async def handle_upload(self, files: list[rx.UploadFile]):
         """파일 업로드 처리 — 검증 후 바이트 데이터를 메모리에 저장"""
         # 에러 초기화

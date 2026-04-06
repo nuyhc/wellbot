@@ -125,6 +125,7 @@ def base_input_bar() -> rx.Component:
             on_drop=ChatState.handle_upload(
                 rx.upload_files(upload_id=_BTN_UPLOAD_ID)
             ),
+            on_drop_rejected=ChatState.handle_upload_rejected,
             multiple=True,
             max_size=52_428_800,
             no_drag=True,
@@ -236,6 +237,7 @@ def base_input_bar() -> rx.Component:
                     on_drop=ChatState.handle_upload(
                         rx.upload_files(upload_id=_UPLOAD_ID)
                     ),
+                    on_drop_rejected=ChatState.handle_upload_rejected,
                     multiple=True,
                     max_size=52_428_800,
                     no_click=True,
