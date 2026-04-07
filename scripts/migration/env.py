@@ -15,8 +15,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 # 모델 import → metadata 등록
 from wellbot.models import (  # noqa: F401, E402
-    AgentM,
-    AgentMemUseN,
+    AgntM,
+    AgntMmryUseN,
     AtchFileM,
     ChtbMsgD,
     ChtbSmryD,

@@ -28,13 +28,12 @@ engine = create_engine(db_url)
 
 DEPT_CD = "1"
 DEPT_NM = "admingroup"
-DD_TOKN_ECNT = 9999999999  # NUMERIC(10) 최대값
-MM_TOKN_ECNT = 9999999999
-ACES_MDL_CNTT = '["*"]'  # 모든 모델 허용
+DD_CLBY_TOKN_ECNT = 9999999999  # NUMERIC(10) 최대값
+MM_CLBY_TOKN_ECNT = 9999999999
+PRMN_MDL_CNTT = '["*"]'  # 모든 모델 허용
 
 EMP_NO = "admin"
 USER_NM = "admin"
-EML_ADDR = "admin@example.com"
 PASSWORD = "dlatl12!@"
 USER_ROLE_NM = "super-admin"
 ACNT_STS_NM = "active"
@@ -53,13 +52,13 @@ with Session(engine) as session:
     if not exists:
         session.execute(
             text("""
-                INSERT INTO DEPT_M (DEPT_CD, DEPT_NM, DD_TOKN_ECNT, MM_TOKN_ECNT, ACES_MDL_CNTT,
-                                    RGST_DTM, RGST_ID, UPD_DTM, UPPR_ID)
-                VALUES (:dept_cd, :dept_nm, :dd, :mm, :aces, :now, :rid, :now, :uid)
+                INSERT INTO DEPT_M (DEPT_CD, DEPT_NM, DD_CLBY_TOKN_ECNT, MM_CLBY_TOKN_ECNT, PRMN_MDL_CNTT,
+                                    RGST_DTM, RGSR_ID, UPD_DTM, UPPR_ID)
+                VALUES (:dept_cd, :dept_nm, :dd, :mm, :prmn, :now, :rid, :now, :uid)
             """),
             {
                 "dept_cd": DEPT_CD, "dept_nm": DEPT_NM,
-                "dd": DD_TOKN_ECNT, "mm": MM_TOKN_ECNT, "aces": ACES_MDL_CNTT,
+                "dd": DD_CLBY_TOKN_ECNT, "mm": MM_CLBY_TOKN_ECNT, "prmn": PRMN_MDL_CNTT,
                 "now": now, "rid": "SYSTEM", "uid": "SYSTEM",
             },
         )
@@ -74,15 +73,15 @@ with Session(engine) as session:
     if not exists:
         session.execute(
             text("""
-                INSERT INTO EMP_M (EMP_NO, USER_NM, EML_ADDR, ECR_PWD, USER_ROLE_NM,
-                                   PSTN_DEPT_CD, ACNT_STS_NM, LGN_FLR_TSCNT,
-                                   RGST_DTM, RGST_ID, UPD_DTM, UPPR_ID)
-                VALUES (:emp_no, :user_nm, :eml, :pwd, :role,
-                        :dept, :sts, 0,
+                INSERT INTO EMP_M (EMP_NO, USER_NM, ECR_PWD, USER_ROLE_NM,
+                                   PSTN_DEPT_CD, ACNT_STS_NM,
+                                   RGST_DTM, RGSR_ID, UPD_DTM, UPPR_ID)
+                VALUES (:emp_no, :user_nm, :pwd, :role,
+                        :dept, :sts,
                         :now, :rid, :now, :uid)
             """),
             {
-                "emp_no": EMP_NO, "user_nm": USER_NM, "eml": EML_ADDR,
+                "emp_no": EMP_NO, "user_nm": USER_NM,
                 "pwd": ecr_pwd, "role": USER_ROLE_NM,
                 "dept": DEPT_CD, "sts": ACNT_STS_NM,
                 "now": now, "rid": "SYSTEM", "uid": "SYSTEM",
