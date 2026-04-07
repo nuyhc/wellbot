@@ -1,6 +1,6 @@
 """WellBot 데이터베이스 모델 정의.
 
-실제 MySQL 스키마(docs/database-architecture.md)를 기반으로 정의.
+실제 MySQL 스키마(docs/database_schema_f.xlsx Rev_F)를 기반으로 정의.
 rx.ModelRegistry.register + sqlmodel.SQLModel 방식 사용 (Reflex 0.8.15+ 권장).
 """
 
@@ -18,15 +18,15 @@ from sqlmodel import Field
 # 공통 감사(audit) 컬럼 Mixin
 # ---------------------------------------------------------------------------
 class AuditMixin(sqlmodel.SQLModel):
-    """모든 테이블 공통 감사 컬럼 (RGST_DTM, RGST_ID, UPD_DTM, UPPR_ID)."""
+    """모든 테이블 공통 감사 컬럼 (RGST_DTM, RGSR_ID, UPD_DTM, UPPR_ID)."""
 
     rgst_dtm: datetime = Field(
         sa_type=sa.DateTime,
         sa_column_kwargs={"name": "RGST_DTM", "nullable": False},
     )
-    rgst_id: str = Field(
+    rgsr_id: str = Field(
         sa_type=sa.String(20),
-        sa_column_kwargs={"name": "RGST_ID", "nullable": False},
+        sa_column_kwargs={"name": "RGSR_ID", "nullable": False},
     )
     upd_dtm: datetime = Field(
         sa_type=sa.DateTime,
@@ -35,6 +35,34 @@ class AuditMixin(sqlmodel.SQLModel):
     uppr_id: str = Field(
         sa_type=sa.String(20),
         sa_column_kwargs={"name": "UPPR_ID", "nullable": False},
+    )
+
+
+# ---------------------------------------------------------------------------
+# 감사 컬럼 nullable 버전 (AGNT_M, AGNT_MMRY_USE_N 용)
+# ---------------------------------------------------------------------------
+class AuditMixinNullable(sqlmodel.SQLModel):
+    """감사 컬럼이 모두 nullable인 테이블용."""
+
+    rgst_dtm: Optional[datetime] = Field(
+        default=None,
+        sa_type=sa.DateTime,
+        sa_column_kwargs={"name": "RGST_DTM"},
+    )
+    rgsr_id: Optional[str] = Field(
+        default=None,
+        sa_type=sa.String(20),
+        sa_column_kwargs={"name": "RGSR_ID"},
+    )
+    upd_dtm: Optional[datetime] = Field(
+        default=None,
+        sa_type=sa.DateTime,
+        sa_column_kwargs={"name": "UPD_DTM"},
+    )
+    uppr_id: Optional[str] = Field(
+        default=None,
+        sa_type=sa.String(20),
+        sa_column_kwargs={"name": "UPPR_ID"},
     )
 
 
@@ -50,20 +78,21 @@ class DeptM(AuditMixin, table=True):
     dept_cd: str = Field(
         sa_column=sa.Column("DEPT_CD", sa.String(8), primary_key=True)
     )
-    dept_nm: str = Field(
-        sa_column=sa.Column("DEPT_NM", sa.String(50), unique=True)
-    )
-    dd_tokn_ecnt: Optional[int] = Field(
+    dept_nm: Optional[str] = Field(
         default=None,
-        sa_column=sa.Column("DD_TOKN_ECNT", sa.Numeric(10)),
+        sa_column=sa.Column("DEPT_NM", sa.String(100)),
     )
-    mm_tokn_ecnt: Optional[int] = Field(
+    dd_clby_tokn_ecnt: Optional[int] = Field(
         default=None,
-        sa_column=sa.Column("MM_TOKN_ECNT", sa.Numeric(10)),
+        sa_column=sa.Column("DD_CLBY_TOKN_ECNT", sa.Numeric(10)),
     )
-    aces_mdl_cntt: Optional[dict] = Field(
+    mm_clby_tokn_ecnt: Optional[int] = Field(
         default=None,
-        sa_column=sa.Column("ACES_MDL_CNTT", sa.JSON),
+        sa_column=sa.Column("MM_CLBY_TOKN_ECNT", sa.Numeric(10)),
+    )
+    prmn_mdl_cntt: Optional[dict] = Field(
+        default=None,
+        sa_column=sa.Column("PRMN_MDL_CNTT", sa.JSON),
     )
 
 
@@ -79,17 +108,13 @@ class EmpM(AuditMixin, table=True):
     emp_no: str = Field(
         sa_column=sa.Column("EMP_NO", sa.String(15), primary_key=True)
     )
+    ecr_pwd: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("ECR_PWD", sa.String(80)),
+    )
     user_nm: Optional[str] = Field(
         default=None,
         sa_column=sa.Column("USER_NM", sa.String(50)),
-    )
-    eml_addr: Optional[str] = Field(
-        default=None,
-        sa_column=sa.Column("EML_ADDR", sa.String(100), unique=True),
-    )
-    ecr_pwd: Optional[str] = Field(
-        default=None,
-        sa_column=sa.Column("ECR_PWD", sa.String(255)),
     )
     user_role_nm: str = Field(
         sa_column=sa.Column("USER_ROLE_NM", sa.String(50), nullable=False)
@@ -109,9 +134,9 @@ class EmpM(AuditMixin, table=True):
         default=None,
         sa_column=sa.Column("LGN_SCS_DTM", sa.DateTime),
     )
-    lgn_flr_tscnt: int = Field(
-        default=0,
-        sa_column=sa.Column("LGN_FLR_TSCNT", sa.Numeric(5), nullable=False),
+    lgn_flr_tscnt: Optional[int] = Field(
+        default=None,
+        sa_column=sa.Column("LGN_FLR_TSCNT", sa.Numeric(5)),
     )
     lock_dsbn_dtm: Optional[datetime] = Field(
         default=None,
@@ -132,17 +157,17 @@ class CrtfToknN(AuditMixin, table=True):
 
     __tablename__ = "CRTF_TOKN_N"
     __table_args__ = (
-        sa.PrimaryKeyConstraint("EMP_NO", "CRTF_TOKN_ID"),
+        sa.PrimaryKeyConstraint("CRTF_TOKN_ID", "EMP_NO"),
     )
 
-    emp_no: str = Field(
-        sa_column=sa.Column("EMP_NO", sa.String(15))
-    )
     crtf_tokn_id: str = Field(
         sa_column=sa.Column("CRTF_TOKN_ID", sa.String(50))
     )
-    crtf_tokn_ecr_cntt: str = Field(
-        sa_column=sa.Column("CRTF_TOKN_ECR_CNTT", sa.String(300), nullable=False)
+    emp_no: str = Field(
+        sa_column=sa.Column("EMP_NO", sa.String(15))
+    )
+    crtf_ecr_tokn_val: str = Field(
+        sa_column=sa.Column("CRTF_ECR_TOKN_VAL", sa.String(300), nullable=False)
     )
     diss_yn: Optional[str] = Field(
         default=None,
@@ -171,11 +196,11 @@ class ChtbSmryD(AuditMixin, table=True):
         sa_column=sa.Column("CHTB_TLK_SMRY_ID", sa.String(50), primary_key=True)
     )
     emp_no: str = Field(
-        sa_column=sa.Column("EMP_NO", sa.String(20), nullable=False)
+        sa_column=sa.Column("EMP_NO", sa.String(15), nullable=False)
     )
     chtb_tlk_smry_ttl: Optional[str] = Field(
         default=None,
-        sa_column=sa.Column("CHTB_TLK_SMRY_TTL", sa.String(255)),
+        sa_column=sa.Column("CHTB_TLK_SMRY_TTL", sa.String(500)),
     )
     chtb_mdl_nm: Optional[str] = Field(
         default=None,
@@ -196,7 +221,7 @@ class ChtbMsgD(AuditMixin, table=True):
 
     __tablename__ = "CHTB_MSG_D"
     __table_args__ = (
-        sa.PrimaryKeyConstraint("CHTB_TLK_SMRY_ID", "CHTB_TLK_ID", "CHTB_TLK_SEQ"),
+        sa.PrimaryKeyConstraint("CHTB_TLK_ID", "CHTB_TLK_SMRY_ID", "CHTB_TLK_SEQ"),
     )
 
     chtb_tlk_smry_id: str = Field(
@@ -228,13 +253,13 @@ class ChtbMsgD(AuditMixin, table=True):
         default=None,
         sa_column=sa.Column("CHTB_OFFR_MDL_NM", sa.String(50)),
     )
-    chtb_input_tokn_ecnt: Optional[int] = Field(
+    chtb_inpt_tokn_ecnt: Optional[int] = Field(
         default=None,
-        sa_column=sa.Column("CHTB_INPUT_TOKN_ECNT", sa.Numeric(10)),
+        sa_column=sa.Column("CHTB_INPT_TOKN_ECNT", sa.Numeric(10)),
     )
-    chtb_output_tokn_ecnt: Optional[int] = Field(
+    chtb_otpt_tokn_ecnt: Optional[int] = Field(
         default=None,
-        sa_column=sa.Column("CHTB_OUTPUT_TOKN_ECNT", sa.Numeric(10)),
+        sa_column=sa.Column("CHTB_OTPT_TOKN_ECNT", sa.Numeric(10)),
     )
     chtb_tot_tokn_ecnt: Optional[int] = Field(
         default=None,
@@ -258,96 +283,96 @@ class AtchFileM(AuditMixin, table=True):
     """첨부파일 메타데이터 (S3 경로, 토큰 수)."""
 
     __tablename__ = "ATCH_FILE_M"
-    __table_args__ = (
-        sa.PrimaryKeyConstraint("CHTB_TLK_ID", "ATCH_FILE_NO"),
-    )
 
-    chtb_tlk_id: str = Field(
-        sa_column=sa.Column("CHTB_TLK_ID", sa.String(50))
-    )
     atch_file_no: int = Field(
-        sa_column=sa.Column("ATCH_FILE_NO", sa.BigInteger)
+        sa_column=sa.Column("ATCH_FILE_NO", sa.BigInteger, primary_key=True)
     )
     atch_file_nm: Optional[str] = Field(
         default=None,
-        sa_column=sa.Column("ATCH_FILE_NM", sa.String(255)),
+        sa_column=sa.Column("ATCH_FILE_NM", sa.String(300)),
     )
     atch_file_url_addr: Optional[str] = Field(
         default=None,
         sa_column=sa.Column("ATCH_FILE_URL_ADDR", sa.String(500)),
     )
-    atch_tokn_ecnt: Optional[int] = Field(
+    atch_file_tokn_ecnt: Optional[int] = Field(
         default=None,
-        sa_column=sa.Column("ATCH_TOKN_ECNT", sa.Numeric(10)),
+        sa_column=sa.Column("ATCH_FILE_TOKN_ECNT", sa.Numeric(10)),
     )
 
 
 # ---------------------------------------------------------------------------
-# 7. 에이전트마스터 (AGENT_M)
+# 7. 에이전트마스터 (AGNT_M)
 # ---------------------------------------------------------------------------
 @rx.ModelRegistry.register
-class AgentM(AuditMixin, table=True):
+class AgntM(AuditMixinNullable, table=True):
     """지원 Agent 목록 (프레임워크, 경로, 설명)."""
 
-    __tablename__ = "AGENT_M"
+    __tablename__ = "AGNT_M"
     __table_args__ = (
-        sa.PrimaryKeyConstraint("AGENT_ID", "AGENT_SEQ"),
+        sa.PrimaryKeyConstraint("AGNT_ID", "AGNT_SEQ"),
     )
 
-    agent_id: str = Field(
-        sa_column=sa.Column("AGENT_ID", sa.String(50))
+    agnt_id: str = Field(
+        sa_column=sa.Column("AGNT_ID", sa.String(50))
     )
-    agent_seq: int = Field(
-        sa_column=sa.Column("AGENT_SEQ", sa.Numeric(10))
+    agnt_seq: int = Field(
+        sa_column=sa.Column("AGNT_SEQ", sa.Numeric(10))
     )
-    agent_nm: str = Field(
-        sa_column=sa.Column("AGENT_NM", sa.String(100), nullable=False)
-    )
-    agent_frwk_nm: str = Field(
-        sa_column=sa.Column("AGENT_FRWK_NM", sa.String(100), nullable=False)
-    )
-    agent_path_addr: str = Field(
-        sa_column=sa.Column("AGENT_PATH_ADDR", sa.String(300), nullable=False)
-    )
-    agent_dscr_cntt: Optional[str] = Field(
+    agnt_nm: Optional[str] = Field(
         default=None,
-        sa_column=sa.Column("AGENT_DSCR_CNTT", sa.Text().with_variant(MEDIUMTEXT, "mysql")),
+        sa_column=sa.Column("AGNT_NM", sa.String(100)),
     )
-    use_yn: str = Field(
-        sa_column=sa.Column("USE_YN", sa.String(1), nullable=False)
+    agnt_frwk_nm: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("AGNT_FRWK_NM", sa.String(100)),
+    )
+    agnt_path_addr: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("AGNT_PATH_ADDR", sa.String(300)),
+    )
+    agnt_dscr_cntt: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("AGNT_DSCR_CNTT", sa.Text().with_variant(MEDIUMTEXT, "mysql")),
+    )
+    use_yn: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("USE_YN", sa.String(1)),
     )
 
 
 # ---------------------------------------------------------------------------
-# 8. 에이전트메모리사용내역 (AGENT_MEM_USE_N)
+# 8. 에이전트메모리사용내역 (AGNT_MMRY_USE_N)
 # ---------------------------------------------------------------------------
 @rx.ModelRegistry.register
-class AgentMemUseN(AuditMixin, table=True):
+class AgntMmryUseN(AuditMixinNullable, table=True):
     """Agent별 메모리 사용 이력."""
 
-    __tablename__ = "AGENT_MEM_USE_N"
+    __tablename__ = "AGNT_MMRY_USE_N"
     __table_args__ = (
-        sa.PrimaryKeyConstraint("AGENT_ID", "AGENT_SEQ", "EMP_NO"),
+        sa.PrimaryKeyConstraint("AGNT_ID", "AGNT_SEQ", "EMP_NO"),
     )
 
-    agent_id: str = Field(
-        sa_column=sa.Column("AGENT_ID", sa.String(100))
+    agnt_id: str = Field(
+        sa_column=sa.Column("AGNT_ID", sa.String(50))
     )
-    agent_seq: int = Field(
-        sa_column=sa.Column("AGENT_SEQ", sa.Numeric(10))
+    agnt_seq: int = Field(
+        sa_column=sa.Column("AGNT_SEQ", sa.Numeric(10))
     )
     emp_no: str = Field(
-        sa_column=sa.Column("EMP_NO", sa.String(100))
+        sa_column=sa.Column("EMP_NO", sa.String(15))
     )
-    agent_mem_path_addr: Optional[str] = Field(
+    agnt_mmry_path_addr: Optional[str] = Field(
         default=None,
-        sa_column=sa.Column("AGENT_MEM_PATH_ADDR", sa.String(300)),
+        sa_column=sa.Column("AGNT_MMRY_PATH_ADDR", sa.String(300)),
     )
-    agent_type_dscr_cntt: str = Field(
-        sa_column=sa.Column("AGENT_TYPE_DSCR_CNTT", sa.Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
+    agnt_type_dscr_cntt: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("AGNT_TYPE_DSCR_CNTT", sa.Text().with_variant(MEDIUMTEXT, "mysql")),
     )
-    use_yn: str = Field(
-        sa_column=sa.Column("USE_YN", sa.String(1), nullable=False)
+    use_yn: Optional[str] = Field(
+        default=None,
+        sa_column=sa.Column("USE_YN", sa.String(1)),
     )
     last_sync_dtm: Optional[datetime] = Field(
         default=None,

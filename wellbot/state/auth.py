@@ -1,7 +1,7 @@
 """인증 상태 관리 모듈"""
 import reflex as rx
 import bcrypt
-from wellbot.models import User
+from wellbot.models import EmpM
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -24,9 +24,14 @@ class AuthState(rx.State):
     error_message: str = ""
 
     # 세션 상태 필드
-    current_username: str = ""
+    current_emp_no: str = ""
+    current_user_nm: str = ""
     is_authenticated: bool = False
-    is_admin: bool = False
+    user_role: str = ""
+
+    @rx.var
+    def is_admin(self) -> bool:
+        return self.user_role in ("super-admin", "admin")
 
     def set_username(self, value: str):
         self.username = value
@@ -42,11 +47,15 @@ class AuthState(rx.State):
     def login(self):
         self.error_message = ""
         with rx.session() as session:
-            user = session.query(User).filter(User.username == self.username).first()
-            if user and verify_password(self.password, user.password_hash):
+            emp = session.query(EmpM).filter(EmpM.emp_no == self.username).first()
+            if emp and emp.ecr_pwd and verify_password(self.password, emp.ecr_pwd):
+                if emp.acnt_sts_nm != "active":
+                    self.error_message = "비활성화된 계정입니다."
+                    return
                 self.is_authenticated = True
-                self.current_username = user.username
-                self.is_admin = user.is_admin
+                self.current_emp_no = emp.emp_no
+                self.current_user_nm = emp.user_nm or emp.emp_no
+                self.user_role = emp.user_role_nm
                 self.clear_form()
                 return rx.redirect("/")
             else:
@@ -54,8 +63,9 @@ class AuthState(rx.State):
 
     def logout(self):
         self.is_authenticated = False
-        self.current_username = ""
-        self.is_admin = False
+        self.current_emp_no = ""
+        self.current_user_nm = ""
+        self.user_role = ""
         self.clear_form()
         return rx.redirect("/login")
 
@@ -64,6 +74,7 @@ class AuthState(rx.State):
         # TODO: after set Database
         # if not self.is_authenticated:
         #     return rx.redirect("/login")
+        pass
 
     def check_admin(self):
         if not self.is_authenticated:

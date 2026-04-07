@@ -1,20 +1,31 @@
 """관리자 대시보드 페이지"""
 import reflex as rx
-from wellbot.models import User
+from wellbot.models import EmpM
 from wellbot.state.admin import AdminState
 
 
-def user_row(user: User) -> rx.Component:
+def user_row(emp: EmpM) -> rx.Component:
     """사용자 테이블"""
     return rx.table.row(
-        rx.table.cell(rx.text(user.username, color="white")),
+        rx.table.cell(rx.text(emp.emp_no, color="white")),
+        rx.table.cell(rx.text(emp.user_nm, color="white")),
 
         rx.table.cell(
             rx.cond(
-                user.is_admin,
-                rx.badge("Admin", color_scheme="purple", variant="solid"),
-                rx.badge("User", color_scheme="gray", variant="solid")
+                emp.user_role_nm == "super-admin",
+                rx.badge("Super Admin", color_scheme="red", variant="solid"),
+                rx.cond(
+                    emp.user_role_nm == "admin",
+                    rx.badge("Admin", color_scheme="purple", variant="solid"),
+                    rx.badge("User", color_scheme="gray", variant="solid"),
+                ),
             )
+        ),
+
+        rx.table.cell(
+            rx.badge(emp.acnt_sts_nm, color_scheme=rx.cond(
+                emp.acnt_sts_nm == "active", "green", "red"
+            ), variant="solid")
         ),
 
         rx.table.cell(
@@ -22,7 +33,7 @@ def user_row(user: User) -> rx.Component:
                 rx.button(
                     "권한 토글",
                     size="1",
-                    on_click=lambda: AdminState.toggle_admin(user.username),
+                    on_click=lambda: AdminState.toggle_admin(emp.emp_no),
                     variant="outline",
                     color_scheme="purple"
                 ),
@@ -30,7 +41,7 @@ def user_row(user: User) -> rx.Component:
                 rx.button(
                     "삭제",
                     size="1",
-                    on_click=lambda: AdminState.delete_user(user.username),
+                    on_click=lambda: AdminState.delete_user(emp.emp_no),
                     variant="solid",
                     color_scheme="red"
                 )
@@ -67,9 +78,14 @@ def admin_page() -> rx.Component:
                 rx.heading("Add User", size="4", color="white", margin_bottom="1em"),
                 rx.hstack(
                     rx.input(
-                        placeholder="Username",
-                        value=AdminState.new_username,
-                        on_change=AdminState.set_new_username
+                        placeholder="사원번호",
+                        value=AdminState.new_emp_no,
+                        on_change=AdminState.set_new_emp_no
+                    ),
+                    rx.input(
+                        placeholder="사용자명",
+                        value=AdminState.new_user_nm,
+                        on_change=AdminState.set_new_user_nm
                     ),
                     rx.input(
                         placeholder="Password",
@@ -77,11 +93,10 @@ def admin_page() -> rx.Component:
                         value=AdminState.new_password,
                         on_change=AdminState.set_new_password
                     ),
-                    rx.checkbox(
-                        "Admin 권한 부여",
-                        checked=AdminState.new_is_admin,
-                        on_change=AdminState.set_new_is_admin,
-                        color="white"
+                    rx.select(
+                        ["user", "admin"],
+                        value=AdminState.new_role,
+                        on_change=AdminState.set_new_role,
                     ),
                     rx.button("사용자 생성", on_click=AdminState.add_user, color_scheme="blue"),
                     align_items="center"
@@ -100,12 +115,14 @@ def admin_page() -> rx.Component:
                 rx.table.root(
                     rx.table.header(
                         rx.table.row(
-                            rx.table.column_header_cell("아이디", color="gray"),
+                            rx.table.column_header_cell("사원번호", color="gray"),
+                            rx.table.column_header_cell("이름", color="gray"),
                             rx.table.column_header_cell("권한", color="gray"),
+                            rx.table.column_header_cell("상태", color="gray"),
                             rx.table.column_header_cell("액션", color="gray")
                         )
                     ),
-                    
+
                     rx.table.body(rx.foreach(AdminState.users, user_row)),
                     variant="surface",
                     color_scheme="gray"
