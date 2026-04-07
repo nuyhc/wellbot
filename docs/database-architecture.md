@@ -55,21 +55,11 @@ config = rx.Config(
 
 ### 현재 정의된 모델
 
-`wellbot/models.py`에서 `rx.Model`을 상속하여 테이블을 정의한다.
+`wellbot/models.py`에서 `rx.ModelRegistry.register` + `sqlmodel.SQLModel`로 테이블을 정의한다.
 
-```python
-import reflex as rx
-
-class User(rx.Model, table=True):
-    __tablename__ = "wellbot_user"
-    username: str
-    password_hash: str
-    is_admin: bool = False
-```
-
-- `rx.Model`은 내부적으로 `SQLModel`을 상속
 - `table=True` 지정 시 실제 DB 테이블로 매핑
 - `__tablename__`으로 테이블명을 명시적으로 지정
+- `AuditMixin`으로 공통 감사 컬럼 상속
 
 ## DB 접근 패턴
 
@@ -80,22 +70,11 @@ Reflex에서는 `rx.session()` 컨텍스트 매니저를 통해 DB 세션을 획
 ```python
 # 조회
 with rx.session() as session:
-    user = session.query(User).filter(User.username == username).first()
+    user = session.query(EmpM).filter(EmpM.emp_no == emp_no).first()
 
 # 삽입
 with rx.session() as session:
-    session.add(new_user)
-    session.commit()
-
-# 삭제
-with rx.session() as session:
-    session.delete(user)
-    session.commit()
-
-# 수정
-with rx.session() as session:
-    user.is_admin = not user.is_admin
-    session.add(user)
+    session.add(new_emp)
     session.commit()
 ```
 
@@ -122,7 +101,7 @@ with rx.session() as session:
 
 ## 실제 데이터베이스 스키마 (MySQL)
 
-> 출처: `docs/database_schema.xlsx`
+> 출처: `docs/database_schema_f.xlsx` (Rev_F)
 
 ### 테이블 전체 목록
 
@@ -134,8 +113,8 @@ with rx.session() as session:
 | 4 | 챗봇요약상세 | CHTB_SMRY_D | 대화 세션 (제목, 모델, 즐겨찾기) |
 | 5 | 챗봇메시지상세 | CHTB_MSG_D | 개별 메시지 (토큰 수, 응답시간, 첨부파일) |
 | 6 | 첨부파일마스터 | ATCH_FILE_M | 첨부파일 메타 (S3 경로, 토큰 수) |
-| 7 | 에이전트마스터 | AGENT_M | 지원 Agent 목록 (프레임워크, 경로, 설명) |
-| 8 | 에이전트메모리사용내역 | AGENT_MEM_USE_N | Agent 메모리 사용 이력 |
+| 7 | 에이전트마스터 | AGNT_M | 지원 Agent 목록 (프레임워크, 경로, 설명) |
+| 8 | 에이전트메모리사용내역 | AGNT_MMRY_USE_N | Agent 메모리 사용 이력 |
 
 ---
 
@@ -146,14 +125,14 @@ with rx.session() as session:
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
 | 부서코드 | DEPT_CD | VARCHAR(8) | PK | | | |
-| 부서명 | DEPT_NM | VARCHAR(50) | UK | | | |
-| 일별토큰개수 | DD_TOKN_ECNT | NUMERIC(10) | | | | |
-| 월별토큰개수 | MM_TOKN_ECNT | NUMERIC(10) | | | | |
-| 허용모델내용 | ACES_MDL_CNTT | JSON | | | | |
-| 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
-| 수정일시 | UPD_DTM | datetime | | | Y | |
-| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
+| 부서명 | DEPT_NM | VARCHAR(100) | | | | |
+| 일별정산토큰개수 | DD_CLBY_TOKN_ECNT | NUMERIC(10) | | | | |
+| 월별정산토큰개수 | MM_CLBY_TOKN_ECNT | NUMERIC(10) | | | | |
+| 허용모델내용 | PRMN_MDL_CNTT | JSON | | | | |
+| 등록일시 | RGST_DTM | datetime | | | | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | | |
+| 수정일시 | UPD_DTM | datetime | | | | |
+| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | | |
 
 ---
 
@@ -163,19 +142,18 @@ with rx.session() as session:
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 사원번호 | EMP_NO | VARCHAR(15) | PK | | | |
+| 사원번호 | EMP_NO | VARCHAR(15) | PK | FK | | |
+| 암호화비밀번호 | ECR_PWD | VARCHAR(80) | | | | |
 | 사용자명 | USER_NM | VARCHAR(50) | | | | |
-| 이메일주소 | EML_ADDR | VARCHAR(100) | UK | | | |
-| 암호화비밀번호 | ECR_PWD | VARCHAR(255) | | | | |
 | 사용자역할명 | USER_ROLE_NM | VARCHAR(50) | | | Y | super-admin / admin / user |
 | 소속부서코드 | PSTN_DEPT_CD | VARCHAR(8) | | FK | Y | → DEPT_M.DEPT_CD |
 | 계정상태명 | ACNT_STS_NM | VARCHAR(50) | | | Y | active / inactive / locked |
 | 로그인성공일시 | LGN_SCS_DTM | datetime | | | | |
-| 로그인실패횟수 | LGN_FLR_TSCNT | NUMERIC(5) | | | Y | |
+| 로그인실패횟수 | LGN_FLR_TSCNT | NUMERIC(5) | | | | |
 | 잠금해제일시 | LOCK_DSBN_DTM | datetime | | | | |
 | 사용자UUID | USER_UUID | VARCHAR(36) | | | | |
 | 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | Y | |
 | 수정일시 | UPD_DTM | datetime | | | Y | |
 | 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
 
@@ -187,14 +165,14 @@ with rx.session() as session:
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
+| 인증토큰아이디 | CRTF_TOKN_ID | VARCHAR(50) | PK | | | |
 | 사원번호 | EMP_NO | VARCHAR(15) | PK | | | |
-| 인증토큰아이디 | CRTF_TOKN_ID | VARCHAR(50) | PK | | | 시퀀스 |
-| 인증암호화토큰값 | CRTF_TOKN_ECR_CNTT | VARCHAR(300) | | | Y | |
+| 인증암호화토큰값 | CRTF_ECR_TOKN_VAL | VARCHAR(300) | | | Y | |
 | 폐기여부 | DISS_YN | VARCHAR(1) | | | | |
 | 만료일시 | TRTN_DTM | datetime | | | | |
 | 폐기일시 | DISS_DTM | datetime | | | | |
 | 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | Y | |
 | 수정일시 | UPD_DTM | datetime | | | Y | |
 | 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
 
@@ -207,12 +185,12 @@ with rx.session() as session:
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
 | 챗봇대화요약ID | CHTB_TLK_SMRY_ID | VARCHAR(50) | PK | | | 대화 세션 아이디 |
-| 사원번호 | EMP_NO | VARCHAR(20) | | | Y | |
-| 챗봇대화요약제목 | CHTB_TLK_SMRY_TTL | VARCHAR(255) | | | | |
+| 사원번호 | EMP_NO | VARCHAR(15) | | | Y | |
+| 챗봇대화요약제목 | CHTB_TLK_SMRY_TTL | VARCHAR(500) | | | | |
 | 챗봇모델명 | CHTB_MDL_NM | VARCHAR(100) | | | | |
 | 즐겨찾기여부 | BKMR_YN | VARCHAR(1) | | | | |
 | 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | Y | |
 | 수정일시 | UPD_DTM | datetime | | | Y | |
 | 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
 
@@ -224,21 +202,21 @@ with rx.session() as session:
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 챗봇대화요약아이디 | CHTB_TLK_SMRY_ID | VARCHAR(50) | PK | | | 대화 세션 아이디 |
+| 챗봇대화요약아이디 | CHTB_TLK_SMRY_ID | VARCHAR(50) | PK | FK | | 대화 세션 아이디 |
 | 챗봇대화아이디 | CHTB_TLK_ID | VARCHAR(50) | PK | | | 메시지 아이디 |
 | 챗봇대화순번 | CHTB_TLK_SEQ | NUMERIC(10) | PK | | | |
 | 에이전트아이디 | AGNT_ID | VARCHAR(50) | | | | |
-| 메시지역할명 | MSG_ROLE_NM | VARCHAR(50) | | | | user / assistant / system |
+| 메시지역할명 | MSG_ROLE_NM | VARCHAR(50) | | | | user / assistant / system / tool |
 | 챗봇메시지내용 | CHTB_MSG_CNTT | MEDIUMTEXT | | | | |
 | 챗봇모델명 | CHTB_MDL_NM | VARCHAR(100) | | | | |
 | 챗봇제공모델명 | CHTB_OFFR_MDL_NM | VARCHAR(50) | | | | Anthropic / AWS / Cohere 등 |
-| 챗봇입력토큰개수 | CHTB_INPUT_TOKN_ECNT | NUMERIC(10) | | | | |
-| 챗봇출력토큰개수 | CHTB_OUTPUT_TOKN_ECNT | NUMERIC(10) | | | | |
+| 챗봇입력토큰개수 | CHTB_INPT_TOKN_ECNT | NUMERIC(10) | | | | |
+| 챗봇출력토큰개수 | CHTB_OTPT_TOKN_ECNT | NUMERIC(10) | | | | |
 | 챗봇총토큰개수 | CHTB_TOT_TOKN_ECNT | NUMERIC(10) | | | | |
 | 응답시간 | RPLY_TIME | NUMERIC(5,2) | | | | |
-| 첨부파일번호 | ATCH_FILE_NO | BIGINT(15) | | | | 시퀀스 |
+| 첨부파일번호 | ATCH_FILE_NO | BIGINT | | | | |
 | 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | Y | |
 | 수정일시 | UPD_DTM | datetime | | | Y | |
 | 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
 
@@ -250,55 +228,54 @@ with rx.session() as session:
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 챗봇대화아이디 | CHTB_TLK_ID | VARCHAR(50) | PK | | | |
-| 첨부파일번호 | ATCH_FILE_NO | BIGINT(15) | PK | | | 시퀀스 |
-| 첨부파일명 | ATCH_FILE_NM | VARCHAR(255) | | | | |
+| 첨부파일번호 | ATCH_FILE_NO | BIGINT | PK | | | |
+| 첨부파일명 | ATCH_FILE_NM | VARCHAR(300) | | | | |
 | 첨부파일URL주소 | ATCH_FILE_URL_ADDR | VARCHAR(500) | | | | S3 path |
-| 첨부파일토큰개수 | ATCH_TOKN_ECNT | NUMERIC(10) | | | | |
+| 첨부파일토큰개수 | ATCH_FILE_TOKN_ECNT | NUMERIC(10) | | | | |
 | 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | Y | |
 | 수정일시 | UPD_DTM | datetime | | | Y | |
 | 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
 
 ---
 
-### 7. 에이전트마스터 (AGENT_M)
+### 7. 에이전트마스터 (AGNT_M)
 
 지원 Agent 목록. 관리자가 설정하는 프레임워크, 경로(ARN/스크립트), 설명 등을 관리한다.
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 에이전트아이디 | AGENT_ID | VARCHAR(50) | PK | | | |
-| 에이전트순번 | AGENT_SEQ | NUMERIC(10) | PK | | | |
-| 에이전트명 | AGENT_NM | VARCHAR(100) | | | Y | |
-| 에이전트프레임워크명 | AGENT_FRWK_NM | VARCHAR(100) | | | Y | 관리자에서 설정하는 값 |
-| 에이전트경로주소 | AGENT_PATH_ADDR | VARCHAR(300) | | | Y | ARN, 스크립트 경로 등 |
-| 에이전트상세설명 | AGENT_DSCR_CNTT | MEDIUMTEXT | | | | 에이전트 설명 |
-| 사용여부 | USE_YN | VARCHAR(1) | | | Y | 사용 여부 |
-| 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
-| 수정일시 | UPD_DTM | datetime | | | Y | |
-| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
+| 에이전트아이디 | AGNT_ID | VARCHAR(50) | PK | | | |
+| 에이전트순번 | AGNT_SEQ | NUMERIC(10) | PK | | | |
+| 에이전트명 | AGNT_NM | VARCHAR(100) | | | | |
+| 에이전트프레임워크명 | AGNT_FRWK_NM | VARCHAR(100) | | | | |
+| 에이전트경로주소 | AGNT_PATH_ADDR | VARCHAR(300) | | | | ARN, 스크립트 경로 등 |
+| 에이전트상세설명 | AGNT_DSCR_CNTT | MEDIUMTEXT | | | | |
+| 사용여부 | USE_YN | VARCHAR(1) | | | | |
+| 등록일시 | RGST_DTM | datetime | | | | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | | |
+| 수정일시 | UPD_DTM | datetime | | | | |
+| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | | |
 
 ---
 
-### 8. 에이전트메모리사용내역 (AGENT_MEM_USE_N)
+### 8. 에이전트메모리사용내역 (AGNT_MMRY_USE_N)
 
 Agent별 메모리 사용 이력. 프레임워크 유형(AgentCore, LangGraph 등)과 동기화 상태를 추적한다.
 
 | 논리명 | 컬럼명 | 데이터타입 | PK | FK | NOT NULL | 비고 |
 |--------|--------|-----------|----|----|----------|------|
-| 에이전트아이디 | AGENT_ID | VARCHAR(100) | PK | | | |
-| 에이전트순번 | AGENT_SEQ | NUMERIC(10) | PK | | | |
-| 사원번호 | EMP_NO | VARCHAR(100) | PK | | Y | |
-| 에이전트메모리경로주소 | AGENT_MEM_PATH_ADDR | VARCHAR(300) | | | | |
-| 에이전트유형설명내용 | AGENT_TYPE_DSCR_CNTT | MEDIUMTEXT | | | Y | AgentCore, LangGraph 등 |
-| 사용여부 | USE_YN | VARCHAR(1) | | | Y | 사용 여부 |
+| 에이전트아이디 | AGNT_ID | VARCHAR(50) | PK | FK | | |
+| 에이전트순번 | AGNT_SEQ | NUMERIC(10) | PK | FK | | |
+| 사원번호 | EMP_NO | VARCHAR(15) | PK | | | |
+| 에이전트메모리경로주소 | AGNT_MMRY_PATH_ADDR | VARCHAR(300) | | | | |
+| 에이전트유형설명내용 | AGNT_TYPE_DSCR_CNTT | MEDIUMTEXT | | | | AgentCore, LangGraph 등 |
+| 사용여부 | USE_YN | VARCHAR(1) | | | | |
 | 최종동기화일시 | LAST_SYNC_DTM | datetime | | | | |
-| 등록일시 | RGST_DTM | datetime | | | Y | |
-| 등록자아이디 | RGST_ID | VARCHAR(20) | | | Y | |
-| 수정일시 | UPD_DTM | datetime | | | Y | |
-| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | Y | |
+| 등록일시 | RGST_DTM | datetime | | | | |
+| 등록자아이디 | RGSR_ID | VARCHAR(20) | | | | |
+| 수정일시 | UPD_DTM | datetime | | | | |
+| 수정자아이디 | UPPR_ID | VARCHAR(20) | | | | |
 
 ---
 
@@ -314,12 +291,10 @@ DEPT_M (부서)
                  └─── 1:N ──→ CHTB_SMRY_D (대화세션)  ← EMP_NO
                                 │
                                 └─── 1:N ──→ CHTB_MSG_D (메시지)  ← CHTB_TLK_SMRY_ID
-                                              │
-                                              └─── 1:N ──→ ATCH_FILE_M (첨부파일)  ← CHTB_TLK_ID
 
-AGENT_M (에이전트)
+AGNT_M (에이전트)
   │
-  └─── 1:N ──→ AGENT_MEM_USE_N (메모리사용)  ← AGENT_ID, AGENT_SEQ
+  └─── 1:N ──→ AGNT_MMRY_USE_N (메모리사용)  ← AGNT_ID, AGNT_SEQ
                  │
                  └─── N:1 ──→ EMP_M (사원)  ← EMP_NO
 ```
@@ -331,29 +306,11 @@ AGENT_M (에이전트)
 | 컬럼명 | 데이터타입 | 용도 |
 |--------|-----------|------|
 | RGST_DTM | datetime | 등록일시 |
-| RGST_ID | VARCHAR(20) | 등록자 아이디 |
+| RGSR_ID | VARCHAR(20) | 등록자 아이디 |
 | UPD_DTM | datetime | 수정일시 |
 | UPPR_ID | VARCHAR(20) | 수정자 아이디 |
 
 ---
-
-### 현재 코드 모델과의 차이점
-
-현재 `wellbot/models.py`의 `User` 모델은 실제 DB 스키마와 큰 차이가 있다:
-
-| 항목 | 현재 코드 (User) | 실제 DB (EMP_M) |
-|------|-----------------|-----------------|
-| 테이블명 | wellbot_user | EMP_M |
-| PK | id (자동 생성) | EMP_NO (사원번호) |
-| 사용자 식별 | username | EMP_NO + USER_NM + EML_ADDR |
-| 비밀번호 | password_hash | ECR_PWD |
-| 권한 | is_admin (bool) | USER_ROLE_NM (super-admin/admin/user) |
-| 부서 | 없음 | PSTN_DEPT_CD (FK → DEPT_M) |
-| 계정 상태 | 없음 | ACNT_STS_NM (active/inactive/locked) |
-| 로그인 실패 관리 | 없음 | LGN_FLR_TSCNT, LOCK_DSBN_DTM |
-| 감사 컬럼 | 없음 | RGST_DTM, RGST_ID, UPD_DTM, UPPR_ID |
-
-또한 현재 코드에 존재하지 않는 테이블이 7개 (DEPT_M, CRTF_TOKN_N, CHTB_SMRY_D, CHTB_MSG_D, ATCH_FILE_M, AGENT_M, AGENT_MEM_USE_N) 있으며, `models.py` 전면 재작성이 필요하다.
 
 ## 참고사항
 
