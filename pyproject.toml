@@ -11,3 +11,8 @@ dependencies = [
     "pymysql>=1.1.0",
     "python-dotenv>=1.0.0",
 ]
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
