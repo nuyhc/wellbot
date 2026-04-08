@@ -1,0 +1,7 @@
+[project]
+name = "wellbot"
+version = "0.2.0"
+description = "A Modular chatbot system built on AWS Bedrock, evolving from simple chat to RAG and agent capabilities with Reflex."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
