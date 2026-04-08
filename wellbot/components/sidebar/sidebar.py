@@ -1,6 +1,7 @@
 """Sidebar 컴포넌트.
 
-대화 목록, 새 대화 버튼, 사용자 프로필 영역을 포함한다.
+ChatGPT/Gemini 스타일 사이드바.
+대화 목록, 새 대화 버튼, 하단 사용자 프로필.
 """
 
 import reflex as rx
@@ -12,84 +13,97 @@ from wellbot.styles import COLORS, SPACING
 
 
 def sidebar_header() -> rx.Component:
-    """Sidebar 상단: 새 대화 버튼 + pin/hide 토글."""
+    """Sidebar 상단: 사이드바 토글 + 새 대화 버튼."""
     return rx.hstack(
-        rx.button(
-            rx.icon("plus", size=16),
-            rx.text("새 대화", size="2"),
-            variant="soft",
+        rx.icon_button(
+            rx.icon("panel-left-close", size=18),
+            variant="ghost",
+            size="2",
+            cursor="pointer",
+            on_click=UIState.hide_sidebar,
+            color=COLORS["text_secondary"],
+            _hover={"color": COLORS["text_primary"]},
+        ),
+        rx.spacer(),
+        rx.icon_button(
+            rx.icon("square-pen", size=18),
+            variant="ghost",
             size="2",
             cursor="pointer",
             on_click=ChatState.create_new_conversation,
-            flex="1",
-            min_width="0",
-        ),
-        rx.hstack(
-            rx.icon_button(
-                rx.cond(
-                    UIState.sidebar_pinned,
-                    rx.icon("pin", size=14),
-                    rx.icon("pin-off", size=14),
-                ),
-                variant="ghost",
-                size="1",
-                color_scheme="gray",
-                cursor="pointer",
-                on_click=rx.cond(
-                    UIState.sidebar_pinned,
-                    UIState.unpin_sidebar,
-                    UIState.pin_sidebar,
-                ),
-            ),
-            rx.icon_button(
-                rx.icon("panel-left-close", size=14),
-                variant="ghost",
-                size="1",
-                color_scheme="gray",
-                cursor="pointer",
-                on_click=UIState.hide_sidebar,
-            ),
-            spacing="1",
-            flex_shrink="0",
+            color=COLORS["text_secondary"],
+            _hover={"color": COLORS["text_primary"]},
         ),
         width="100%",
         align="center",
-        spacing="2",
         padding_x="0.75em",
         padding_y="0.75em",
     )
 
 
+def search_box() -> rx.Component:
+    """사이드바 검색 박스."""
+    return rx.box(
+        rx.hstack(
+            rx.icon("search", size=14, color=COLORS["text_secondary"]),
+            rx.text("채팅 검색", size="2", color=COLORS["text_secondary"]),
+            align="center",
+            spacing="2",
+            padding_x="0.75em",
+            padding_y="0.5em",
+            width="100%",
+            border_radius=SPACING["border_radius_sm"],
+            bg=COLORS["sidebar_hover"],
+            cursor="pointer",
+            _hover={"bg": COLORS["sidebar_active"]},
+        ),
+        padding_x="0.5em",
+        padding_bottom="0.5em",
+        width="100%",
+    )
+
+
 def user_profile_placeholder() -> rx.Component:
-    """사용자 프로필 placeholder. Phase 4에서 실제 프로필로 교체."""
+    """사용자 프로필 placeholder."""
     return rx.hstack(
-        rx.icon_button(
-            rx.icon("user", size=16),
-            size="2",
-            radius="full",
-            variant="soft",
-            color_scheme="gray",
+        rx.box(
+            rx.icon("user", size=16, color=COLORS["text_primary"]),
+            width="28px",
+            height="28px",
+            border_radius="50%",
+            bg=COLORS["sidebar_hover"],
+            display="flex",
+            align_items="center",
+            justify_content="center",
             flex_shrink="0",
         ),
-        rx.vstack(
-            rx.text("사용자", size="2", weight="medium"),
-            rx.text(
-                "user@example.com",
-                size="1",
-                color=COLORS["text_secondary"],
-                overflow="hidden",
-                text_overflow="ellipsis",
-                white_space="nowrap",
-            ),
-            spacing="0",
-            min_width="0",
-            flex="1",
+        rx.text(
+            "사용자",
+            size="2",
+            color=COLORS["text_primary"],
+            weight="medium",
         ),
         width="100%",
         align="center",
         spacing="2",
         padding="0.75em",
-        border_top=f"1px solid {COLORS['border']}",
+        cursor="pointer",
+        border_radius=SPACING["border_radius_sm"],
+        _hover={"bg": COLORS["sidebar_hover"]},
+    )
+
+
+def sidebar_footer() -> rx.Component:
+    """사이드바 하단 영역."""
+    return rx.box(
+        rx.separator(color_scheme="gray", size="4"),
+        rx.box(
+            user_profile_placeholder(),
+            padding_x="0.5em",
+            padding_y="0.5em",
+        ),
+        width="100%",
+        flex_shrink="0",
     )
 
 
@@ -98,9 +112,9 @@ def sidebar() -> rx.Component:
     return rx.box(
         rx.vstack(
             sidebar_header(),
-            rx.separator(color_scheme="gray"),
+            search_box(),
             conversation_list(),
-            user_profile_placeholder(),
+            sidebar_footer(),
             height="100%",
             width="100%",
             spacing="0",

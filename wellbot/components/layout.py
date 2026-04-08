@@ -1,7 +1,7 @@
 """2단 레이아웃 컴포넌트.
 
-Sidebar(좌) + 메인 대화 영역(우) 구성.
-반응형 처리: 768px 미만에서 Sidebar 숨김.
+ChatGPT/Gemini 스타일 레이아웃.
+Sidebar(좌) + 메인 대화 영역(우) + 우측 상단 다크/라이트 모드 토글.
 """
 
 import reflex as rx
@@ -19,14 +19,35 @@ def sidebar_toggle_button() -> rx.Component:
             rx.icon("panel-left-open", size=18),
             variant="ghost",
             size="2",
-            color_scheme="gray",
             cursor="pointer",
             on_click=UIState.toggle_sidebar,
-            position="fixed",
-            top="1em",
-            left="1em",
+            position="absolute",
+            top="0.75em",
+            left="0.75em",
             z_index="10",
+            color=COLORS["text_secondary"],
+            _hover={"color": COLORS["text_primary"]},
         ),
+    )
+
+
+def color_mode_toggle() -> rx.Component:
+    """우측 상단 다크/라이트 모드 전환 버튼."""
+    return rx.icon_button(
+        rx.color_mode_cond(
+            light=rx.icon("moon", size=18),
+            dark=rx.icon("sun", size=18),
+        ),
+        variant="ghost",
+        size="2",
+        cursor="pointer",
+        on_click=rx.toggle_color_mode,
+        position="absolute",
+        top="0.75em",
+        right="0.75em",
+        z_index="10",
+        color=COLORS["text_secondary"],
+        _hover={"color": COLORS["text_primary"]},
     )
 
 
@@ -36,6 +57,7 @@ def chat_layout(main_content: rx.Component) -> rx.Component:
         sidebar(),
         rx.box(
             sidebar_toggle_button(),
+            color_mode_toggle(),
             main_content,
             flex="1",
             height="100vh",
@@ -47,4 +69,5 @@ def chat_layout(main_content: rx.Component) -> rx.Component:
         width="100%",
         spacing="0",
         overflow="hidden",
+        bg=COLORS["main_bg"],
     )

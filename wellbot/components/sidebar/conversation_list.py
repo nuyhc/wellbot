@@ -1,13 +1,13 @@
 """대화 목록 컴포넌트.
 
-Sidebar에 대화 목록을 시간 역순으로 표시한다.
-활성 대화 하이라이트, 대화 전환, 삭제 기능을 제공한다.
+ChatGPT/Gemini 스타일 대화 목록.
+활성 대화 하이라이트, 대화 전환, 삭제 기능.
 """
 
 import reflex as rx
 
 from wellbot.state.chat_state import ChatState, Conversation
-from wellbot.styles import COLORS
+from wellbot.styles import COLORS, SPACING
 
 
 def conversation_item(conv: Conversation) -> rx.Component:
@@ -15,10 +15,10 @@ def conversation_item(conv: Conversation) -> rx.Component:
     is_active = ChatState.current_conversation_id == conv.id
 
     return rx.hstack(
-        rx.icon("message-square", size=14, flex_shrink="0"),
         rx.text(
             conv.title,
             size="2",
+            color=rx.cond(is_active, COLORS["text_primary"], COLORS["text_secondary"]),
             weight=rx.cond(is_active, "medium", "regular"),
             overflow="hidden",
             text_overflow="ellipsis",
@@ -30,24 +30,23 @@ def conversation_item(conv: Conversation) -> rx.Component:
             rx.icon("trash-2", size=12),
             variant="ghost",
             size="1",
-            color_scheme="red",
             cursor="pointer",
             on_click=ChatState.delete_conversation(conv.id),
             opacity="0",
             flex_shrink="0",
+            color=COLORS["text_secondary"],
             _group_hover={"opacity": "1"},
         ),
         width="100%",
         max_width="100%",
-        padding_x="0.625em",
+        padding_x="0.75em",
         padding_y="0.5em",
         align="center",
         spacing="2",
         cursor="pointer",
-        border_radius="0.5em",
-        bg=rx.cond(is_active, rx.color("accent", 4), "transparent"),
-        color=rx.cond(is_active, rx.color("accent", 11), COLORS["text_primary"]),
-        _hover={"bg": rx.cond(is_active, rx.color("accent", 4), rx.color("gray", 3))},
+        border_radius=SPACING["border_radius_sm"],
+        bg=rx.cond(is_active, COLORS["sidebar_active"], "transparent"),
+        _hover={"bg": rx.cond(is_active, COLORS["sidebar_active"], COLORS["sidebar_hover"])},
         on_click=ChatState.switch_conversation(conv.id),
         data_group="true",
         overflow="hidden",
@@ -60,11 +59,21 @@ def conversation_list() -> rx.Component:
         rx.cond(
             ChatState.sorted_conversations.length() > 0,
             rx.vstack(
+                # "최근" 카테고리 라벨
+                rx.text(
+                    "최근",
+                    size="1",
+                    color=COLORS["category_text"],
+                    weight="medium",
+                    padding_x="0.75em",
+                    padding_top="0.5em",
+                    padding_bottom="0.25em",
+                ),
                 rx.foreach(
                     ChatState.sorted_conversations,
                     conversation_item,
                 ),
-                spacing="1",
+                spacing="0",
                 width="100%",
             ),
             rx.center(
@@ -80,6 +89,6 @@ def conversation_list() -> rx.Component:
         overflow_y="auto",
         overflow_x="hidden",
         padding_x="0.5em",
-        padding_y="0.5em",
+        padding_y="0.25em",
         width="100%",
     )

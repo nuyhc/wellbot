@@ -15,7 +15,7 @@ def login() -> rx.Component:
         rx.center(
             rx.vstack(
                 rx.icon("lock", size=48, color=COLORS["accent"]),
-                rx.heading("로그인", size="6"),
+                rx.heading("로그인", size="6", color=COLORS["text_primary"]),
                 rx.text(
                     "Phase 4에서 인증 기능이 구현됩니다.",
                     color=COLORS["text_secondary"],
