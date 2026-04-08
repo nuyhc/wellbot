@@ -55,3 +55,29 @@ def get_models_map() -> dict[str, dict]:
 def get_system_prompt() -> str | None:
     """글로벌 시스템 프롬프트 반환"""
     return load_config().get("system_prompt")
+
+
+_DEFAULT_FILE_UPLOAD = {"max_file_size": 52428800, "max_file_count": 20, "upload_dir": "uploaded_files"}
+_DEFAULT_CONTEXT_BUDGET = {"system_ratio": 0.05, "file_ratio": 0.30, "history_ratio": 0.50, "question_ratio": 0.15}
+_DEFAULT_VECTOR_STORE = {"default_k": 5, "retention_days": 30}
+
+
+def get_file_upload_config() -> dict:
+    """file_upload 섹션 반환"""
+    return load_config().get("file_upload", _DEFAULT_FILE_UPLOAD)
+
+
+def get_context_budget_config(model_name: str | None = None) -> dict:
+    """context_budget 섹션 반환 (모델별 오버라이드 지원)"""
+    cfg = load_config()
+    budget = {**_DEFAULT_CONTEXT_BUDGET, **cfg.get("context_budget", {})}
+    if model_name:
+        model = get_models_map().get(model_name, {})
+        if "context_budget" in model:
+            budget = {**budget, **model["context_budget"]}
+    return budget
+
+
+def get_vector_store_config() -> dict:
+    """vector_store 섹션 반환"""
+    return load_config().get("vector_store", _DEFAULT_VECTOR_STORE)
