@@ -1,18 +1,117 @@
 """메시지 입력 바 컴포넌트.
 
-ChatGPT/Gemini 스타일 입력 바.
-파일 첨부 버튼 + 텍스트 입력 + 전송 버튼.
+ChatGPT/Claude 스타일 입력 바.
+파일 첨부 버튼 + 텍스트 입력 + 모델 선택 팝오버 + 전송 버튼.
 
-rx.text_area 사용:
-- enter_key_submit=True → Enter 전송, Shift+Enter 줄바꿈
-- auto_height=True → 내용에 따라 자동 높이 조절
-- 내장 debounce로 입력 지연 없음
+모델 선택 팝오버: 모델 목록 + 확장 사고 토글을 하나의 드롭다운으로 통합.
 """
 
 import reflex as rx
 
-from wellbot.state.chat_state import ChatState
+from wellbot.state.chat_state import ChatState, ModelInfo
 from wellbot.styles import COLORS, SPACING
+
+
+def _model_item(model: ModelInfo) -> rx.Component:
+    """팝오버 내 개별 모델 항목."""
+    return rx.popover.close(
+        rx.hstack(
+            rx.vstack(
+                rx.text(model.name, size="2", weight="medium"),
+                rx.text(
+                    model.description,
+                    size="1",
+                    color=COLORS["text_secondary"],
+                ),
+                spacing="0",
+                align_items="start",
+            ),
+            rx.spacer(),
+            rx.cond(
+                model.name == ChatState.selected_model,
+                rx.icon("check", size=16, color=COLORS["accent"]),
+            ),
+            width="100%",
+            align="center",
+            padding="0.5em 0.75em",
+            border_radius=SPACING["border_radius_sm"],
+            cursor="pointer",
+            _hover={"bg": COLORS["sidebar_hover"]},
+            on_click=ChatState.set_model(model.name),
+        ),
+    )
+
+
+def _thinking_toggle_row() -> rx.Component:
+    """확장 사고 토글 행."""
+    return rx.cond(
+        ChatState.model_supports_thinking,
+        rx.hstack(
+            rx.vstack(
+                rx.text("확장 사고", size="2", weight="medium"),
+                rx.text(
+                    "복잡한 작업을 위해 더 오래 사고",
+                    size="1",
+                    color=COLORS["text_secondary"],
+                ),
+                spacing="0",
+                align_items="start",
+            ),
+            rx.spacer(),
+            rx.switch(
+                checked=ChatState.thinking_enabled,
+                on_change=ChatState.toggle_thinking,
+                size="2",
+            ),
+            width="100%",
+            align="center",
+            padding="0.5em 0.75em",
+        ),
+    )
+
+
+def _model_popover() -> rx.Component:
+    """Claude 스타일 모델 선택 팝오버."""
+    return rx.popover.root(
+        rx.popover.trigger(
+            rx.button(
+                rx.text(
+                    ChatState.trigger_label,
+                    size="1",
+                    weight="medium",
+                ),
+                rx.icon("chevron-down", size=14),
+                variant="ghost",
+                size="1",
+                cursor="pointer",
+                color=COLORS["text_secondary"],
+                _hover={"color": COLORS["text_primary"]},
+                type="button",
+            ),
+        ),
+        rx.popover.content(
+            rx.vstack(
+                # 모델 목록
+                rx.foreach(ChatState.model_list, _model_item),
+                # 구분선
+                rx.separator(size="4", color=COLORS["border"]),
+                # 확장 사고 토글
+                _thinking_toggle_row(),
+                spacing="1",
+                width="100%",
+            ),
+            side="top",
+            align="end",
+            style={
+                "min_width": "260px",
+                "padding": "0.5em",
+                "border_radius": SPACING["border_radius_md"],
+                "bg": COLORS["sidebar_bg"],
+                "border": f"1px solid {COLORS['border']}",
+                "box_shadow": "0 4px 24px rgba(0,0,0,0.25)",
+            },
+        ),
+    )
 
 
 def input_bar() -> rx.Component:
@@ -49,7 +148,7 @@ def input_bar() -> rx.Component:
                                 },
                             },
                         ),
-                        # 하단: 첨부 버튼 + 전송 버튼
+                        # 하단: 첨부 + 모델 팝오버 + 전송
                         rx.hstack(
                             # 파일 첨부 버튼
                             rx.tooltip(
@@ -69,6 +168,8 @@ def input_bar() -> rx.Component:
                                 content="파일 첨부",
                             ),
                             rx.spacer(),
+                            # 모델 선택 팝오버
+                            _model_popover(),
                             # 전송 버튼
                             rx.icon_button(
                                 rx.icon("arrow-up", size=16),
@@ -103,6 +204,7 @@ def input_bar() -> rx.Component:
                             ),
                             width="100%",
                             align="center",
+                            spacing="2",
                         ),
                         spacing="2",
                         padding="0.75em 1em",
