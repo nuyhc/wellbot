@@ -27,7 +27,7 @@ def conversation_item(conv: Conversation) -> rx.Component:
             flex="1",
         ),
         rx.icon_button(
-            rx.icon("trash-2", size=12),
+            rx.icon("trash-2", size=14),
             variant="ghost",
             size="1",
             cursor="pointer",
@@ -35,7 +35,8 @@ def conversation_item(conv: Conversation) -> rx.Component:
             opacity="0",
             flex_shrink="0",
             color=COLORS["text_secondary"],
-            _group_hover={"opacity": "1"},
+            class_name="delete-btn",
+            _hover={"color": rx.color("red", 9)},
         ),
         width="100%",
         max_width="100%",
@@ -46,9 +47,11 @@ def conversation_item(conv: Conversation) -> rx.Component:
         cursor="pointer",
         border_radius=SPACING["border_radius_sm"],
         bg=rx.cond(is_active, COLORS["sidebar_active"], "transparent"),
-        _hover={"bg": rx.cond(is_active, COLORS["sidebar_active"], COLORS["sidebar_hover"])},
+        _hover={
+            "bg": rx.cond(is_active, COLORS["sidebar_active"], COLORS["sidebar_hover"]),
+            "& .delete-btn": {"opacity": "1"},
+        },
         on_click=ChatState.switch_conversation(conv.id),
-        data_group="true",
         overflow="hidden",
     )
 

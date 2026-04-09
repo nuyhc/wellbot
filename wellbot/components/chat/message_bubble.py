@@ -35,40 +35,20 @@ def user_message(message: Message) -> rx.Component:
 
 
 def ai_message(message: Message) -> rx.Component:
-    """AI 메시지 - 좌측 정렬, 아이콘 + 마크다운."""
-    return rx.hstack(
-        # AI 아이콘
-        rx.box(
-            rx.icon("sparkles", size=18, color=COLORS["accent"]),
-            width="30px",
-            height="30px",
-            border_radius="50%",
-            bg=COLORS["user_bubble"],
-            display="flex",
-            align_items="center",
-            justify_content="center",
-            flex_shrink="0",
-            margin_top="2px",
-        ),
-        # 메시지 내용 - 마크다운 렌더링
-        rx.box(
-            rx.markdown(
-                message.content,
-                component_map={
-                    "code": lambda text: rx.code(
-                        text,
-                        color_scheme="gray",
-                        variant="ghost",
-                    ),
-                },
-            ),
-            flex="1",
-            min_width="0",
-            color=COLORS["text_primary"],
+    """AI 메시지 - 좌측 정렬, 마크다운 렌더링."""
+    return rx.box(
+        rx.markdown(
+            message.content,
+            component_map={
+                "code": lambda text: rx.code(
+                    text,
+                    color_scheme="gray",
+                    variant="ghost",
+                ),
+            },
         ),
         width="100%",
-        align="start",
-        spacing="3",
+        color=COLORS["text_primary"],
         padding_x="1em",
     )
 

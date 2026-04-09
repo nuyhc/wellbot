@@ -36,7 +36,7 @@ TITLE_MAX_LENGTH: int = 30
 class Message(BaseModel):
     """개별 메시지 모델."""
 
-    role: str  # "user" | "ai"
+    role: str  # "user" | "assistant"
     content: str
     timestamp: float
 
@@ -140,7 +140,7 @@ class ChatState(rx.State):
         self.current_input = value
 
     @rx.event(background=True)
-    async def send_message(self) -> None:
+    async def send_message(self, form_data: dict | None = None) -> None:
         """메시지를 전송하고 스텁 응답을 생성한다."""
         async with self:
             text = self.current_input.strip()
