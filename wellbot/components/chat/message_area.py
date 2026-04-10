@@ -2,6 +2,7 @@
 
 ChatGPT/Gemini 스타일 메시지 영역.
 대화 메시지 목록, 스트리밍 응답, 사고 과정 인디케이터, 환영 메시지.
+자동 스크롤: 하단 근처에 있으면 새 메시지 시 자동 스크롤, 위로 스크롤하면 중단.
 """
 
 import reflex as rx
@@ -119,6 +120,33 @@ def streaming_message() -> rx.Component:
     )
 
 
+def scroll_to_bottom_button() -> rx.Component:
+    """맨 아래로 이동 플로팅 버튼."""
+    return rx.el.button(
+        rx.icon("chevron-down", size=18, color=COLORS["text_secondary"]),
+        id="scroll-to-bottom-btn",
+        style={
+            "width": "36px",
+            "height": "36px",
+            "border_radius": "50%",
+            "background": str(COLORS["input_bg"]),
+            "border": f"1px solid {COLORS['border']}",
+            "display": "none",
+            "align_items": "center",
+            "justify_content": "center",
+            "cursor": "pointer",
+            "position": "absolute",
+            "bottom": "0.75em",
+            "left": "50%",
+            "transform": "translateX(-50%)",
+            "z_index": "5",
+            "box_shadow": "0 2px 8px rgba(0,0,0,0.15)",
+            "padding": "0",
+            "outline": "none",
+        },
+    )
+
+
 def message_area() -> rx.Component:
     """메시지 표시 영역."""
     return rx.box(
@@ -143,7 +171,6 @@ def message_area() -> rx.Component:
                     & ~ChatState.has_streaming,
                     loading_indicator(),
                 ),
-                rx.box(id="message-bottom"),
                 spacing="4",
                 padding_y="1.5em",
                 width="100%",
@@ -152,10 +179,12 @@ def message_area() -> rx.Component:
             ),
             welcome_message(),
         ),
+        scroll_to_bottom_button(),
         id="message-area",
         flex="1",
         overflow_y="auto",
         width="100%",
         padding_top="3em",
+        position="relative",
         transition="all 0.2s ease",
     )

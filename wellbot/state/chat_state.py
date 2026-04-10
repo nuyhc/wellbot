@@ -240,6 +240,9 @@ class ChatState(rx.State):
         """대화를 전환한다."""
         self.current_conversation_id = conv_id
         self.current_input = ""
+        return rx.call_script(  # type: ignore[return-value]
+            "if (window.__resetAutoScroll) { window.__resetAutoScroll(); }"
+        )
 
     def delete_conversation(self, conv_id: str) -> None:
         """대화를 삭제한다."""
