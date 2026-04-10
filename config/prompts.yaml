@@ -1,9 +1,28 @@
-default: default
+# Reference: https://github.com/asgeirtj/system_prompts_leaks
+default: 일반
 
 prompts:
-  - name: default
-    description: "기본 어시스턴트"
-  - name: casual
-    description: "친근한 말투"
-  - name: formal
-    description: "격식체 비즈니스"
+  - name: 일반
+    description: "다양한 업무 상황과 요청 유형을 하나의 일관된 기준으로 처리"
+    reference: "Developed through the Gemini 3.1 pro + GTP 5.4 Thinking + Opus 4.6"
+    updated_at: "2026-04-10"
+
+  - name: 구조적
+    description: "구조적이고 민감정보 보호 원칙을 엄격히 준수"
+    reference: "Based Google Gemini 3.1 Pro"
+    updated_at: "2026-04-10"
+
+  - name: 정확성
+    description: "사실 정확성과 간결한 전달에 집중"
+    reference: "Based OpenAI GPT-5.4 Thinking"
+    updated_at: "2026-04-10"
+
+  - name: 균형적
+    description: "균형 잡힌 시각을 바탕으로 맥락과 윤리적 판단 고려"
+    reference: "Based Anthropic Claude Opus 4.6"
+    updated_at: "2026-04-10"
+
+  - name: 미적용
+    description: "모델 기본 응답 활용"
+    reference: ""
+    updated_at: "2026-04-10"
