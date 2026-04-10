@@ -17,56 +17,89 @@ def _model_item(model: ModelInfo) -> rx.Component:
     return rx.popover.close(
         rx.hstack(
             rx.vstack(
-                rx.text(model.name, size="2", weight="medium"),
+                rx.text(
+                    model.name,
+                    size="1",
+                    weight="medium",
+                ),
                 rx.text(
                     model.description,
-                    size="1",
+                    font_size="11px",
                     color=COLORS["text_secondary"],
                 ),
                 spacing="0",
                 align_items="start",
             ),
             rx.spacer(),
-            rx.cond(
-                model.name == ChatState.selected_model,
-                rx.icon("check", size=16, color=COLORS["accent"]),
+            # 체크 아이콘 자리를 항상 확보하여 정렬 유지
+            rx.box(
+                rx.cond(
+                    model.name == ChatState.selected_model,
+                    rx.icon("check", size=14, color=COLORS["accent"]),
+                ),
+                width="16px",
+                display="flex",
+                align_items="center",
+                justify_content="center",
+                flex_shrink="0",
             ),
             width="100%",
             align="center",
-            padding="0.5em 0.75em",
+            padding="0.35em 0.6em",
             border_radius=SPACING["border_radius_sm"],
             cursor="pointer",
             _hover={"bg": COLORS["sidebar_hover"]},
             on_click=ChatState.set_model(model.name),
         ),
+        # popover.close에도 width 100% 적용
+        width="100%",
     )
 
 
 def _thinking_toggle_row() -> rx.Component:
-    """확장 사고 토글 행."""
-    return rx.cond(
-        ChatState.model_supports_thinking,
-        rx.hstack(
-            rx.vstack(
-                rx.text("확장 사고", size="2", weight="medium"),
-                rx.text(
-                    "복잡한 작업을 위해 더 오래 사고",
-                    size="1",
-                    color=COLORS["text_secondary"],
+    """확장 사고 토글 행. 미지원 모델에서는 비활성화 상태로 표시."""
+    return rx.hstack(
+        rx.vstack(
+            rx.text(
+                "확장 사고",
+                size="1",
+                weight="medium",
+                color=rx.cond(
+                    ChatState.model_supports_thinking,
+                    COLORS["text_primary"],
+                    COLORS["text_secondary"],
                 ),
-                spacing="0",
-                align_items="start",
             ),
-            rx.spacer(),
-            rx.switch(
-                checked=ChatState.thinking_enabled,
-                on_change=ChatState.toggle_thinking,
-                size="2",
+            rx.text(
+                rx.cond(
+                    ChatState.model_supports_thinking,
+                    "복잡한 작업을 위해 더 오래 사고",
+                    "확장 사고 미지원 모델",
+                ),
+                font_size="11px",
+                color=COLORS["text_secondary"],
             ),
-            width="100%",
-            align="center",
-            padding="0.5em 0.75em",
+            spacing="0",
+            align_items="start",
+            flex="1",
+            min_width="0",
         ),
+        rx.switch(
+            checked=rx.cond(
+                ChatState.model_supports_thinking,
+                ChatState.thinking_enabled,
+                False,
+            ),
+            on_change=ChatState.toggle_thinking,
+            disabled=~ChatState.model_supports_thinking,
+            size="1",
+            flex_shrink="0",
+        ),
+        width="100%",
+        align="center",
+        gap="0.5em",
+        padding="0.35em 0.6em",
+        opacity=rx.cond(ChatState.model_supports_thinking, "1", "0.5"),
     )
 
 
@@ -103,8 +136,8 @@ def _model_popover() -> rx.Component:
             side="top",
             align="end",
             style={
-                "min_width": "260px",
-                "padding": "0.5em",
+                "width": "250px",
+                "padding": "0.4em",
                 "border_radius": SPACING["border_radius_md"],
                 "bg": COLORS["sidebar_bg"],
                 "border": f"1px solid {COLORS['border']}",
