@@ -75,21 +75,21 @@ class ChatState(rx.State):
     show_style_panel: bool = False
 
     def _ensure_conversation(self) -> None:
-        """대화가 없으면 새로 생성한다."""
+        """대화가 없으면 새로 생성."""
         if not self.conversations:
             conv = _new_conversation()
             self.conversations = [conv]
             self.current_conversation_id = conv.id
 
     def _get_current_index(self) -> int | None:
-        """현재 대화의 인덱스를 반환한다."""
+        """현재 대화의 인덱스 반환."""
         for i, conv in enumerate(self.conversations):
             if conv.id == self.current_conversation_id:
                 return i
         return None
 
     def _update_conversation(self, idx: int, **kwargs: object) -> None:
-        """대화를 불변적으로 업데이트한다."""
+        """대화 업데이트."""
         conv = self.conversations[idx]
         updated = Conversation(
             id=conv.id,
@@ -205,11 +205,18 @@ class ChatState(rx.State):
     def on_load(self) -> None:
         """페이지 로드 시 초기화."""
         self._ensure_conversation()
-        if not self.selected_model:
-            try:
-                self.selected_model = get_config().default_model.name
-            except Exception:
-                pass
+        try:
+            cfg = get_config()
+            if not self.selected_model:
+                self.selected_model = cfg.default_model.name
+            # 기본 프롬프트 이름으로 초기화 (prompts.yaml의 default 값)
+            if self.selected_prompt == "default":
+                for p in cfg.prompts:
+                    if p.content == cfg.system_prompt:
+                        self.selected_prompt = p.name
+                        break
+        except Exception:
+            pass
 
     def set_model(self, name: str) -> None:
         """사용 모델을 변경한다."""
