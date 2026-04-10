@@ -1,0 +1,9 @@
+default: default
+
+prompts:
+  - name: default
+    description: "기본 어시스턴트"
+  - name: casual
+    description: "친근한 말투"
+  - name: formal
+    description: "격식체 비즈니스"
