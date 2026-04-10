@@ -118,7 +118,9 @@ class ChatState(rx.State):
 
     @rx.var
     def can_send(self) -> bool:
-        """전송 가능 여부 (입력이 비어있지 않고 로딩 중이 아님)."""
+        """전송 가능 여부 (대화 선택됨, 입력이 비어있지 않고 로딩 중이 아님)."""
+        if self._get_current_index() is None:
+            return False
         return self.current_input.strip() != "" and not self.is_loading
 
     @rx.var
@@ -237,7 +239,10 @@ class ChatState(rx.State):
         self.show_style_panel = False
 
     def create_new_conversation(self) -> None:
-        """새 대화를 생성한다."""
+        """새 대화를 생성한다. 현재 대화가 비어있으면 무시."""
+        idx = self._get_current_index()
+        if idx is not None and not self.conversations[idx].messages:
+            return
         conv = _new_conversation()
         self.conversations = [conv, *self.conversations]
         self.current_conversation_id = conv.id
