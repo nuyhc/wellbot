@@ -72,3 +72,49 @@ THEME = rx.theme(
     accent_color="gray",
     gray_color="slate",
 )
+
+
+def _table_border() -> str:
+    """테이블 border 색상 문자열."""
+    return f"1px solid {rx.color('gray', 6)}"
+
+
+# rx.markdown 공통 component_map (테이블 border 포함)
+MARKDOWN_COMPONENT_MAP: dict = {
+    "code": lambda text: rx.code(text, color_scheme="gray", variant="ghost"),
+    "table": lambda *children, **props: rx.el.table(
+        *children,
+        border_collapse="collapse",
+        width="100%",
+        margin_y="0.5em",
+        font_size="0.875rem",
+        **props,
+    ),
+    "th": lambda *children, **props: rx.el.th(
+        *children,
+        border=_table_border(),
+        padding="0.5em 0.75em",
+        text_align="left",
+        font_weight="600",
+        background=rx.color("gray", 3),
+        **props,
+    ),
+    "td": lambda *children, **props: rx.el.td(
+        *children,
+        border=_table_border(),
+        padding="0.5em 0.75em",
+        **props,
+    ),
+    "tr": lambda *children, **props: rx.el.tr(
+        *children,
+        **props,
+    ),
+    "thead": lambda *children, **props: rx.el.thead(
+        *children,
+        **props,
+    ),
+    "tbody": lambda *children, **props: rx.el.tbody(
+        *children,
+        **props,
+    ),
+}

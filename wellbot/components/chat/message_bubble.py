@@ -8,7 +8,7 @@ AI: 좌측 정렬, 배경 없이 마크다운 렌더링.
 import reflex as rx
 
 from wellbot.state.chat_state import Message
-from wellbot.styles import COLORS, SPACING
+from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 
 
 def user_message(message: Message) -> rx.Component:
@@ -39,13 +39,7 @@ def ai_message(message: Message) -> rx.Component:
     return rx.box(
         rx.markdown(
             message.content,
-            component_map={
-                "code": lambda text: rx.code(
-                    text,
-                    color_scheme="gray",
-                    variant="ghost",
-                ),
-            },
+            component_map=MARKDOWN_COMPONENT_MAP,
         ),
         width="100%",
         color=COLORS["text_primary"],

@@ -9,7 +9,7 @@ import reflex as rx
 
 from wellbot.components.chat.message_bubble import message_bubble
 from wellbot.state.chat_state import ChatState
-from wellbot.styles import COLORS, SPACING
+from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 
 
 def welcome_message() -> rx.Component:
@@ -106,13 +106,7 @@ def streaming_message() -> rx.Component:
     return rx.box(
         rx.markdown(
             ChatState.streaming_content,
-            component_map={
-                "code": lambda text: rx.code(
-                    text,
-                    color_scheme="gray",
-                    variant="ghost",
-                ),
-            },
+            component_map=MARKDOWN_COMPONENT_MAP,
         ),
         width="100%",
         color=COLORS["text_primary"],
