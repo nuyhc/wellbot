@@ -16,7 +16,7 @@ def welcome_message() -> rx.Component:
     return rx.center(
         rx.vstack(
             rx.box(
-                rx.icon("wand", size=32, color=COLORS["accent"]),
+                rx.icon("message-circle", size=32, color=COLORS["accent"]),
                 width="56px",
                 height="56px",
                 border_radius="50%",
@@ -42,7 +42,7 @@ def loading_indicator() -> rx.Component:
     """AI 응답 대기 중 로딩 인디케이터 (스트리밍 시작 전)."""
     return rx.hstack(
         rx.box(
-            rx.icon("wand", size=18, color=COLORS["accent"]),
+            rx.icon("message-circle-dashed", size=18, color=COLORS["accent"]),
             width="30px",
             height="30px",
             border_radius="50%",
@@ -73,7 +73,7 @@ def thinking_indicator() -> rx.Component:
     """AI 사고 과정 진행 중 인디케이터 (Extended Thinking)."""
     return rx.hstack(
         rx.box(
-            rx.icon("loader", size=18, color=COLORS["accent"]),
+            rx.icon("message-circle-dashed", size=18, color=COLORS["accent"]),
             width="30px",
             height="30px",
             border_radius="50%",
