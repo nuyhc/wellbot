@@ -103,6 +103,66 @@ def _thinking_toggle_row() -> rx.Component:
     )
 
 
+def _plus_menu_item(
+    icon_name: str,
+    label: str,
+    on_click: rx.EventHandler | None = None,
+) -> rx.Component:
+    """+ 메뉴 내 개별 항목."""
+    item = rx.hstack(
+        rx.icon(icon_name, size=16, color=COLORS["text_secondary"]),
+        rx.text(label, size="2"),
+        align="center",
+        gap="0.6em",
+        padding="0.5em 0.75em",
+        width="100%",
+        border_radius=SPACING["border_radius_sm"],
+        cursor="pointer",
+        _hover={"bg": COLORS["sidebar_hover"]},
+        **({"on_click": on_click} if on_click else {}),
+    )
+    return rx.popover.close(item, width="100%")
+
+
+def _plus_menu_popover() -> rx.Component:
+    """+ 버튼 팝오버 메뉴 (파일첨부, 지식베이스, 스타일)."""
+    return rx.popover.root(
+        rx.popover.trigger(
+            rx.icon_button(
+                rx.icon("plus", size=16),
+                variant="ghost",
+                size="2",
+                cursor="pointer",
+                color=COLORS["text_secondary"],
+                _hover={
+                    "color": COLORS["text_primary"],
+                    "bg": COLORS["tool_btn_hover"],
+                },
+                border_radius="50%",
+                type="button",
+            ),
+        ),
+        rx.popover.content(
+            rx.vstack(
+                _plus_menu_item("paperclip", "파일 추가"),
+                _plus_menu_item("database-search", "지식베이스"),
+                _plus_menu_item("paintbrush", "스타일"),
+                spacing="1",
+                width="100%",
+            ),
+            side="top",
+            align="start",
+            style={
+                "padding": "0.5em",
+                "border_radius": SPACING["border_radius_md"],
+                "bg": COLORS["sidebar_bg"],
+                "border": f"1px solid {COLORS['border']}",
+                "box_shadow": "0 4px 24px rgba(0,0,0,0.25)",
+            },
+        ),
+    )
+
+
 def _model_popover() -> rx.Component:
     """Claude 스타일 모델 선택 팝오버."""
     return rx.popover.root(
@@ -183,23 +243,8 @@ def input_bar() -> rx.Component:
                         ),
                         # 하단: 첨부 + 모델 팝오버 + 전송
                         rx.hstack(
-                            # 파일 첨부 버튼
-                            rx.tooltip(
-                                rx.icon_button(
-                                    rx.icon("paperclip", size=16),
-                                    variant="ghost",
-                                    size="2",
-                                    cursor="pointer",
-                                    color=COLORS["text_secondary"],
-                                    _hover={
-                                        "color": COLORS["text_primary"],
-                                        "bg": COLORS["tool_btn_hover"],
-                                    },
-                                    border_radius="50%",
-                                    type="button",
-                                ),
-                                content="파일 첨부",
-                            ),
+                            # + 메뉴 팝오버
+                            _plus_menu_popover(),
                             rx.spacer(),
                             # 모델 선택 팝오버
                             _model_popover(),
