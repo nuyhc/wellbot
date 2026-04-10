@@ -8,7 +8,7 @@ ChatGPT/Claude 스타일 입력 바.
 
 import reflex as rx
 
-from wellbot.state.chat_state import ChatState, ModelInfo
+from wellbot.state.chat_state import ChatState, ModelInfo, PromptInfo
 from wellbot.styles import COLORS, SPACING
 
 
@@ -119,9 +119,12 @@ def _plus_menu_item(
         border_radius=SPACING["border_radius_sm"],
         cursor="pointer",
         _hover={"bg": COLORS["sidebar_hover"]},
+    )
+    return rx.popover.close(
+        item,
+        width="100%",
         **({"on_click": on_click} if on_click else {}),
     )
-    return rx.popover.close(item, width="100%")
 
 
 def _plus_menu_popover() -> rx.Component:
@@ -146,7 +149,7 @@ def _plus_menu_popover() -> rx.Component:
             rx.vstack(
                 _plus_menu_item("paperclip", "파일 추가"),
                 _plus_menu_item("database-search", "지식베이스"),
-                _plus_menu_item("paintbrush", "스타일"),
+                _plus_menu_item("paintbrush", "스타일", on_click=ChatState.toggle_style_panel),
                 spacing="1",
                 width="100%",
             ),
@@ -207,10 +210,90 @@ def _model_popover() -> rx.Component:
     )
 
 
+def _style_prompt_item(prompt: PromptInfo) -> rx.Component:
+    """스타일 패널 내 개별 프롬프트 항목."""
+    return rx.hstack(
+        rx.hstack(
+            rx.text(prompt.name, size="2", weight="medium"),
+            rx.text(
+                prompt.description,
+                size="1",
+                color=COLORS["text_secondary"],
+            ),
+            align="baseline",
+            gap="0.5em",
+        ),
+        rx.spacer(),
+        rx.box(
+            rx.cond(
+                prompt.name == ChatState.selected_prompt,
+                rx.icon("check", size=14, color=COLORS["accent"]),
+            ),
+            width="16px",
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            flex_shrink="0",
+        ),
+        width="100%",
+        align="center",
+        padding="0.5em 0.75em",
+        border_radius=SPACING["border_radius_sm"],
+        cursor="pointer",
+        bg=rx.cond(
+            prompt.name == ChatState.selected_prompt,
+            COLORS["sidebar_hover"],
+            "transparent",
+        ),
+        _hover={"bg": COLORS["sidebar_hover"]},
+        on_click=ChatState.select_prompt(prompt.name),
+    )
+
+
+def _style_panel() -> rx.Component:
+    """스타일(시스템 프롬프트) 선택 패널."""
+    return rx.cond(
+        ChatState.show_style_panel,
+        rx.box(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("paintbrush", size=14, color=COLORS["text_secondary"]),
+                    rx.text("스타일 선택", size="2", weight="medium"),
+                    rx.spacer(),
+                    rx.icon_button(
+                        rx.icon("x", size=14),
+                        variant="ghost",
+                        size="1",
+                        cursor="pointer",
+                        color=COLORS["text_secondary"],
+                        on_click=ChatState.toggle_style_panel,
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.separator(size="4", color=COLORS["border"]),
+                rx.foreach(ChatState.prompt_list, _style_prompt_item),
+                spacing="2",
+                width="100%",
+            ),
+            bg=COLORS["sidebar_bg"],
+            border=f"1px solid {COLORS['border']}",
+            border_radius=SPACING["border_radius_md"],
+            padding="0.75em",
+            width="100%",
+            max_width=SPACING["message_max_width"],
+            margin_x="auto",
+            margin_bottom="0.5em",
+        ),
+    )
+
+
 def input_bar() -> rx.Component:
     """하단 고정 메시지 입력 바."""
     return rx.box(
         rx.vstack(
+            # 스타일 선택 패널
+            _style_panel(),
             # 입력 컨테이너 (둥근 박스)
             rx.box(
                 rx.form(

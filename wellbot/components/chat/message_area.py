@@ -73,7 +73,7 @@ def thinking_indicator() -> rx.Component:
     """AI 사고 과정 진행 중 인디케이터 (Extended Thinking)."""
     return rx.hstack(
         rx.box(
-            rx.icon("brain", size=18, color=COLORS["accent"]),
+            rx.icon("loader", size=18, color=COLORS["accent"]),
             width="30px",
             height="30px",
             border_radius="50%",

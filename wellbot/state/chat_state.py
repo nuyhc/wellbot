@@ -24,6 +24,14 @@ class ModelInfo(BaseModel):
     supports_thinking: bool
 
 
+class PromptInfo(BaseModel):
+    """프론트엔드 표시용 프롬프트 템플릿 정보."""
+
+    name: str
+    content: str
+    description: str = ""
+
+
 class Message(BaseModel):
     """개별 메시지 모델."""
 
@@ -62,7 +70,9 @@ class ChatState(rx.State):
     is_thinking: bool = False
     streaming_content: str = ""
     selected_model: str = ""
-    thinking_enabled: bool = True
+    thinking_enabled: bool = False
+    selected_prompt: str = "default"
+    show_style_panel: bool = False
 
     def _ensure_conversation(self) -> None:
         """대화가 없으면 새로 생성한다."""
@@ -167,6 +177,29 @@ class ChatState(rx.State):
         except Exception:
             return False
 
+    @rx.var
+    def prompt_list(self) -> list[PromptInfo]:
+        """사용 가능한 프롬프트 템플릿 목록."""
+        try:
+            cfg = get_config()
+            return [
+                PromptInfo(name=p.name, content=p.content, description=p.description)
+                for p in cfg.prompts
+            ]
+        except Exception as e:
+            print(f"[prompt_list] 프롬프트 로드 실패: {e}")
+            return []
+
+    @rx.var
+    def current_system_prompt(self) -> str:
+        """현재 선택된 시스템 프롬프트 내용."""
+        try:
+            cfg = get_config()
+            p = cfg.get_prompt(self.selected_prompt)
+            return p.content if p else cfg.system_prompt
+        except Exception:
+            return ""
+
     # ── Event handlers ──
 
     def on_load(self) -> None:
@@ -181,16 +214,20 @@ class ChatState(rx.State):
     def set_model(self, name: str) -> None:
         """사용 모델을 변경한다."""
         self.selected_model = name
-        try:
-            cfg = get_config()
-            model = cfg.get_model(name)
-            self.thinking_enabled = bool(model and model.thinking)
-        except Exception:
-            self.thinking_enabled = False
+        self.thinking_enabled = False
 
     def toggle_thinking(self, checked: bool) -> None:
         """thinking 활성화/비활성화를 토글한다."""
         self.thinking_enabled = checked
+
+    def toggle_style_panel(self) -> None:
+        """스타일 패널 표시/숨김을 토글한다."""
+        self.show_style_panel = not self.show_style_panel
+
+    def select_prompt(self, name: str) -> None:
+        """시스템 프롬프트 템플릿을 선택하고 패널을 닫는다."""
+        self.selected_prompt = name
+        self.show_style_panel = False
 
     def create_new_conversation(self) -> None:
         """새 대화를 생성한다."""
@@ -259,15 +296,18 @@ class ChatState(rx.State):
             ]
             model_name = self.selected_model
             use_thinking = self.thinking_enabled
+            prompt_name = self.selected_prompt
 
         # 2. Bedrock 스트리밍 호출
         content = ""
         try:
             cfg = get_config()
             model = cfg.get_model(model_name) or cfg.default_model
+            prompt = cfg.get_prompt(prompt_name)
+            system_prompt = prompt.content if prompt else cfg.system_prompt
 
             async for event_type, chunk in astream_chat(
-                api_messages, model, cfg.system_prompt,
+                api_messages, model, system_prompt,
                 thinking_enabled=use_thinking,
             ):
                 if event_type == "thinking":
