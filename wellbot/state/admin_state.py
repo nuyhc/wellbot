@@ -1,0 +1,282 @@
+"""Admin 상태 관리 - AdminState.
+
+관리자 인증(env + DB 이중), 부서/사원/에이전트 CRUD 상태를 담당한다.
+"""
+
+import os
+
+import reflex as rx
+from dotenv import load_dotenv
+
+from wellbot.services import admin_service
+
+load_dotenv()
+
+
+class AdminState(rx.State):
+    """관리 페이지 상태."""
+
+    # ── 인증 ──
+    is_authenticated: bool = False
+    auth_emp_no: str = ""
+    auth_password: str = ""
+    auth_error: str = ""
+    admin_label: str = ""  # 로그인한 관리자 표시명
+
+    # ── 탭 ──
+    active_tab: str = "dept"
+
+    # ── 데이터 목록 ──
+    depts: list[dict] = []
+    employees: list[dict] = []
+    agents: list[dict] = []
+
+    # ── 모달 ──
+    show_modal: bool = False
+    modal_mode: str = ""  # "dept" | "employee" | "agent"
+    is_editing: bool = False
+    form_data: dict = {}
+    error_message: str = ""
+    success_message: str = ""
+
+    # ── 인증 이벤트 ──
+
+    def set_auth_emp_no(self, value: str) -> None:
+        self.auth_emp_no = value
+        self.auth_error = ""
+
+    def set_auth_password(self, value: str) -> None:
+        self.auth_password = value
+        self.auth_error = ""
+
+    def check_admin_auth(self) -> None:
+        """관리자 인증: .env 비밀번호 또는 DB ADMIN 계정."""
+        password = self.auth_password.strip()
+        emp_no = self.auth_emp_no.strip()
+
+        if not password:
+            self.auth_error = "비밀번호를 입력해주세요."
+            return
+
+        # 1) 사원번호 없이 비밀번호만 → .env ADMIN_PASSWORD 체크
+        if not emp_no:
+            env_pw = os.environ.get("ADMIN_PASSWORD", "")
+            if password == env_pw:
+                self.is_authenticated = True
+                self.admin_label = "SUPER"
+                self.auth_error = ""
+                self._load_all()
+                return
+            self.auth_error = "비밀번호가 올바르지 않습니다."
+            return
+
+        # 2) 사원번호 + 비밀번호 → DB 인증
+        if admin_service.authenticate_admin(emp_no, password):
+            self.is_authenticated = True
+            self.admin_label = emp_no
+            self.auth_error = ""
+            self._load_all()
+            return
+
+        self.auth_error = "사원번호 또는 비밀번호가 올바르지 않습니다."
+
+    def admin_logout(self) -> rx.event.EventSpec:
+        """로그아웃."""
+        self.is_authenticated = False
+        self.admin_label = ""
+        self.auth_emp_no = ""
+        self.auth_password = ""
+        self.auth_error = ""
+        return rx.redirect("/admin")  # type: ignore[return-value]
+
+    # ── Computed vars ──
+
+    @rx.var
+    def dept_options(self) -> list[str]:
+        """부서 select용 옵션 목록 ('코드 - 부서명')."""
+        return [
+            f"{d.get('dept_cd', '')} - {d.get('dept_nm', '')}"
+            for d in self.depts
+        ]
+
+    @rx.var
+    def dept_codes(self) -> list[str]:
+        """부서 코드만 추출한 목록."""
+        return [d.get("dept_cd", "") for d in self.depts]
+
+    # ── 데이터 로드 ──
+
+    def _load_all(self) -> None:
+        self.load_depts()
+        self.load_employees()
+        self.load_agents()
+
+    def load_depts(self) -> None:
+        try:
+            self.depts = admin_service.list_depts()
+        except Exception as e:
+            self.error_message = f"부서 로드 실패: {e}"
+
+    def load_employees(self) -> None:
+        try:
+            self.employees = admin_service.list_employees()
+        except Exception as e:
+            self.error_message = f"사원 로드 실패: {e}"
+
+    def load_agents(self) -> None:
+        try:
+            self.agents = admin_service.list_agents()
+        except Exception as e:
+            self.error_message = f"에이전트 로드 실패: {e}"
+
+    def on_admin_load(self) -> None:
+        """페이지 로드 시: 인증 상태면 데이터 로드."""
+        if self.is_authenticated:
+            self._load_all()
+
+    def set_active_tab(self, tab: str) -> None:
+        self.active_tab = tab
+
+    # ── 모달 제어 ──
+
+    def open_create_modal(self, mode: str) -> None:
+        self.modal_mode = mode
+        self.is_editing = False
+        self.form_data = {}
+        self.error_message = ""
+        self.show_modal = True
+
+    def open_edit_modal(self, mode: str, data: dict) -> None:
+        self.modal_mode = mode
+        self.is_editing = True
+        self.form_data = dict(data)
+        self.error_message = ""
+        self.show_modal = True
+
+    def close_modal(self) -> None:
+        self.show_modal = False
+        self.form_data = {}
+        self.error_message = ""
+
+    def set_form_field(self, field: str, value: str) -> None:
+        self.form_data = {**self.form_data, field: value}
+
+    # ── CRUD 이벤트 ──
+
+    def save_dept(self) -> None:
+        """부서 생성/수정."""
+        try:
+            fd = self.form_data
+            if not fd.get("dept_cd") or not fd.get("dept_nm"):
+                self.error_message = "부서코드와 부서명은 필수입니다."
+                return
+            dd = int(fd["dd_clby_tokn_ecnt"]) if fd.get("dd_clby_tokn_ecnt") else None
+            mm = int(fd["mm_clby_tokn_ecnt"]) if fd.get("mm_clby_tokn_ecnt") else None
+            if self.is_editing:
+                admin_service.update_dept(
+                    fd["dept_cd"], dept_nm=fd.get("dept_nm"),
+                    dd_clby_tokn_ecnt=dd, mm_clby_tokn_ecnt=mm,
+                )
+            else:
+                admin_service.create_dept(fd["dept_cd"], fd["dept_nm"], dd, mm)
+            self.close_modal()
+            self.load_depts()
+            self.success_message = "부서가 저장되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
+
+    def delete_dept(self, dept_cd: str) -> None:
+        """부서 삭제."""
+        try:
+            admin_service.delete_dept(dept_cd)
+            self.load_depts()
+            self.success_message = "부서가 삭제되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
+
+    def save_employee(self) -> None:
+        """사원 생성/수정."""
+        try:
+            fd = self.form_data
+            if not fd.get("emp_no") or not fd.get("user_nm"):
+                self.error_message = "사원번호와 사용자명은 필수입니다."
+                return
+            if self.is_editing:
+                kwargs: dict = {
+                    "user_nm": fd.get("user_nm", ""),
+                    "user_role_nm": fd.get("user_role_nm", "USER"),
+                    "pstn_dept_cd": fd.get("pstn_dept_cd", ""),
+                    "acnt_sts_nm": fd.get("acnt_sts_nm", "ACTIVE"),
+                }
+                if fd.get("password"):
+                    kwargs["password"] = fd["password"]
+                admin_service.update_employee(fd["emp_no"], **kwargs)
+            else:
+                if not fd.get("password"):
+                    self.error_message = "비밀번호는 필수입니다."
+                    return
+                admin_service.create_employee(
+                    emp_no=fd["emp_no"],
+                    password=fd["password"],
+                    user_nm=fd["user_nm"],
+                    user_role_nm=fd.get("user_role_nm", "USER"),
+                    pstn_dept_cd=fd.get("pstn_dept_cd", ""),
+                    acnt_sts_nm=fd.get("acnt_sts_nm", "ACTIVE"),
+                )
+            self.close_modal()
+            self.load_employees()
+            self.success_message = "사원이 저장되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
+
+    def delete_employee(self, emp_no: str) -> None:
+        """사원 삭제."""
+        try:
+            admin_service.delete_employee(emp_no)
+            self.load_employees()
+            self.success_message = "사원이 삭제되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
+
+    def save_agent(self) -> None:
+        """에이전트 생성/수정."""
+        try:
+            fd = self.form_data
+            if not fd.get("agnt_id") or not fd.get("agnt_nm"):
+                self.error_message = "에이전트ID와 에이전트명은 필수입니다."
+                return
+            seq = int(fd.get("agnt_seq", 1))
+            if self.is_editing:
+                admin_service.update_agent(
+                    fd["agnt_id"], seq,
+                    agnt_nm=fd.get("agnt_nm"),
+                    agnt_frwk_nm=fd.get("agnt_frwk_nm", ""),
+                    agnt_path_addr=fd.get("agnt_path_addr", ""),
+                    agnt_dscr_cntt=fd.get("agnt_dscr_cntt", ""),
+                    use_yn=fd.get("use_yn", "Y"),
+                )
+            else:
+                admin_service.create_agent(
+                    agnt_id=fd["agnt_id"],
+                    agnt_seq=seq,
+                    agnt_nm=fd["agnt_nm"],
+                    agnt_frwk_nm=fd.get("agnt_frwk_nm", ""),
+                    agnt_path_addr=fd.get("agnt_path_addr", ""),
+                    agnt_dscr_cntt=fd.get("agnt_dscr_cntt", ""),
+                    use_yn=fd.get("use_yn", "Y"),
+                )
+            self.close_modal()
+            self.load_agents()
+            self.success_message = "에이전트가 저장되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
+
+    def delete_agent(self, key: str) -> None:
+        """에이전트 삭제 (key = 'agnt_id|agnt_seq')."""
+        try:
+            parts = key.split("|")
+            admin_service.delete_agent(parts[0], int(parts[1]))
+            self.load_agents()
+            self.success_message = "에이전트가 삭제되었습니다."
+        except Exception as e:
+            self.error_message = str(e)
