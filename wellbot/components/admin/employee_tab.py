@@ -19,7 +19,11 @@ def _emp_row(emp: dict) -> rx.Component:
                 emp["acnt_sts_nm"],
                 size="1",
                 variant="soft",
-                color_scheme=rx.cond(emp["acnt_sts_nm"] == "ACTIVE", "green", "red"),
+                color_scheme=rx.cond(
+                    emp["acnt_sts_nm"] == "ACTIVE",
+                    "green",
+                    rx.cond(emp["acnt_sts_nm"] == "PENDING", "yellow", "red"),
+                ),
             ),
         ),
         rx.table.cell(
@@ -104,7 +108,7 @@ def employee_modal() -> rx.Component:
                 ),
                 rx.text("계정 상태", size="2", weight="medium"),
                 rx.select(
-                    ["ACTIVE", "LOCKED", "DISABLED"],
+                    ["ACTIVE", "PENDING", "LOCKED", "DISABLED"],
                     value=AdminState.form_data.get("acnt_sts_nm", "ACTIVE"),
                     on_change=lambda v: AdminState.set_form_field("acnt_sts_nm", v),
                 ),

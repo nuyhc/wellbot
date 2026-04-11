@@ -7,6 +7,7 @@ ChatGPT/Gemini 스타일 사이드바.
 import reflex as rx
 
 from wellbot.components.sidebar.conversation_list import conversation_list
+from wellbot.state.auth_state import AuthState
 from wellbot.state.chat_state import ChatState
 from wellbot.state.ui_state import UIState
 from wellbot.styles import COLORS, SPACING
@@ -63,8 +64,8 @@ def search_box() -> rx.Component:
     )
 
 
-def user_profile_placeholder() -> rx.Component:
-    """사용자 프로필 placeholder."""
+def user_profile() -> rx.Component:
+    """인증된 사용자 정보 + 로그아웃."""
     return rx.hstack(
         rx.box(
             rx.icon("user", size=16, color=COLORS["text_primary"]),
@@ -77,19 +78,35 @@ def user_profile_placeholder() -> rx.Component:
             justify_content="center",
             flex_shrink="0",
         ),
-        rx.text(
-            "사용자",
-            size="2",
-            color=COLORS["text_primary"],
-            weight="medium",
+        rx.vstack(
+            rx.text(
+                AuthState.current_user_nm,
+                size="2",
+                color=COLORS["text_primary"],
+                weight="medium",
+            ),
+            rx.text(
+                AuthState.current_emp_no,
+                size="1",
+                color=COLORS["text_secondary"],
+            ),
+            spacing="0",
+        ),
+        rx.spacer(),
+        rx.icon_button(
+            rx.icon("log-out", size=14),
+            variant="ghost",
+            size="1",
+            cursor="pointer",
+            on_click=AuthState.logout,
+            color=COLORS["text_secondary"],
+            _hover={"color": COLORS["text_primary"]},
         ),
         width="100%",
         align="center",
         spacing="2",
         padding="0.75em",
-        cursor="pointer",
         border_radius=SPACING["border_radius_sm"],
-        _hover={"bg": COLORS["sidebar_hover"]},
     )
 
 
@@ -98,7 +115,7 @@ def sidebar_footer() -> rx.Component:
     return rx.box(
         rx.separator(color_scheme="gray", size="4"),
         rx.box(
-            user_profile_placeholder(),
+            user_profile(),
             padding_x="0.5em",
             padding_y="0.5em",
         ),

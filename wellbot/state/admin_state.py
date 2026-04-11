@@ -136,6 +136,7 @@ class AdminState(rx.State):
 
     def set_active_tab(self, tab: str) -> None:
         self.active_tab = tab
+        self.success_message = ""
 
     # ── 모달 제어 ──
 
@@ -144,6 +145,7 @@ class AdminState(rx.State):
         self.is_editing = False
         self.form_data = {}
         self.error_message = ""
+        self.success_message = ""
         self.show_modal = True
 
     def open_edit_modal(self, mode: str, data: dict) -> None:
@@ -151,6 +153,7 @@ class AdminState(rx.State):
         self.is_editing = True
         self.form_data = dict(data)
         self.error_message = ""
+        self.success_message = ""
         self.show_modal = True
 
     def close_modal(self) -> None:

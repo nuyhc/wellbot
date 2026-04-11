@@ -1,14 +1,210 @@
 """인증 상태 관리 - AuthState.
 
-MySQL DB 기반 로그인/로그아웃, bcrypt 비밀번호 검증, JWT 발급을 담당한다.
-Phase 4에서 구현 예정.
+rx.Cookie 기반 세션 토큰 + DB 검증으로 로그인 상태를 유지한다.
 """
 
 import reflex as rx
 
+from wellbot.services import auth_service
+
 
 class AuthState(rx.State):
-    """인증 관련 상태를 관리하는 State 클래스."""
+    """인증 관련 상태."""
 
-    # Phase 4에서 구현
-    pass
+    # ── 폼 입력 ──
+    login_emp_no: str = ""
+    login_password: str = ""
+    login_error: str = ""
+    is_logging_in: bool = False
+
+    # ── 세션 (쿠키 연동) ──
+    # 초단위: 10800 = 3시간, 86400 = 24시간
+    auth_token: str = rx.Cookie(name="wellbot_auth", max_age=10800)
+
+    # ── 사용자 정보 ──
+    is_authenticated: bool = False
+    current_emp_no: str = ""
+    current_user_nm: str = ""
+    current_user_role: str = ""
+    current_dept_cd: str = ""
+
+    # ── 폼 핸들러 ──
+
+    def set_login_emp_no(self, value: str) -> None:
+        self.login_emp_no = value
+        self.login_error = ""
+
+    def set_login_password(self, value: str) -> None:
+        self.login_password = value
+        self.login_error = ""
+
+    # ── 로그인 ──
+
+    def handle_login(self, _form_data: dict | None = None) -> rx.event.EventSpec | None:
+        """로그인 처리."""
+        emp_no = self.login_emp_no.strip()
+        password = self.login_password.strip()
+
+        if not emp_no or not password:
+            self.login_error = "사원번호와 비밀번호를 입력해주세요."
+            return None
+
+        self.is_logging_in = True
+        result = auth_service.authenticate_user(emp_no, password)
+
+        if not result["success"]:
+            self.login_error = result["error"]
+            self.is_logging_in = False
+            return None
+
+        # 토큰 생성 + 쿠키 저장
+        token = auth_service.create_session_token(emp_no)
+        self.auth_token = token
+
+        user = result["user"]
+        self._set_user_info(user)
+
+        self.login_emp_no = ""
+        self.login_password = ""
+        self.login_error = ""
+        self.is_logging_in = False
+
+        return rx.redirect("/")
+
+    def _set_user_info(self, user: dict) -> None:
+        """사용자 정보를 State에 반영."""
+        self.is_authenticated = True
+        self.current_emp_no = user.get("emp_no", "")
+        self.current_user_nm = user.get("user_nm", "")
+        self.current_user_role = user.get("user_role_nm", "")
+        self.current_dept_cd = user.get("pstn_dept_cd", "")
+
+    # ── 인증 확인 (on_load) ──
+
+    def check_auth(self) -> rx.event.EventSpec | None:
+        """페이지 로드 시 인증 확인. 미인증이면 /login으로 리다이렉트."""
+        if not self.auth_token:
+            self.is_authenticated = False
+            return rx.redirect("/login")
+
+        user = auth_service.validate_session_token(self.auth_token)
+        if not user:
+            self.auth_token = ""
+            self.is_authenticated = False
+            return rx.redirect("/login")
+
+        self._set_user_info(user)
+        return None
+
+    def check_login_page(self) -> rx.event.EventSpec | None:
+        """로그인 페이지 로드 시: 이미 인증되었으면 /로 리다이렉트."""
+        if not self.auth_token:
+            return None
+
+        user = auth_service.validate_session_token(self.auth_token)
+        if user:
+            self._set_user_info(user)
+            return rx.redirect("/")
+
+        self.auth_token = ""
+        return None
+
+    # ── 로그아웃 ──
+
+    def logout(self) -> rx.event.EventSpec:
+        """로그아웃: 토큰 폐기 + 쿠키 삭제."""
+        if self.auth_token:
+            auth_service.invalidate_session_token(self.auth_token)
+
+        self.auth_token = ""
+        self.is_authenticated = False
+        self.current_emp_no = ""
+        self.current_user_nm = ""
+        self.current_user_role = ""
+        self.current_dept_cd = ""
+
+        return rx.redirect("/login")
+
+    # ── 회원가입 ──
+
+    _reg_dept_options: list[dict] = []
+
+    def load_dept_list(self) -> None:
+        """회원가입 페이지 로드 시 부서 목록 조회."""
+        self._reg_dept_options = auth_service.list_dept_options()
+
+    @rx.var
+    def reg_dept_names(self) -> list[str]:
+        """부서명 목록 (드롭다운 표시용)."""
+        return [d.get("name", "") for d in self._reg_dept_options]
+
+    def _dept_name_to_code(self, name: str) -> str:
+        """부서명 → 부서코드 변환."""
+        for d in self._reg_dept_options:
+            if d.get("name") == name:
+                return d.get("code", "")
+        return ""
+
+    reg_emp_no: str = ""
+    reg_password: str = ""
+    reg_password_confirm: str = ""
+    reg_user_nm: str = ""
+    reg_dept_cd: str = ""
+    reg_error: str = ""
+    reg_success: bool = False
+    is_registering: bool = False
+
+    def set_reg_emp_no(self, value: str) -> None:
+        self.reg_emp_no = value
+        self.reg_error = ""
+
+    def set_reg_password(self, value: str) -> None:
+        self.reg_password = value
+        self.reg_error = ""
+
+    def set_reg_password_confirm(self, value: str) -> None:
+        self.reg_password_confirm = value
+        self.reg_error = ""
+
+    def set_reg_user_nm(self, value: str) -> None:
+        self.reg_user_nm = value
+        self.reg_error = ""
+
+    reg_dept_display: str = ""  # 드롭다운에 표시되는 부서명
+
+    def set_reg_dept(self, dept_name: str) -> None:
+        """부서 선택 시 부서명 → 부서코드 변환."""
+        self.reg_dept_display = dept_name
+        self.reg_dept_cd = self._dept_name_to_code(dept_name)
+        self.reg_error = ""
+
+    def handle_register(self, _form_data: dict | None = None) -> None:
+        """회원가입 처리."""
+        emp_no = self.reg_emp_no.strip()
+        password = self.reg_password
+        confirm = self.reg_password_confirm
+        user_nm = self.reg_user_nm.strip()
+        dept_cd = self.reg_dept_cd.strip()
+
+        if not emp_no or not password or not user_nm or not dept_cd:
+            self.reg_error = "사원번호, 비밀번호, 이름, 부서코드는 필수입니다."
+            return
+
+        if password != confirm:
+            self.reg_error = "비밀번호가 일치하지 않습니다."
+            return
+
+        if len(password) < 4:
+            self.reg_error = "비밀번호는 4자 이상이어야 합니다."
+            return
+
+        self.is_registering = True
+        result = auth_service.register_user(emp_no, password, user_nm, dept_cd)
+
+        if not result["success"]:
+            self.reg_error = result["error"]
+            self.is_registering = False
+            return
+
+        self.reg_success = True
+        self.is_registering = False
