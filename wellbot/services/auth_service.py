@@ -16,6 +16,8 @@ from wellbot.services.database import get_session
 load_dotenv()
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET 환경변수가 설정되지 않았습니다.")
 TOKEN_EXPIRE_HOURS = 24
 LOCK_THRESHOLD = 5
 LOCK_DURATION_MINUTES = 30

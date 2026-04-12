@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 load_dotenv()
 
-DB_URL = os.environ.get(
-    "DB_URL", "mysql+pymysql://app:StrongPass!@localhost:3306/wellbot"
-)
+DB_URL = os.environ.get("DB_URL")
+if not DB_URL:
+    raise RuntimeError("DB_URL 환경변수가 설정되지 않았습니다.")
 
 engine = create_engine(DB_URL, echo=False, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine)

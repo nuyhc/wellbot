@@ -18,8 +18,11 @@ class AuthState(rx.State):
     is_logging_in: bool = False
 
     # ── 세션 (쿠키 연동) ──
-    # 초단위: 10800 = 3시간, 86400 = 24시간
-    auth_token: str = rx.Cookie(name="wellbot_auth", max_age=10800)
+    auth_token: str = rx.Cookie(
+        name="wellbot_auth",
+        max_age=86400,  # 24시간 (JWT 만료와 일치)
+        same_site="lax",
+    )
 
     # ── 사용자 정보 ──
     is_authenticated: bool = False
@@ -194,8 +197,8 @@ class AuthState(rx.State):
             self.reg_error = "비밀번호가 일치하지 않습니다."
             return
 
-        if len(password) < 4:
-            self.reg_error = "비밀번호는 4자 이상이어야 합니다."
+        if len(password) < 8:
+            self.reg_error = "비밀번호는 8자 이상이어야 합니다."
             return
 
         self.is_registering = True

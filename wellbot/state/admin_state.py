@@ -3,6 +3,7 @@
 관리자 인증(env + DB 이중), 부서/사원/에이전트 CRUD 상태를 담당한다.
 """
 
+import hmac
 import os
 
 import reflex as rx
@@ -61,7 +62,7 @@ class AdminState(rx.State):
         # 1) 사원번호 없이 비밀번호만 → .env ADMIN_PASSWORD 체크
         if not emp_no:
             env_pw = os.environ.get("ADMIN_PASSWORD", "")
-            if password == env_pw:
+            if hmac.compare_digest(password, env_pw):
                 self.is_authenticated = True
                 self.admin_label = "SUPER"
                 self.auth_error = ""
@@ -129,10 +130,21 @@ class AdminState(rx.State):
         except Exception as e:
             self.error_message = f"에이전트 로드 실패: {e}"
 
-    def on_admin_load(self) -> None:
-        """페이지 로드 시: 인증 상태면 데이터 로드."""
-        if self.is_authenticated:
-            self._load_all()
+    async def on_admin_load(self) -> rx.event.EventSpec | None:
+        """페이지 로드 시: AuthState ADMIN 역할이면 자동 인증, 아니면 비밀번호 요구."""
+        if not self.is_authenticated:
+            # 메인 로그인에서 ADMIN 역할로 인증된 경우 자동 통과
+            from wellbot.state.auth_state import AuthState
+            auth = await self.get_state(AuthState)
+            if auth.is_authenticated and auth.current_user_role == "ADMIN":
+                self.is_authenticated = True
+                self.admin_label = auth.current_emp_no
+                self._load_all()
+                return None
+            # 미인증 상태 → 관리자 로그인 폼 표시 (리다이렉트 아님)
+            return None
+        self._load_all()
+        return None
 
     def set_active_tab(self, tab: str) -> None:
         self.active_tab = tab

@@ -82,21 +82,25 @@ def stream_chat(
     response = client.converse_stream(**kwargs)
 
     for event in response["stream"]:
-        if "contentBlockDelta" not in event:
-            continue
+        if "contentBlockDelta" in event:
+            delta = event["contentBlockDelta"].get("delta", {})
 
-        delta = event["contentBlockDelta"].get("delta", {})
+            # 텍스트 응답
+            if "text" in delta:
+                yield ("text", delta["text"])
 
-        # 텍스트 응답
-        if "text" in delta:
-            yield ("text", delta["text"])
+            # 사고 과정 (reasoningContent 형식)
+            elif "reasoningContent" in delta:
+                rc = delta["reasoningContent"]
+                text = rc.get("text", "") if isinstance(rc, dict) else str(rc)
+                if text:
+                    yield ("thinking", text)
 
-        # 사고 과정 (reasoningContent 형식)
-        elif "reasoningContent" in delta:
-            rc = delta["reasoningContent"]
-            text = rc.get("text", "") if isinstance(rc, dict) else str(rc)
-            if text:
-                yield ("thinking", text)
+        # 토큰 사용량 (스트림 마지막에 반환됨)
+        elif "metadata" in event:
+            usage = event["metadata"].get("usage", {})
+            if usage:
+                yield ("usage", usage)
 
 
 def _safe_next(
