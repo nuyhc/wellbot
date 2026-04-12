@@ -8,6 +8,7 @@ import bcrypt
 import jwt
 from dotenv import load_dotenv
 
+from wellbot.constants import LOCK_DURATION_MINUTES, LOCK_THRESHOLD, TOKEN_EXPIRE_HOURS
 from wellbot.models.auth_token import CrtfToknN
 from wellbot.models.dept import DeptM
 from wellbot.models.employee import EmpM
@@ -18,9 +19,6 @@ load_dotenv()
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET 환경변수가 설정되지 않았습니다.")
-TOKEN_EXPIRE_HOURS = 24
-LOCK_THRESHOLD = 5
-LOCK_DURATION_MINUTES = 30
 
 
 def authenticate_user(emp_no: str, password: str) -> dict:

@@ -103,10 +103,11 @@ def stream_chat(
                 yield ("usage", usage)
 
 
-TITLE_MODEL_ID = "apac.amazon.nova-lite-v1:0"
-TITLE_SYSTEM_PROMPT = (
-    "대화의 첫 질문과 응답을 보고, 이 대화를 대표하는 짧은 제목을 한국어로 만들어주세요. "
-    "15자 이내로, 제목만 출력하세요. 따옴표나 부가 설명 없이 제목 텍스트만 응답하세요."
+from wellbot.constants import (
+    TITLE_MAX_TOKENS,
+    TITLE_MODEL_ID,
+    TITLE_SYSTEM_PROMPT,
+    TITLE_TEMPERATURE,
 )
 
 
@@ -124,7 +125,7 @@ def generate_title(user_msg: str, assistant_msg: str) -> str:
             modelId=TITLE_MODEL_ID,
             messages=messages,
             system=[{"text": TITLE_SYSTEM_PROMPT}],
-            inferenceConfig={"maxTokens": 30, "temperature": 0.3},
+            inferenceConfig={"maxTokens": TITLE_MAX_TOKENS, "temperature": TITLE_TEMPERATURE},
         )
         output = response.get("output", {})
         content = output.get("message", {}).get("content", [])

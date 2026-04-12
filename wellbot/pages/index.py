@@ -9,18 +9,19 @@ import reflex as rx
 from wellbot.components.chat.input_bar import input_bar
 from wellbot.components.chat.message_area import message_area
 from wellbot.components.layout import chat_layout
+from wellbot.constants import BTN_THRESHOLD, SCROLL_THRESHOLD
 
 
 # 자동 스크롤 JavaScript
 # - MutationObserver로 메시지 영역 내 DOM 변경 감지
-# - 사용자가 하단 근처(100px 이내)에 있을 때만 자동 스크롤
+# - 사용자가 하단 근처에 있을 때만 자동 스크롤
 # - 사용자가 위로 스크롤하면 자동 스크롤 중단
 # - "맨 아래로" 버튼 표시/숨김 제어
 # - setInterval로 DOM 준비될 때까지 폴링
 AUTO_SCROLL_SCRIPT = """
 (function initAutoScroll() {
-    var SCROLL_THRESHOLD = 100;  // 자동 스크롤 유지 판정
-    var BTN_THRESHOLD = 30;     // 버튼 표시 판정
+    var SCROLL_THRESHOLD = __SCROLL_THRESHOLD__;
+    var BTN_THRESHOLD = __BTN_THRESHOLD__;
 
     function setup() {
         var el = document.getElementById('message-area');
@@ -99,7 +100,7 @@ AUTO_SCROLL_SCRIPT = """
         }, 100);
     }
 })();
-"""
+""".replace("__SCROLL_THRESHOLD__", str(SCROLL_THRESHOLD)).replace("__BTN_THRESHOLD__", str(BTN_THRESHOLD))
 
 
 def chat_main() -> rx.Component:

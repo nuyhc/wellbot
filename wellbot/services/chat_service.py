@@ -5,11 +5,10 @@ from decimal import Decimal
 
 from sqlalchemy import func
 
+from wellbot.constants import CONVERSATION_LIMIT
 from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_summary import ChtbSmryD
 from wellbot.services.database import get_session
-
-CONVERSATION_LIMIT = 30
 
 
 def _verify_ownership(session, smry_id: str, emp_no: str) -> ChtbSmryD | None:

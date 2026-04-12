@@ -10,12 +10,10 @@ import uuid
 from pydantic import BaseModel
 import reflex as rx
 
+from wellbot.constants import DEFAULT_CONVERSATION_TITLE, TITLE_MAX_LENGTH
 from wellbot.services.bedrock_client import astream_chat, generate_title
 from wellbot.services import chat_service
 from wellbot.services.config import get_config
-
-
-TITLE_MAX_LENGTH: int = 30
 
 
 class ModelInfo(BaseModel):
@@ -61,7 +59,7 @@ def _new_conversation() -> Conversation:
     now = time.time()
     return Conversation(
         id=str(uuid.uuid4()),
-        title="새 대화",
+        title=DEFAULT_CONVERSATION_TITLE,
         messages=[],
         created_at=now,
         is_loaded=True,
