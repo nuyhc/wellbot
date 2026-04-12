@@ -103,6 +103,38 @@ def stream_chat(
                 yield ("usage", usage)
 
 
+TITLE_MODEL_ID = "apac.amazon.nova-lite-v1:0"
+TITLE_SYSTEM_PROMPT = (
+    "대화의 첫 질문과 응답을 보고, 이 대화를 대표하는 짧은 제목을 한국어로 만들어주세요. "
+    "15자 이내로, 제목만 출력하세요. 따옴표나 부가 설명 없이 제목 텍스트만 응답하세요."
+)
+
+
+def generate_title(user_msg: str, assistant_msg: str) -> str:
+    """경량 모델로 대화 제목을 생성한다."""
+    client = _get_client()
+    messages = [
+        {
+            "role": "user",
+            "content": [{"text": f"질문: {user_msg}\n\n답변: {assistant_msg}"}],
+        },
+    ]
+    try:
+        response = client.converse(
+            modelId=TITLE_MODEL_ID,
+            messages=messages,
+            system=[{"text": TITLE_SYSTEM_PROMPT}],
+            inferenceConfig={"maxTokens": 30, "temperature": 0.3},
+        )
+        output = response.get("output", {})
+        content = output.get("message", {}).get("content", [])
+        if content and "text" in content[0]:
+            return content[0]["text"].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return ""
+
+
 def _safe_next(
     gen: Generator[tuple[str, str], None, None],
 ) -> tuple[bool, tuple[str, str] | None]:

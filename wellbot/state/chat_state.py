@@ -10,7 +10,7 @@ import uuid
 from pydantic import BaseModel
 import reflex as rx
 
-from wellbot.services.bedrock_client import astream_chat
+from wellbot.services.bedrock_client import astream_chat, generate_title
 from wellbot.services import chat_service
 from wellbot.services.config import get_config
 
@@ -505,3 +505,16 @@ class ChatState(rx.State):
                 output_tokens=output_tokens,
                 reply_time=elapsed,
             )
+
+        # 4. 첫 메시지 교환 후 LLM으로 제목 생성
+        if is_first_msg and content and emp_no:
+            try:
+                generated = generate_title(text, content)
+                if generated:
+                    chat_service.update_conversation_title(conv_id, generated, emp_no)
+                    async with self:
+                        idx = self._get_current_index()
+                        if idx is not None:
+                            self._update_conversation(idx, title=generated)
+            except Exception:
+                pass
