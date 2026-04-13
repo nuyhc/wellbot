@@ -1,0 +1,33 @@
+"""챗봇메시지첨부파일상세 (chtb_msg_atch_file_d) model."""
+
+from datetime import datetime
+
+from sqlalchemy import BigInteger, DateTime, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from .base import Base
+
+
+class ChtbMsgAtchFileD(Base):
+    """챗봇메시지첨부파일상세 - 챗봇 메시지와 첨부파일의 매핑."""
+
+    __tablename__ = "chtb_msg_atch_file_d"
+
+    chtb_tlk_id: Mapped[str] = mapped_column(
+        "CHTB_TLK_ID", String(50), primary_key=True, comment="챗봇대화아이디",
+    )
+    atch_file_no: Mapped[int] = mapped_column(
+        "ATCH_FILE_NO", BigInteger, primary_key=True, comment="첨부파일번호",
+    )
+    rgst_dtm: Mapped[datetime | None] = mapped_column(
+        "RGST_DTM", DateTime, comment="등록일시",
+    )
+    rgsr_id: Mapped[str | None] = mapped_column(
+        "RGSR_ID", String(20), comment="등록자아이디",
+    )
+    upd_dtm: Mapped[datetime | None] = mapped_column(
+        "UPD_DTM", DateTime, comment="수정일시",
+    )
+    uppr_id: Mapped[str | None] = mapped_column(
+        "UPPR_ID", String(20), comment="수정자아이디",
+    )
