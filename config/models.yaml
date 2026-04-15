@@ -8,6 +8,8 @@ models:
     temperature: 0.7
     thinking: true
     thinking_budget: 5000
+    supports_vision: true
+    supports_document: true
 
   - name: "Claude Opus 4.6"
     description: "고난도 작업에 가장 강력함"
@@ -18,6 +20,8 @@ models:
     temperature: 0.7
     thinking: true
     thinking_budget: 8000
+    supports_vision: true
+    supports_document: true
 
   - name: "Amazon Nova Pro"
     description: "균형 잡힌 성능과 비용"
@@ -27,6 +31,8 @@ models:
     max_tokens: 1024
     temperature: 0.7
     top_p: 0.9
+    supports_vision: true
+    supports_document: true
 
   - name: "Amazon Nova Lite"
     description: "가장 빠른 답변"
@@ -36,3 +42,5 @@ models:
     max_tokens: 1024
     temperature: 0.7
     top_p: 0.9
+    supports_vision: true
+    supports_document: true

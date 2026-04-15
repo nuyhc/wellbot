@@ -27,3 +27,53 @@ TITLE_SYSTEM_PROMPT: str = (
 # ── UI ──
 SCROLL_THRESHOLD: int = 100        # 자동 스크롤 유지 판정(px)
 BTN_THRESHOLD: int = 30            # 스크롤 버튼 표시 판정(px)
+
+# ── 파일 첨부 ──
+FILE_MAX_SIZE_MB: int = 50                # 파일 단일 최대 크기
+FILE_MAX_PER_MESSAGE: int = 5             # 메시지당 첨부 개수
+FILE_MAX_PER_CONVERSATION: int = 20       # 대화당 누적 첨부 개수
+FILE_MAX_TOTAL_SIZE_MB: int = 200         # 대화당 누적 최대 용량
+
+# ── 파서 ──
+FILE_PARSER_MODE: str = "local"           # "local" | "upstage" | "hybrid"
+FILE_PARSER_FALLBACK: bool = True         # local 실패 시 upstage 폴백 (hybrid 모드)
+
+# ── Upstage Document Parse 공식 제약 ──
+UPSTAGE_MAX_PAGES: int = 100
+UPSTAGE_MAX_SIZE_MB: int = 50
+
+# ── 자동 분할 (PDF 전용) ──
+AUTO_SPLIT_PDF_PAGES: int = 100           # 페이지 초과 시 분할
+AUTO_SPLIT_PDF_SIZE_MB: int = 50          # 용량 초과 시 분할
+
+# ── 분할 안전 마진 ──
+SPLIT_SAFETY_PAGES: int = 90
+SPLIT_SAFETY_SIZE_MB: int = 45
+
+# ── 청킹 & 임베딩 ──
+CHUNK_SIZE_TOKENS: int = 1000
+CHUNK_OVERLAP_TOKENS: int = 200
+EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
+EMBEDDING_DIMENSION: int = 1024
+
+# ── 검색 ──
+SEARCH_TOP_K: int = 5
+TOOL_USE_MAX_ITERATIONS: int = 3          # tool 호출 무한루프 방지
+
+# ── 이미지 ──
+IMAGE_MAX_SIZE_MB: int = 5                # Bedrock Converse 제한
+IMAGE_MAX_DIMENSION: int = 8000           # px
+
+# ── FAISS 캐시 ──
+FAISS_CACHE_MAX_CONVERSATIONS: int = 10   # 메모리 LRU
+
+# ── 파일 타입 집합 ──
+AUTO_SPLITTABLE_EXTS: frozenset[str] = frozenset({".pdf"})
+IMAGE_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+UPSTAGE_SUPPORTED_EXTS: frozenset[str] = frozenset({
+    ".pdf", ".docx", ".xlsx", ".pptx", ".hwp", ".hwpx",
+    ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".bmp",
+})
+LOCAL_SUPPORTED_EXTS: frozenset[str] = frozenset({
+    ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md",
+})

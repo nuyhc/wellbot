@@ -29,6 +29,8 @@ class ModelConfig:
     thinking: bool = False
     thinking_budget: int = 0
     top_p: float | None = None
+    supports_vision: bool = False      # 이미지 입력 (Converse image block)
+    supports_document: bool = False    # document block 입력
 
 
 @dataclass(frozen=True)
