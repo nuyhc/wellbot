@@ -6,8 +6,11 @@ from decimal import Decimal
 from sqlalchemy import func
 
 from wellbot.constants import CONVERSATION_LIMIT
+from wellbot.models.attachment import AtchFileM
 from wellbot.models.chat_message import ChtbMsgD
+from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
 from wellbot.models.chat_summary import ChtbSmryD
+from wellbot.services import file_parser
 from wellbot.services.database import get_session
 
 
@@ -46,10 +49,19 @@ def list_conversations(emp_no: str) -> list[dict]:
 
 
 def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
-    """대화의 메시지 목록 조회 (소유권 검증 포함)."""
+    """대화의 메시지 목록 조회 (소유권 검증 포함).
+
+    Phase 4: user 메시지 중 첫 번째(=가장 낮은 seq) 에 대화 전체 첨부파일
+    목록을 붙여 반환한다.
+
+    Note: 현재 스키마에는 "메시지 ↔ 파일" 의 직접 매핑이 없으므로
+    (chtb_msg_atch_file_d 는 대화 단위 매핑), 대화 전체의 첨부파일을
+    첫 user 메시지 버블 아래에 카드로 표시하는 정책을 채택한다.
+    """
     with get_session() as session:
         if not _verify_ownership(session, smry_id, emp_no):
             return []
+
         rows = (
             session.query(ChtbMsgD)
             .filter(
@@ -59,16 +71,54 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
             .order_by(ChtbMsgD.chtb_tlk_seq.asc())
             .all()
         )
-        return [
+
+        # 대화 첨부파일 일괄 조회 (첫 user 메시지에만 바인딩)
+        att_rows = (
+            session.query(AtchFileM)
+            .join(
+                ChtbMsgAtchFileD,
+                ChtbMsgAtchFileD.atch_file_no == AtchFileM.atch_file_no,
+            )
+            .filter(ChtbMsgAtchFileD.chtb_tlk_id == smry_id)
+            .order_by(AtchFileM.atch_file_no.asc())
+            .all()
+        )
+        attachments = [
             {
-                "role": r.msg_role_nm or "user",
-                "content": r.chtb_msg_cntt or "",
-                "timestamp": r.rgst_dtm.timestamp() if r.rgst_dtm else 0.0,
-                "model_name": r.chtb_mdl_nm or "",
-                "seq": int(r.chtb_tlk_seq) if r.chtb_tlk_seq is not None else 0,
+                "file_no": int(a.atch_file_no),
+                "name": a.atch_file_nm or "",
+                "mime": file_parser.guess_mime(a.atch_file_nm or ""),
+                "size_bytes": 0,
+                "token_count": int(a.atch_file_tokn_ecnt or 0),
+                "status": (
+                    "ready"
+                    if a.atch_file_tokn_ecnt is not None
+                    else "processing"
+                ),
             }
-            for r in rows
+            for a in att_rows
         ]
+
+        results: list[dict] = []
+        first_user_seen = False
+        for r in rows:
+            role = r.msg_role_nm or "user"
+            item_attachments: list[dict] = []
+            if role == "user" and not first_user_seen and attachments:
+                item_attachments = attachments
+                first_user_seen = True
+
+            results.append(
+                {
+                    "role": role,
+                    "content": r.chtb_msg_cntt or "",
+                    "timestamp": r.rgst_dtm.timestamp() if r.rgst_dtm else 0.0,
+                    "model_name": r.chtb_mdl_nm or "",
+                    "seq": int(r.chtb_tlk_seq) if r.chtb_tlk_seq is not None else 0,
+                    "attachments": item_attachments,
+                }
+            )
+        return results
 
 
 def save_conversation(

@@ -8,6 +8,7 @@ ChatGPT/Claude 스타일 입력 바.
 
 import reflex as rx
 
+from wellbot.components.chat.attachment_chip import attachment_chip_list
 from wellbot.state.chat_state import ChatState, ModelInfo, PromptInfo
 from wellbot.styles import COLORS, SPACING
 
@@ -147,7 +148,11 @@ def _plus_menu_popover() -> rx.Component:
         ),
         rx.popover.content(
             rx.vstack(
-                _plus_menu_item("paperclip", "파일 추가"),
+                _plus_menu_item(
+                    "paperclip",
+                    "파일 추가",
+                    on_click=ChatState.trigger_upload,
+                ),
                 _plus_menu_item("database-search", "지식베이스"),
                 _plus_menu_item("paintbrush", "스타일", on_click=ChatState.toggle_style_panel),
                 spacing="1",
@@ -298,6 +303,8 @@ def input_bar() -> rx.Component:
             rx.box(
                 rx.form(
                     rx.vstack(
+                        # 첨부 파일 칩 영역
+                        attachment_chip_list(),
                         # 텍스트 입력 영역
                         rx.text_area(
                             value=ChatState.current_input,
