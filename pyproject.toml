@@ -24,6 +24,9 @@ dependencies = [
     "numpy>=1.26.0",
     # HTTP (Upstage API 호출)
     "httpx>=0.27.0",
+    # API (Reflex api_transformer 에 마운트)
+    "fastapi>=0.115.0",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.uv]
