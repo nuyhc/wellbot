@@ -35,12 +35,16 @@ def _get_bucket() -> str:
     return bucket
 
 
+S3_KEY_PREFIX: str = os.environ.get("S3_KEY_PREFIX", "files")
+
+
 def build_prefix(emp_no: str, smry_id: str, file_no: int) -> str:
     """파일 저장 prefix 를 생성한다.
 
-    구조: {emp_no}/{smry_id}/{file_no}/
+    구조: {S3_KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
     """
-    return f"{emp_no}/{smry_id}/{file_no}/"
+    base = S3_KEY_PREFIX.strip("/")
+    return f"{base}/{emp_no}/{smry_id}/{file_no}/"
 
 
 def upload_streaming(
