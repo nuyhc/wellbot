@@ -338,37 +338,53 @@ def input_bar() -> rx.Component:
                             rx.spacer(),
                             # 모델 선택 팝오버
                             _model_popover(),
-                            # 전송 버튼
-                            rx.icon_button(
-                                rx.icon("arrow-up", size=16),
-                                size="2",
-                                variant="solid",
-                                type="submit",
-                                disabled=~ChatState.can_send,
-                                loading=ChatState.is_loading,
-                                cursor=rx.cond(
-                                    ChatState.can_send,
-                                    "pointer",
-                                    "not-allowed",
+                            # 전송/중지 버튼
+                            rx.cond(
+                                ChatState.is_loading,
+                                # 중지 버튼
+                                rx.icon_button(
+                                    rx.icon("square", size=14),
+                                    size="2",
+                                    variant="solid",
+                                    type="button",
+                                    cursor="pointer",
+                                    border_radius="50%",
+                                    bg=COLORS["text_primary"],
+                                    color=COLORS["main_bg"],
+                                    _hover={"bg": COLORS["accent_hover"]},
+                                    on_click=ChatState.stop_generation,
                                 ),
-                                border_radius="50%",
-                                bg=rx.cond(
-                                    ChatState.can_send,
-                                    COLORS["text_primary"],
-                                    COLORS["tool_btn_bg"],
-                                ),
-                                color=rx.cond(
-                                    ChatState.can_send,
-                                    COLORS["main_bg"],
-                                    COLORS["text_secondary"],
-                                ),
-                                _hover={
-                                    "bg": rx.cond(
+                                # 전송 버튼
+                                rx.icon_button(
+                                    rx.icon("arrow-up", size=16),
+                                    size="2",
+                                    variant="solid",
+                                    type="submit",
+                                    disabled=~ChatState.can_send,
+                                    cursor=rx.cond(
                                         ChatState.can_send,
-                                        COLORS["accent_hover"],
+                                        "pointer",
+                                        "not-allowed",
+                                    ),
+                                    border_radius="50%",
+                                    bg=rx.cond(
+                                        ChatState.can_send,
+                                        COLORS["text_primary"],
                                         COLORS["tool_btn_bg"],
                                     ),
-                                },
+                                    color=rx.cond(
+                                        ChatState.can_send,
+                                        COLORS["main_bg"],
+                                        COLORS["text_secondary"],
+                                    ),
+                                    _hover={
+                                        "bg": rx.cond(
+                                            ChatState.can_send,
+                                            COLORS["accent_hover"],
+                                            COLORS["tool_btn_bg"],
+                                        ),
+                                    },
+                                ),
                             ),
                             width="100%",
                             align="center",

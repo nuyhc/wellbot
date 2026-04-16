@@ -133,6 +133,9 @@ class ChatState(rx.State):
     pending_attachments: list[AttachmentInfo] = []
     attachment_error: str = ""
 
+    # ── 생성 중지 ──
+    _cancel_requested: bool = False
+
     # 인증된 사용자 (on_load에서 캐시)
     _emp_no: str = ""
 
@@ -289,6 +292,12 @@ class ChatState(rx.State):
             return ""
 
     # ── Event handlers ──
+
+    def stop_generation(self) -> None:
+        """사용자가 생성 중지를 요청한다."""
+        if not self.is_loading:
+            return
+        self._cancel_requested = True
 
     async def on_load(self) -> None:
         """페이지 로드 시 초기화: DB에서 대화 목록 로드."""
@@ -750,6 +759,7 @@ class ChatState(rx.State):
             self.is_loading = True
             self.is_thinking = False
             self.streaming_content = ""
+            self._cancel_requested = False
 
             # DB 저장용 로컬 변수
             conv_id = self.conversations[idx].id
@@ -851,7 +861,14 @@ class ChatState(rx.State):
                     thinking_enabled=use_thinking,
                 )
 
+            stream_interrupted = False
             async for event_type, chunk in stream:
+                # 취소 확인
+                async with self:
+                    if self._cancel_requested:
+                        stream_interrupted = True
+                        break
+
                 if event_type == "thinking":
                     async with self:
                         self.is_thinking = True
@@ -877,13 +894,29 @@ class ChatState(rx.State):
             # 사고 과정 제거 (Nova 등 확장 사고 미지원 모델용)
             content = response_filter.strip_thinking(content)
 
+            # 중단된 경우 접미사 추가
+            if stream_interrupted and content:
+                content += "\n\n*[생성이 중단되었습니다]*"
+
             # 3. 최종 AI 메시지를 대화에 저장 + 상태 복구
             async with self:
+                self._cancel_requested = False
                 idx = self._get_current_index()
+
                 if idx is not None and content:
                     ai_msg = Message(
                         role="assistant",
                         content=content,
+                        timestamp=time.time(),
+                        model_name=model_name,
+                    )
+                    updated = [*self.conversations[idx].messages, ai_msg]
+                    self._update_conversation(idx, messages=updated)
+                elif idx is not None and stream_interrupted:
+                    # 텍스트 도착 전에 중단된 경우
+                    ai_msg = Message(
+                        role="assistant",
+                        content="*[생성이 시작되기 전에 중단되었습니다]*",
                         timestamp=time.time(),
                         model_name=model_name,
                     )
@@ -894,7 +927,7 @@ class ChatState(rx.State):
                 self.is_thinking = False
                 self.streaming_content = ""
 
-        # DB 저장: AI 응답 메시지 (State 락 밖)
+        # DB 저장: AI 응답 메시지 (State 락 밖) — 텍스트 없이 중단된 경우 저장 안 함
         if emp_no and content:
             elapsed = round(time.time() - start_time, 2)
             ai_seq = chat_service.get_next_seq(conv_id)
