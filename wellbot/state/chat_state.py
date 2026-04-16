@@ -559,11 +559,31 @@ class ChatState(rx.State):
         max_per_msg = FILE_MAX_PER_MESSAGE
         current_count = len(self.pending_attachments)
 
-        # JS: 파일 선택 → fetch POST /api/upload
+        # JS: 파일 선택 → fetch POST /api/upload (백엔드 직접)
+        # env.json 에서 백엔드 URL 을 읽어 사용 (dev: localhost:8000, prod: 동일 도메인)
         # 완료 알림은 Python 측 polling 으로 DB 에서 감지
         script = f"""
 (async function() {{
   try {{
+    // 백엔드 URL 결정
+    // Nginx 리버스 프록시 환경: 상대 경로 (/api/upload) 로 충분
+    // Dev (포트 분리) 환경: env.json 의 PING 에서 origin 추출
+    let backendBase = '';
+    try {{
+      const envResp = await fetch('/env.json');
+      const env = await envResp.json();
+      const pingUrl = env.PING || '';
+      if (pingUrl) {{
+        const u = new URL(pingUrl);
+        // 같은 origin 이면 상대 경로 사용 (Nginx 프록시 환경)
+        if (u.origin === window.location.origin) {{
+          backendBase = '';
+        }} else {{
+          backendBase = u.origin;  // Dev: e.g. "http://localhost:8000"
+        }}
+      }}
+    }} catch(e) {{}}
+
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
@@ -597,7 +617,7 @@ class ChatState(rx.State):
       form.append('file', file);
       form.append('conversation_id', '{conv_id}');
       try {{
-        const resp = await fetch('/api/upload', {{
+        const resp = await fetch(backendBase + '/api/upload', {{
           method: 'POST',
           body: form,
           credentials: 'include',
