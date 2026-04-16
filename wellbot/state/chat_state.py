@@ -27,7 +27,7 @@ from wellbot.services.bedrock_client import (
     generate_title,
     image_format,
 )
-from wellbot.services import attachment_service, chat_service, file_parser, tool_executor
+from wellbot.services import attachment_service, chat_service, file_parser, response_filter, tool_executor
 from wellbot.services.config import get_config
 
 
@@ -874,6 +874,9 @@ class ChatState(rx.State):
             content = "오류가 발생했습니다."
 
         finally:
+            # 사고 과정 제거 (Nova 등 확장 사고 미지원 모델용)
+            content = response_filter.strip_thinking(content)
+
             # 3. 최종 AI 메시지를 대화에 저장 + 상태 복구
             async with self:
                 idx = self._get_current_index()
