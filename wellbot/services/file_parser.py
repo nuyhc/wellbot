@@ -16,7 +16,6 @@ PDF 는 Upstage 제약(100p/50MB) 초과 시 자동 분할 후 merge.
 
 from __future__ import annotations
 
-import io
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -24,14 +23,12 @@ from pathlib import Path
 from typing import Protocol
 
 from wellbot.constants import (
-    AUTO_SPLITTABLE_EXTS,
     FILE_PARSER_FALLBACK,
     FILE_PARSER_MODE,
     IMAGE_EXTS,
     LOCAL_SUPPORTED_EXTS,
     SPLIT_SAFETY_PAGES,
     SPLIT_SAFETY_SIZE_MB,
-    UPSTAGE_MAX_PAGES,
     UPSTAGE_MAX_SIZE_MB,
     UPSTAGE_SUPPORTED_EXTS,
 )
@@ -219,7 +216,7 @@ class UpstageParser:
         self._api_key = os.environ.get("UPSTAGE_API_KEY", "")
         self._api_url = os.environ.get(
             "UPSTAGE_API_URL",
-            "https://api.upstage.ai/v1/document-digitization",
+            "https://api.upstage.ai/v1/document-ai/document-parse",
         )
 
     def supports(self, ext: str) -> bool:
@@ -283,43 +280,46 @@ class UpstageParser:
         )
 
     def _call_api(self, file_path: Path) -> ParsedDocument:
-        """Upstage API 를 호출한다."""
+        """Upstage API 를 호출한다.
+
+        이전 동작 확인 버전과 동일한 요청 형식 사용:
+        - files: {"document": (filename, bytes)}
+        - data: {"output_formats": '["markdown"]'}
+        - markdown 우선, fallback 으로 text
+        """
         import httpx
 
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        with open(file_path, "rb") as f:
-            files = {"document": (file_path.name, f, _guess_mime(file_path))}
-            data = {
-                "model": "document-parse",
-                "ocr": "auto",
-                "output_formats": '["text"]',
-            }
-            try:
-                response = httpx.post(
-                    self._api_url,
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=300.0,
-                )
-                response.raise_for_status()
-                payload = response.json()
-            except httpx.HTTPStatusError as e:
-                raise ParsingFailedError(
-                    f"Upstage API 오류 ({e.response.status_code}): {e.response.text[:200]}"
-                ) from e
-            except httpx.HTTPError as e:
-                raise ParsingFailedError(f"Upstage API 호출 실패: {e}") from e
+        file_bytes = file_path.read_bytes()
 
-        # Upstage 응답에서 텍스트 추출
+        try:
+            response = httpx.post(
+                self._api_url,
+                headers=headers,
+                files={"document": (file_path.name, file_bytes)},
+                data={"output_formats": '["markdown"]'},
+                timeout=300.0,
+            )
+            if response.status_code != 200:
+                raise ParsingFailedError(
+                    f"Upstage API 오류 (HTTP {response.status_code}): "
+                    f"{response.text[:200]}"
+                )
+            payload = response.json()
+        except ParsingFailedError:
+            raise
+        except httpx.HTTPError as e:
+            raise ParsingFailedError(f"Upstage API 호출 실패: {e}") from e
+
+        # 응답에서 텍스트 추출 (markdown 우선 → text fallback)
         content = payload.get("content", {})
-        text = content.get("text") or ""
+        text = content.get("markdown") or content.get("text") or ""
         if not text:
-            # elements[].content.text concat
             elements = payload.get("elements", []) or []
             parts: list[str] = []
             for el in elements:
-                el_text = (el.get("content") or {}).get("text") or ""
+                el_text = (el.get("content") or {}).get("markdown") or ""
+                el_text = el_text or (el.get("content") or {}).get("text") or ""
                 if el_text:
                     parts.append(el_text)
             text = "\n".join(parts)
