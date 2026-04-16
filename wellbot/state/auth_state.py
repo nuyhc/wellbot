@@ -3,14 +3,21 @@
 rx.Cookie 기반 세션 토큰 + DB 검증으로 로그인 상태를 유지한다.
 """
 
+from pathlib import Path
+
 import reflex as rx
 
 from wellbot.constants import PASSWORD_MIN_LENGTH, TOKEN_EXPIRE_SECONDS
 from wellbot.services import auth_service
 
+_NOTICE_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "notice.md"
+
 
 class AuthState(rx.State):
     """인증 관련 상태."""
+
+    # ── 공지사항 ──
+    notice_html: str = ""
 
     # ── 폼 입력 ──
     login_emp_no: str = ""
@@ -100,8 +107,17 @@ class AuthState(rx.State):
         self._set_user_info(user)
         return None
 
+    def _load_notice(self) -> None:
+        """config/notice.md 파일을 읽어 공지사항을 로드한다."""
+        if _NOTICE_PATH.exists():
+            self.notice_html = _NOTICE_PATH.read_text(encoding="utf-8").strip()
+        else:
+            self.notice_html = ""
+
     def check_login_page(self) -> rx.event.EventSpec | None:
         """로그인 페이지 로드 시: 이미 인증되었으면 /로 리다이렉트."""
+        self._load_notice()
+
         if not self.auth_token:
             return None
 
