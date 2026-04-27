@@ -1,13 +1,15 @@
+# max_tokens = thinking + response
+
 models:
   - name: "Claude Sonnet 4.5"
     description: "일상적인 작업에 가장 효율적"
     provider: "bedrock"
     model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     context_window: 200000
-    max_tokens: 1024
-    temperature: 0.7
+    max_tokens: 8192
+    temperature: 0.5
     thinking: true
-    thinking_budget: 5000
+    thinking_budget: 4096
     supports_vision: true
     supports_document: true
 
@@ -16,10 +18,10 @@ models:
     provider: "bedrock"
     model_id: "global.anthropic.claude-opus-4-6-v1"
     context_window: 1000000
-    max_tokens: 2048
-    temperature: 0.7
+    max_tokens: 16384
+    temperature: 0.4
     thinking: true
-    thinking_budget: 8000
+    thinking_budget: 8192
     supports_vision: true
     supports_document: true
 
@@ -28,8 +30,8 @@ models:
     provider: "bedrock"
     model_id: "apac.amazon.nova-pro-v1:0"
     context_window: 300000
-    max_tokens: 1024
-    temperature: 0.7
+    max_tokens: 4096
+    temperature: 0.6
     top_p: 0.9
     supports_vision: true
     supports_document: true
@@ -39,8 +41,8 @@ models:
     provider: "bedrock"
     model_id: "apac.amazon.nova-lite-v1:0"
     context_window: 300000
-    max_tokens: 1024
-    temperature: 0.7
+    max_tokens: 2048
+    temperature: 0.6
     top_p: 0.9
     supports_vision: true
     supports_document: true
