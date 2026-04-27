@@ -58,7 +58,7 @@ def _allowed_extensions() -> frozenset[str]:
     if mode == "local":
         return LOCAL_SUPPORTED_EXTS | file_parser.IMAGE_EXTS
     if mode == "upstage":
-        return UPSTAGE_SUPPORTED_EXTS
+        return UPSTAGE_SUPPORTED_EXTS | frozenset({".txt", ".md"}) | file_parser.IMAGE_EXTS
     # hybrid
     return LOCAL_SUPPORTED_EXTS | UPSTAGE_SUPPORTED_EXTS
 

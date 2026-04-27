@@ -210,7 +210,10 @@ class UpstageParser:
     제약:
         - 최대 100페이지 / 50MB
         - PDF 는 분할 처리 가능, 그 외 형식은 초과 시 에러
+        - .txt/.md 는 로컬 파싱으로 위임
     """
+
+    _TEXT_EXTS: frozenset[str] = frozenset({".txt", ".md"})
 
     def __init__(self) -> None:
         self._api_key = os.environ.get("UPSTAGE_API_KEY", "")
@@ -218,11 +221,16 @@ class UpstageParser:
             "UPSTAGE_API_URL",
             "https://api.upstage.ai/v1/document-ai/document-parse",
         )
+        self._local = LocalParser()
 
     def supports(self, ext: str) -> bool:
-        return ext in UPSTAGE_SUPPORTED_EXTS
+        return ext in UPSTAGE_SUPPORTED_EXTS or ext in self._TEXT_EXTS
 
     def parse(self, file_path: Path) -> ParsedDocument:
+        ext = _ext(file_path)
+        # .txt/.md 는 로컬 파싱으로 위임
+        if ext in self._TEXT_EXTS:
+            return self._local.parse(file_path)
         if not self._api_key:
             raise ParserError("UPSTAGE_API_KEY 환경변수가 설정되지 않았습니다.")
 
