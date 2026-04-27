@@ -20,7 +20,7 @@ TITLE_MODEL_ID: str = "apac.amazon.nova-lite-v1:0"
 TITLE_MAX_TOKENS: int = 30
 TITLE_TEMPERATURE: float = 0.3
 TITLE_SYSTEM_PROMPT: str = (
-    "대화의 첫 질문과 응답을 보고, 이 대화를 대표하는 짧은 제목을 한국어로 만들어주세요. "
+    "대화의 첫 질문과 응답을 보고, 이 대화를 대표하는 짧은 제목을 한국어로 만들어주세요."
     "15자 이내로, 제목만 출력하세요. 따옴표나 부가 설명 없이 제목 텍스트만 응답하세요."
 )
 
