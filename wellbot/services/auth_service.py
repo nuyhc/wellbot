@@ -8,7 +8,7 @@ import bcrypt
 import jwt
 from dotenv import load_dotenv
 
-from wellbot.constants import LOCK_DURATION_MINUTES, LOCK_THRESHOLD, TOKEN_EXPIRE_HOURS
+from wellbot.constants import KST, LOCK_DURATION_MINUTES, LOCK_THRESHOLD, TOKEN_EXPIRE_HOURS
 from wellbot.models.auth_token import CrtfToknN
 from wellbot.models.dept import DeptM
 from wellbot.models.employee import EmpM
@@ -40,8 +40,8 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         # 잠금 확인
         fail_count = int(emp.lgn_flr_tscnt or 0)
         if fail_count >= LOCK_THRESHOLD:
-            if emp.lock_dsbn_dtm and emp.lock_dsbn_dtm > datetime.now():
-                remaining = (emp.lock_dsbn_dtm - datetime.now()).seconds // 60
+            if emp.lock_dsbn_dtm and emp.lock_dsbn_dtm > datetime.now(KST):
+                remaining = (emp.lock_dsbn_dtm - datetime.now(KST)).seconds // 60
                 return {
                     "success": False,
                     "error": f"계정이 잠겨있습니다. {remaining + 1}분 후 다시 시도해주세요.",
@@ -56,18 +56,18 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         ):
             emp.lgn_flr_tscnt = int(emp.lgn_flr_tscnt or 0) + 1
             if int(emp.lgn_flr_tscnt) >= LOCK_THRESHOLD:
-                emp.lock_dsbn_dtm = datetime.now() + timedelta(
+                emp.lock_dsbn_dtm = datetime.now(KST) + timedelta(
                     minutes=LOCK_DURATION_MINUTES
                 )
-            emp.upd_dtm = datetime.now()
+            emp.upd_dtm = datetime.now(KST)
             emp.uppr_id = emp_no
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
 
         # 성공
         emp.lgn_flr_tscnt = 0
         emp.lock_dsbn_dtm = None
-        emp.lgn_scs_dtm = datetime.now()
-        emp.upd_dtm = datetime.now()
+        emp.lgn_scs_dtm = datetime.now(KST)
+        emp.upd_dtm = datetime.now(KST)
         emp.uppr_id = emp_no
 
         return {
@@ -83,7 +83,7 @@ def authenticate_user(emp_no: str, password: str) -> dict:
 
 def create_session_token(emp_no: str) -> str:
     """세션 토큰(JWT) 생성 및 DB 저장."""
-    now = datetime.now()
+    now = datetime.now(KST)
     expires = now + timedelta(hours=TOKEN_EXPIRE_HOURS)
     token_id = uuid.uuid4().hex[:50]
 
@@ -132,7 +132,7 @@ def validate_session_token(token: str) -> dict | None:
         record = session.query(CrtfToknN).get((token_id, emp_no))
         if not record or record.diss_yn != "N":
             return None
-        if record.trtn_dtm and record.trtn_dtm < datetime.now():
+        if record.trtn_dtm and record.trtn_dtm < datetime.now(KST):
             return None
 
         emp = session.query(EmpM).get(emp_no)
@@ -164,7 +164,7 @@ def invalidate_session_token(token: str) -> bool:
     if not token_id or not emp_no:
         return False
 
-    now = datetime.now()
+    now = datetime.now(KST)
     with get_session() as session:
         record = session.query(CrtfToknN).get((token_id, emp_no))
         if not record:
@@ -196,7 +196,7 @@ def register_user(
         if existing:
             return {"success": False, "error": "이미 등록된 사원번호입니다."}
 
-        now = datetime.now()
+        now = datetime.now(KST)
         hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         emp = EmpM(
             emp_no=emp_no,

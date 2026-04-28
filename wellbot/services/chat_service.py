@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import func
 
-from wellbot.constants import CONVERSATION_LIMIT
+from wellbot.constants import CONVERSATION_LIMIT, KST
 from wellbot.models.attachment import AtchFileM
 from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
@@ -128,7 +128,7 @@ def save_conversation(
     model_name: str = "",
 ) -> None:
     """대화 저장 (없으면 INSERT, 있으면 소유자 확인 후 UPDATE)."""
-    now = datetime.now()
+    now = datetime.now(KST)
     with get_session() as session:
         existing = _verify_ownership(session, conv_id, emp_no)
         if existing:
@@ -157,7 +157,7 @@ def update_conversation_title(smry_id: str, title: str, emp_no: str) -> None:
         record = _verify_ownership(session, smry_id, emp_no)
         if record:
             record.chtb_tlk_smry_ttl = title
-            record.upd_dtm = datetime.now()
+            record.upd_dtm = datetime.now(KST)
             record.uppr_id = emp_no[:20]
 
 
@@ -187,7 +187,7 @@ def save_message(
     reply_time: float | None = None,
 ) -> None:
     """메시지 DB 저장."""
-    now = datetime.now()
+    now = datetime.now(KST)
     total_tokens = input_tokens + output_tokens
     with get_session() as session:
         record = ChtbMsgD(

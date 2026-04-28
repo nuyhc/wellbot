@@ -20,6 +20,7 @@ from sqlalchemy import func
 
 from wellbot.models.attachment import AtchFileM
 from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
+from wellbot.constants import KST
 from wellbot.services import chunker, embedding_service, file_parser, storage_service
 from wellbot.services.database import get_session
 
@@ -71,7 +72,7 @@ def register_attachment(
     Returns:
         생성된 atch_file_no.
     """
-    now = datetime.now()
+    now = datetime.now(KST)
 
     with get_session() as session:
         file_no = _next_file_no(session)
@@ -215,7 +216,7 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
 
 def _update_token_count(file_no: int, emp_no: str, total_tokens: int) -> None:
     """atch_file_m.atch_file_tokn_ecnt 갱신."""
-    now = datetime.now()
+    now = datetime.now(KST)
     with get_session() as session:
         record = session.query(AtchFileM).get(file_no)
         if not record:

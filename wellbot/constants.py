@@ -3,6 +3,11 @@
 설정값을 중앙 관리
 """
 
+from zoneinfo import ZoneInfo
+
+# ── 타임존 ──
+KST = ZoneInfo("Asia/Seoul")
+
 # ── 인증/세션 ──
 TOKEN_EXPIRE_HOURS: int = 3
 TOKEN_EXPIRE_SECONDS: int = TOKEN_EXPIRE_HOURS * 3600  # 쿠키 max_age용

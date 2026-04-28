@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from wellbot.constants import KST
+
 import bcrypt
 
 from wellbot.models.agent import AgntM
@@ -58,7 +60,7 @@ def create_dept(
     prmn_mdl: dict | None = None,
 ) -> dict:
     """부서 생성."""
-    now = datetime.now()
+    now = datetime.now(KST)
     with get_session() as session:
         dept = DeptM(
             dept_cd=dept_cd,
@@ -85,7 +87,7 @@ def update_dept(dept_cd: str, **kwargs: Any) -> dict:
         for key, val in kwargs.items():
             if hasattr(dept, key):
                 setattr(dept, key, val)
-        dept.upd_dtm = datetime.now()
+        dept.upd_dtm = datetime.now(KST)
         dept.uppr_id = "ADMIN"
         session.flush()
         return _to_dict_model(dept)
@@ -125,7 +127,7 @@ def create_employee(
     acnt_sts_nm: str = "ACTIVE",
 ) -> dict:
     """사원 생성 (bcrypt 해싱)."""
-    now = datetime.now()
+    now = datetime.now(KST)
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     with get_session() as session:
         emp = EmpM(
@@ -162,7 +164,7 @@ def update_employee(emp_no: str, **kwargs: Any) -> dict:
         for key, val in kwargs.items():
             if hasattr(emp, key):
                 setattr(emp, key, val)
-        emp.upd_dtm = datetime.now()
+        emp.upd_dtm = datetime.now(KST)
         emp.uppr_id = "ADMIN"
         session.flush()
         d = _to_dict_model(emp)
@@ -211,7 +213,7 @@ def create_agent(
     use_yn: str = "Y",
 ) -> dict:
     """에이전트 생성."""
-    now = datetime.now()
+    now = datetime.now(KST)
     with get_session() as session:
         agent = AgntM(
             agnt_id=agnt_id,
@@ -240,7 +242,7 @@ def update_agent(agnt_id: str, agnt_seq: int, **kwargs: Any) -> dict:
         for key, val in kwargs.items():
             if hasattr(agent, key):
                 setattr(agent, key, val)
-        agent.upd_dtm = datetime.now()
+        agent.upd_dtm = datetime.now(KST)
         agent.uppr_id = "ADMIN"
         session.flush()
         return _to_dict_model(agent)
