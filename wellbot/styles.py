@@ -29,6 +29,7 @@ COLORS = {
 # 간격 토큰
 SPACING = {
     "sidebar_width": "260px",
+    "sidebar_collapsed_width": "60px",
     "input_bar_height": "100px",
     "message_max_width": "768px",
     "border_radius": "24px",
