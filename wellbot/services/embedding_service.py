@@ -4,12 +4,12 @@
 - FAISS 인덱스 빌드/직렬화/역직렬화
 - 대화 단위 LRU 메모리 캐시 (다음 Phase 에서 활용)
 
-업로드 시 (Phase 2):
+업로드 시:
   1. 청크 텍스트 → Bedrock Titan 임베딩
   2. FAISS IndexFlatIP 인덱스 빌드
   3. faiss.serialize_index() → bytes → S3 저장
 
-검색 시 (Phase 5, 아직 미사용):
+검색 시:
   1. S3 에서 index.faiss + chunks.jsonl 다운로드
   2. faiss.deserialize_index() → 메모리 인덱스
   3. query 임베딩 생성 → index.search() → top-k 청크
@@ -159,7 +159,7 @@ def search_index(index, query_vec: np.ndarray, top_k: int) -> tuple[np.ndarray, 
     return index.search(q, k)
 
 
-# ── 대화 단위 LRU 캐시 (Phase 5 에서 본격 활용) ──
+# ── 대화 단위 LRU 캐시 ──
 
 
 @dataclass
@@ -219,7 +219,7 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
     - chunks 리스트는 flat: [{file_no, file_name, seq, text}, ...]
       -> FAISS 검색 결과 인덱스 → chunks[idx] 로 바로 매핑 가능
 
-    파일이 처리 중이거나 실패한 경우(S3 에 파생물 부재) 는 조용히 스킵.
+    파일이 처리 중이거나 실패한 경우(S3 에 파생물 부재)는 스킵.
     """
     # 순환 import 방지 위해 lazy
     from wellbot.services import attachment_service
