@@ -22,7 +22,7 @@ app = rx.App(
     style=GLOBAL_STYLE,
     api_transformer=api_app,
 )
-app.add_page(index, route="/", title="Wellbot", on_load=[AuthState.check_auth, ChatState.on_load])
+app.add_page(index, route="/", title="WellBot", on_load=[AuthState.check_auth, ChatState.on_load])
 app.add_page(login, route="/login", title="WellBot - 로그인", on_load=AuthState.check_login_page)
 app.add_page(register, route="/register", title="WellBot - 회원가입", on_load=AuthState.load_dept_list)
 app.add_page(admin, route="/admin", title="WellBot - 관리", on_load=AdminState.on_admin_load)
