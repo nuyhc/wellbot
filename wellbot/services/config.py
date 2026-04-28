@@ -1,6 +1,6 @@
 """앱 설정 로드.
 
-config/models.yaml에서 모델 정의를, config/prompts.yaml에서 프롬프트 설정을 읽어온다.
+config/models.yaml에서 모델 정의를, config/prompts.yaml에서 프롬프트 설정 로드.
 """
 
 from __future__ import annotations

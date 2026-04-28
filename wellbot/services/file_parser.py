@@ -1,7 +1,6 @@
 """파일 파싱 서비스.
 
-다양한 파일 형식(PDF/DOCX/XLSX/PPTX/TXT/MD/HWP/이미지)을
-텍스트로 변환한다.
+다양한 파일 형식(PDF/DOCX/XLSX/PPTX/TXT/MD/HWP/이미지)을 텍스트로 변환
 
 파서 종류:
   - LocalParser: 로컬 라이브러리 기반 (pdfplumber, python-docx 등)
