@@ -27,6 +27,7 @@ dependencies = [
     # API (Reflex api_transformer 에 마운트)
     "fastapi>=0.115.0",
     "python-multipart>=0.0.9",
+    "tzdata>=2026.2",
 ]
 
 [tool.uv]
