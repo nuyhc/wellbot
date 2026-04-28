@@ -3,5 +3,6 @@ from reflex.plugins.sitemap import SitemapPlugin
 
 config = rx.Config(
     app_name="wellbot",
+    show_built_with_reflex=False,
     plugins=[SitemapPlugin()],
 )
