@@ -101,10 +101,10 @@ def employee_modal() -> rx.Component:
                 ),
                 rx.text("소속 부서", size="2", weight="medium"),
                 rx.select(
-                    AdminState.dept_codes,
-                    value=AdminState.form_data.get("pstn_dept_cd", ""),
+                    AdminState.dept_display_options,
+                    value=AdminState.form_dept_display,
                     placeholder="부서 선택",
-                    on_change=lambda v: AdminState.set_form_field("pstn_dept_cd", v),
+                    on_change=lambda v: AdminState.set_form_dept(v),
                 ),
                 rx.text("계정 상태", size="2", weight="medium"),
                 rx.select(

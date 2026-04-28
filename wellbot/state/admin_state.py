@@ -105,6 +105,23 @@ class AdminState(rx.State):
         """부서 코드만 추출한 목록."""
         return [d.get("dept_cd", "") for d in self.depts]
 
+    @rx.var
+    def dept_display_options(self) -> list[str]:
+        """부서 select용 표시 목록 ('부서명(코드)')."""
+        return [
+            f"{d.get('dept_nm', '')}({d.get('dept_cd', '')})"
+            for d in self.depts
+        ]
+
+    def _dept_display_to_code(self, display: str) -> str:
+        """'부서명(코드)' → 부서코드 추출."""
+        # 마지막 '(' 이후 ')' 이전 문자열이 코드
+        start = display.rfind("(")
+        end = display.rfind(")")
+        if start != -1 and end != -1 and end > start:
+            return display[start + 1:end]
+        return display
+
     # ── 데이터 로드 ──
 
     def _load_all(self) -> None:
@@ -175,6 +192,22 @@ class AdminState(rx.State):
 
     def set_form_field(self, field: str, value: str) -> None:
         self.form_data = {**self.form_data, field: value}
+
+    def set_form_dept(self, display: str) -> None:
+        """부서 드롭다운 선택 시 '부서명(코드)' → 코드 변환 후 form_data에 저장."""
+        code = self._dept_display_to_code(display)
+        self.form_data = {**self.form_data, "pstn_dept_cd": code}
+
+    @rx.var
+    def form_dept_display(self) -> str:
+        """현재 form_data의 pstn_dept_cd에 대응하는 '부서명(코드)' 표시값."""
+        code = self.form_data.get("pstn_dept_cd", "")
+        if not code:
+            return ""
+        for d in self.depts:
+            if d.get("dept_cd", "") == code:
+                return f"{d.get('dept_nm', '')}({d.get('dept_cd', '')})"
+        return code
 
     # ── CRUD 이벤트 ──
 

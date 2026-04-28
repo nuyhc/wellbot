@@ -94,7 +94,7 @@ def user_profile() -> rx.Component:
         ),
         rx.spacer(),
         rx.icon_button(
-            rx.icon("log-out", size=14),
+            rx.icon("log-out", size=18),
             variant="ghost",
             size="1",
             cursor="pointer",

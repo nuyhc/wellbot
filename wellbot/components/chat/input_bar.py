@@ -407,7 +407,7 @@ def input_bar() -> rx.Component:
             ),
             # 하단 안내 텍스트
             rx.text(
-                "Wellbot은 실수할 수 있습니다. WellBot의 출력 결과를 확인하고 활용하세요.",
+                "WellBot은 실수할 수 있습니다. WellBot의 출력 결과를 확인하고 활용하세요.",
                 size="1",
                 color=COLORS["text_secondary"],
                 text_align="center",
