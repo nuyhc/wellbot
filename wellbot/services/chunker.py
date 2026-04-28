@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from wellbot.constants import CHUNK_OVERLAP_TOKENS, CHUNK_SIZE_TOKENS
+from wellbot.constants import CHUNK_OVERLAP_TOKENS, CHUNK_SIZE_TOKENS, AVG_TOKENS_PER_WORD
 
 
 @dataclass(frozen=True)
@@ -29,12 +29,11 @@ def estimate_tokens(text: str) -> int:
     """간단한 토큰 수 추정.
 
     정확한 토크나이저를 사용하지 않아도 청킹/가드 용도로 충분.
-    한국어는 단어당 ~1.5토큰, 영어는 ~1.3토큰 수준이므로 평균 1.4 사용.
     """
     if not text:
         return 0
     words = text.split()
-    return max(1, int(len(words) * 1.3))
+    return max(1, int(len(words) * AVG_TOKENS_PER_WORD))
 
 
 def _split_paragraphs(text: str) -> list[str]:
@@ -113,7 +112,7 @@ def chunk_text(
                 return
             # 문단 끝에서 overlap 토큰만큼만 (단어 기준)
             words = tail.split()
-            overlap_words = max(1, int(overlap / 1.3))
+            overlap_words = max(1, int(overlap / AVG_TOKENS_PER_WORD))
             tail_text = " ".join(words[-overlap_words:])
             buffer = [tail_text]
             buffer_tokens = estimate_tokens(tail_text)
@@ -159,9 +158,9 @@ def _force_split_by_words(
     if not words:
         return []
 
-    # 토큰 ≈ 단어 * 1.3 → 단어 수 = size / 1.3
-    words_per_chunk = max(1, int(size / 1.3))
-    overlap_words = max(0, int(overlap / 1.3)) if overlap > 0 else 0
+    # 토큰 ≈ 단어 * AVG_TOKENS_PER_WORD → 단어 수 = size / AVG_TOKENS_PER_WORD
+    words_per_chunk = max(1, int(size / AVG_TOKENS_PER_WORD))
+    overlap_words = max(0, int(overlap / AVG_TOKENS_PER_WORD)) if overlap > 0 else 0
 
     parts: list[str] = []
     start = 0

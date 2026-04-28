@@ -51,6 +51,7 @@ SPLIT_SAFETY_PAGES: int = 90
 SPLIT_SAFETY_SIZE_MB: int = 45
 
 # ── 청킹 & 임베딩 ──
+AVG_TOKENS_PER_WORD = 1.4                 # 한국어는 단어당 ~1.5토큰, 영어는 ~1.3토큰 수준이므로 평균 1.4 사용.
 CHUNK_SIZE_TOKENS: int = 1000
 CHUNK_OVERLAP_TOKENS: int = 200
 EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
