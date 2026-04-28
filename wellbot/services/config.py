@@ -165,3 +165,24 @@ def get_config() -> AppConfig:
     if _config is None:
         _config = load_config()
     return _config
+
+
+# ── 환영 메시지 ──
+
+_GREETINGS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "greetings.yaml"
+_DEFAULT_GREETING = "오늘은 무슨 이야기를 할까요?"
+_greetings: tuple[str, ...] | None = None
+
+
+def get_greetings() -> tuple[str, ...]:
+    """캐싱된 환영 메시지 목록을 반환한다."""
+    global _greetings
+    if _greetings is None:
+        try:
+            with open(_GREETINGS_PATH, encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+            items = raw.get("greetings", [])
+            _greetings = tuple(items) if items else (_DEFAULT_GREETING,)
+        except Exception:
+            _greetings = (_DEFAULT_GREETING,)
+    return _greetings

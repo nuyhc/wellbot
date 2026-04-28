@@ -5,6 +5,7 @@ DB 연동으로 대화 이력을 영속화(persistence) 보장.
 """
 
 import asyncio
+import random
 import time
 import uuid
 
@@ -28,7 +29,7 @@ from wellbot.services.bedrock_client import (
     image_format,
 )
 from wellbot.services import attachment_service, chat_service, file_parser, response_filter, tool_executor
-from wellbot.services.config import get_config
+from wellbot.services.config import get_config, get_greetings
 
 
 class ModelInfo(BaseModel):
@@ -128,6 +129,7 @@ class ChatState(rx.State):
     thinking_enabled: bool = False
     selected_prompt: str = "default"
     show_style_panel: bool = False
+    greeting_text: str = ""
 
     # ── 첨부파일 ──
     pending_attachments: list[AttachmentInfo] = []
@@ -139,6 +141,10 @@ class ChatState(rx.State):
     # 인증된 사용자 (on_load에서 캐시)
     _emp_no: str = ""
 
+    def _refresh_greeting(self) -> None:
+        """환영 메시지를 랜덤으로 갱신."""
+        self.greeting_text = random.choice(get_greetings())
+
     def _ensure_conversation(self) -> None:
         """대화가 없으면 새로 생성."""
         if not self.conversations:
@@ -147,11 +153,16 @@ class ChatState(rx.State):
             self.current_conversation_id = conv.id
 
     def _get_current_index(self) -> int | None:
-        """현재 대화의 인덱스 반환."""
+        """현재 대화의 인덱스 반환. 못 찾으면 자동 복구 시도."""
         for i, conv in enumerate(self.conversations):
             if conv.id == self.current_conversation_id:
                 return i
-        return None
+        # 자동 복구: current_id가 conversations에 없는 경우
+        if self.conversations:
+            self.current_conversation_id = self.conversations[0].id
+            return 0
+        self._ensure_conversation()
+        return 0 if self.conversations else None
 
     def _update_conversation(self, idx: int, **kwargs: object) -> None:
         """대화 업데이트."""
@@ -214,12 +225,16 @@ class ChatState(rx.State):
 
     @rx.var
     def sorted_conversations(self) -> list[Conversation]:
-        """시간 역순으로 정렬된 대화 목록."""
-        return sorted(
-            self.conversations,
-            key=lambda c: c.created_at,
-            reverse=True,
-        )
+        """시간 역순으로 정렬된 대화 목록.
+
+        빈 미저장 대화는 숨기되, 현재 활성 대화는 항상 표시.
+        """
+        current_id = self.current_conversation_id
+        visible = [
+            c for c in self.conversations
+            if c.is_persisted or c.messages or c.id == current_id
+        ]
+        return sorted(visible, key=lambda c: c.created_at, reverse=True)
 
     @rx.var
     def model_names(self) -> list[str]:
@@ -319,6 +334,13 @@ class ChatState(rx.State):
         except Exception:
             pass
 
+        # 환영 메시지 초기화
+        self._refresh_greeting()
+
+        # 이미 대화가 로드된 상태면 재조회하지 않음
+        if self.conversations:
+            return
+
         # DB에서 대화 목록 로드
         if self._emp_no:
             convs = chat_service.list_conversations(self._emp_no)
@@ -335,10 +357,9 @@ class ChatState(rx.State):
                 for c in convs
             ]
             if db_conversations:
-                self.conversations = db_conversations
-                self.current_conversation_id = db_conversations[0].id
-                # 첫 번째 대화의 메시지 로드
-                self._load_messages_for(0)
+                new_conv = _new_conversation()
+                self.conversations = [new_conv, *db_conversations]
+                self.current_conversation_id = new_conv.id
             else:
                 self._ensure_conversation()
         else:
@@ -386,11 +407,13 @@ class ChatState(rx.State):
         """새 대화를 생성한다. 현재 대화가 비어있으면 무시."""
         idx = self._get_current_index()
         if idx is not None and not self.conversations[idx].messages:
+            self._refresh_greeting()
             return
         conv = _new_conversation()
         self.conversations = [conv, *self.conversations]
         self.current_conversation_id = conv.id
         self.current_input = ""
+        self._refresh_greeting()
 
     def switch_conversation(self, conv_id: str) -> None:
         """대화를 전환한다. 미로드 시 DB에서 메시지 로드."""
@@ -413,10 +436,17 @@ class ChatState(rx.State):
                 pass
         self.conversations = [c for c in self.conversations if c.id != conv_id]
         if conv_id == self.current_conversation_id:
-            if self.conversations:
-                self.current_conversation_id = self.conversations[0].id
+            # 빈 새 대화가 이미 있으면 그쪽으로, 없으면 새로 생성
+            empty = next(
+                (c for c in self.conversations if not c.messages and not c.is_persisted),
+                None,
+            )
+            if empty:
+                self.current_conversation_id = empty.id
             else:
-                self._ensure_conversation()
+                new_conv = _new_conversation()
+                self.conversations = [new_conv, *self.conversations]
+                self.current_conversation_id = new_conv.id
 
     def set_input(self, value: str) -> None:
         """입력 필드 값을 설정한다."""
@@ -728,7 +758,6 @@ class ChatState(rx.State):
             if not text or self.is_loading:
                 return
 
-            self._ensure_conversation()
             idx = self._get_current_index()
             if idx is None:
                 return

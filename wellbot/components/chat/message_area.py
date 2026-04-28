@@ -8,32 +8,28 @@ ChatGPT/Gemini 스타일 메시지 영역.
 import reflex as rx
 
 from wellbot.components.chat.message_bubble import message_bubble
+from wellbot.components.icons import north_star_icon
 from wellbot.state.chat_state import ChatState
 from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 
 
 def welcome_message() -> rx.Component:
-    """대화가 비어있을 때 표시되는 환영 메시지."""
+    """대화가 비어있을 때 표시되는 환영 화면."""
     return rx.center(
         rx.vstack(
             rx.box(
-                rx.icon("message-circle", size=32, color=COLORS["accent"]),
-                width="56px",
-                height="56px",
-                border_radius="50%",
-                bg=COLORS["user_bubble"],
-                display="flex",
-                align_items="center",
-                justify_content="center",
+                north_star_icon(size=36),
+                color=COLORS["text_primary"],
+                margin_bottom="0.5em",
             ),
             rx.heading(
-                "무엇을 도와드릴까요?",
+                ChatState.greeting_text,
                 size="6",
                 color=COLORS["text_primary"],
                 weight="medium",
             ),
             align="center",
-            spacing="4",
+            spacing="2",
         ),
         flex="1",
     )
