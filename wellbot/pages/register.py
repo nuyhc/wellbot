@@ -15,9 +15,9 @@ def _register_form() -> rx.Component:
         rx.vstack(
             rx.vstack(
                 rx.icon("user-plus", size=48, color=COLORS["accent"]),
-                rx.heading("회원가입", size="6"),
+                rx.heading("사용자 등록 신청", size="6"),
                 rx.text(
-                    "가입 후 관리자 승인이 필요합니다.",
+                    "신청 후 관리자 승인이 필요합니다.",
                     size="2",
                     color=COLORS["text_secondary"],
                 ),
@@ -55,7 +55,7 @@ def _register_form() -> rx.Component:
                 rx.text("비밀번호", size="2", weight="medium"),
                 rx.input(
                     value=AuthState.reg_password,
-                    placeholder="비밀번호 (4자 이상)",
+                    placeholder="비밀번호 (8자 이상)",
                     type="password",
                     on_change=AuthState.set_reg_password,
                     width="100%",
@@ -84,11 +84,11 @@ def _register_form() -> rx.Component:
                     AuthState.is_registering,
                     rx.hstack(
                         rx.spinner(size="3"),
-                        rx.text("가입 중..."),
+                        rx.text("등록 중..."),
                         align="center",
                         spacing="2",
                     ),
-                    rx.text("회원가입"),
+                    rx.text("사용자 등록 신청"),
                 ),
                 width="100%",
                 type="submit",
@@ -115,7 +115,7 @@ def _success_message() -> rx.Component:
     """가입 완료 메시지."""
     return rx.vstack(
         rx.icon("circle-check", size=48, color=rx.color("green", 9)),
-        rx.heading("가입 신청 완료", size="5"),
+        rx.heading("등록 신청 완료", size="5"),
         rx.text(
             "관리자 승인 후 로그인할 수 있습니다.",
             size="2",

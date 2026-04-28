@@ -1,6 +1,6 @@
 """Admin 관리 페이지.
 
-.env 비밀번호 또는 DB ADMIN 계정으로 인증 후 부서/사원/에이전트를 관리한다.
+.env 비밀번호 또는 DB ADMIN 계정으로 인증 후 부서/사원/에이전트를 관리.
 """
 
 import reflex as rx
