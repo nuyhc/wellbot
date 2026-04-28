@@ -14,6 +14,15 @@ from wellbot.models.dept import DeptM
 from wellbot.models.employee import EmpM
 from wellbot.services.database import get_session
 
+
+def _ensure_aware(dt: datetime | None) -> datetime | None:
+    """offset-naive datetime을 KST로 변환. 이미 aware이면 그대로 반환."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=KST)
+    return dt
+
 load_dotenv()
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
@@ -40,8 +49,9 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         # 잠금 확인
         fail_count = int(emp.lgn_flr_tscnt or 0)
         if fail_count >= LOCK_THRESHOLD:
-            if emp.lock_dsbn_dtm and emp.lock_dsbn_dtm > datetime.now(KST):
-                remaining = (emp.lock_dsbn_dtm - datetime.now(KST)).seconds // 60
+            lock_dtm = _ensure_aware(emp.lock_dsbn_dtm)
+            if lock_dtm and lock_dtm > datetime.now(KST):
+                remaining = (lock_dtm - datetime.now(KST)).seconds // 60
                 return {
                     "success": False,
                     "error": f"계정이 잠겨있습니다. {remaining + 1}분 후 다시 시도해주세요.",
@@ -132,7 +142,7 @@ def validate_session_token(token: str) -> dict | None:
         record = session.query(CrtfToknN).get((token_id, emp_no))
         if not record or record.diss_yn != "N":
             return None
-        if record.trtn_dtm and record.trtn_dtm < datetime.now(KST):
+        if _ensure_aware(record.trtn_dtm) and _ensure_aware(record.trtn_dtm) < datetime.now(KST):
             return None
 
         emp = session.query(EmpM).get(emp_no)
