@@ -1,6 +1,6 @@
 """Admin 상태 관리 - AdminState.
 
-관리자 인증(env + DB 이중), 부서/사원/에이전트 CRUD 상태를 담당한다.
+관리자 인증(env + DB 이중), 부서/사원/에이전트 CRUD 상태를 담당.
 """
 
 import hmac

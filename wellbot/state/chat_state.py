@@ -1,7 +1,7 @@
 """대화 상태 관리 - ChatState.
 
-메시지 전송, 대화 생성/전환/삭제, Bedrock 스트리밍 응답 처리를 담당한다.
-DB 연동으로 대화 이력을 영속화한다.
+메시지 전송, 대화 생성/전환/삭제, Bedrock 스트리밍 응답 처리를 담당.
+DB 연동으로 대화 이력을 영속화(persistence) 보장.
 """
 
 import asyncio
@@ -658,8 +658,8 @@ class ChatState(rx.State):
     ) -> str:
         """system prompt 에 현재 대화의 첨부파일 메타 목록을 append 한다.
 
-        요약은 생성하지 않고 파일명/타입/크기/토큰 수만 주입 → 매 턴 ~100 토큰.
-        LLM 이 내용을 알아야 하면 search_attachment tool 을 호출하도록 유도.
+        요약은 생성하지 않고 파일명/타입/크기/토큰 수만 주입 → 매 턴 ~100 토큰 (추정).
+        LLM 이 내용을 알아야 하면 search_attachment tool 을 호출하도록 유도 필요.
         """
         if not conv_id:
             return base_prompt

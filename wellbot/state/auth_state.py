@@ -1,6 +1,6 @@
 """인증 상태 관리 - AuthState.
 
-rx.Cookie 기반 세션 토큰 + DB 검증으로 로그인 상태를 유지한다.
+rx.Cookie 기반 세션 토큰 + DB 검증으로 로그인 상태를 유지.
 """
 
 from pathlib import Path

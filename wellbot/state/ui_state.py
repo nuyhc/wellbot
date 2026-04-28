@@ -1,6 +1,6 @@
 """UI 상태 관리 - UIState.
 
-Sidebar 토글, 고정/숨기기 등 UI 관련 상태를 담당한다.
+Sidebar 토글, 고정/숨기기 등 UI 관련 상태를 담당.
 """
 
 import reflex as rx
