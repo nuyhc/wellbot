@@ -1,112 +1,248 @@
 """Sidebar 컴포넌트.
 
-ChatGPT/Gemini 스타일 사이드바.
-대화 목록, 새 대화 버튼, 하단 사용자 프로필.
+ChatGPT 스타일 접이식 사이드바.
+접힘: 아이콘만 표시 (60px), 펼침: 전체 표시 (260px).
 """
 
 import reflex as rx
 
+from wellbot.components.icons import north_star_icon
 from wellbot.components.sidebar.conversation_list import conversation_list
 from wellbot.state.auth_state import AuthState
 from wellbot.state.chat_state import ChatState
 from wellbot.state.ui_state import UIState
 from wellbot.styles import COLORS, SPACING
 
+# 아이콘 공통 크기
+_ICON_SIZE = 18
+_ICON_BOX = "36px"
 
-def sidebar_header() -> rx.Component:
-    """Sidebar 상단: 사이드바 토글 + 새 대화 버튼."""
-    return rx.hstack(
-        rx.icon_button(
-            rx.icon("panel-left-close", size=18),
-            variant="ghost",
-            size="2",
+
+def _collapsed_icon(
+    icon_name: str,
+    on_click,
+    tooltip_text: str,
+) -> rx.Component:
+    """접힌 상태 아이콘 버튼 (균일 크기)."""
+    return rx.tooltip(
+        rx.box(
+            rx.icon(icon_name, size=_ICON_SIZE),
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            width=_ICON_BOX,
+            height=_ICON_BOX,
+            border_radius="8px",
             cursor="pointer",
-            on_click=UIState.hide_sidebar,
             color=COLORS["text_secondary"],
-            _hover={"color": COLORS["text_primary"]},
+            _hover={
+                "bg": COLORS["sidebar_hover"],
+                "color": COLORS["text_primary"],
+            },
+            on_click=on_click,
+        ),
+        content=tooltip_text,
+        side="right",
+    )
+
+
+def _nav_item(
+    icon_name: str,
+    label: str,
+    on_click,
+) -> rx.Component:
+    """펼친 상태 네비게이션 항목 (아이콘 + 텍스트)."""
+    return rx.hstack(
+        rx.icon(icon_name, size=_ICON_SIZE, flex_shrink="0"),
+        rx.text(
+            label,
+            size="2",
+            weight="medium",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
+        align="center",
+        spacing="3",
+        padding_x="0.75em",
+        padding_y="0.5em",
+        width="100%",
+        border_radius=SPACING["border_radius_sm"],
+        cursor="pointer",
+        color=COLORS["text_secondary"],
+        _hover={
+            "bg": COLORS["sidebar_hover"],
+            "color": COLORS["text_primary"],
+        },
+        on_click=on_click,
+    )
+
+
+def _logo_expand_button() -> rx.Component:
+    """접힌 상태 로고: hover 시 사이드바 열기 아이콘으로 전환."""
+    return rx.tooltip(
+        rx.box(
+            # 기본: North Star 로고
+            rx.box(
+                north_star_icon(size=_ICON_SIZE),
+                class_name="logo-default",
+                transition="opacity 0.15s ease",
+            ),
+            # hover: 사이드바 열기 아이콘
+            rx.box(
+                rx.icon("panel-left-open", size=_ICON_SIZE),
+                class_name="logo-hover",
+                position="absolute",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                opacity="0",
+                transition="opacity 0.15s ease",
+            ),
+            position="relative",
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            width=_ICON_BOX,
+            height=_ICON_BOX,
+            border_radius="8px",
+            cursor="pointer",
+            color=COLORS["text_primary"],
+            on_click=UIState.expand_sidebar,
+            _hover={
+                "bg": COLORS["sidebar_hover"],
+                "& .logo-default": {"opacity": "0"},
+                "& .logo-hover": {"opacity": "1"},
+            },
+        ),
+        content="사이드바 열기",
+        side="right",
+    )
+
+
+def _expanded_header() -> rx.Component:
+    """펼친 상태 헤더: 로고 + 닫기 버튼."""
+    return rx.hstack(
+        rx.hstack(
+            rx.box(
+                north_star_icon(size=_ICON_SIZE),
+                color=COLORS["text_primary"],
+            ),
+            align="center",
+            spacing="2",
         ),
         rx.spacer(),
-        rx.icon_button(
-            rx.icon("square-pen", size=18),
-            variant="ghost",
-            size="2",
+        rx.box(
+            rx.icon("panel-left-close", size=_ICON_SIZE),
+            display="flex",
+            align_items="center",
+            justify_content="center",
+            width=_ICON_BOX,
+            height=_ICON_BOX,
+            border_radius="8px",
             cursor="pointer",
-            on_click=ChatState.create_new_conversation,
             color=COLORS["text_secondary"],
-            _hover={"color": COLORS["text_primary"]},
+            on_click=UIState.collapse_sidebar,
+            _hover={
+                "bg": COLORS["sidebar_hover"],
+                "color": COLORS["text_primary"],
+            },
         ),
         width="100%",
         align="center",
         padding_x="0.75em",
-        padding_y="0.75em",
+        padding_y="0.625em",
     )
 
 
-def search_box() -> rx.Component:
-    """사이드바 검색 박스."""
-    return rx.box(
-        rx.hstack(
-            rx.icon("search", size=14, color=COLORS["text_secondary"]),
-            rx.text("채팅 검색", size="2", color=COLORS["text_secondary"]),
-            align="center",
-            spacing="2",
-            padding_x="0.75em",
-            padding_y="0.5em",
-            width="100%",
-            border_radius=SPACING["border_radius_sm"],
-            bg=COLORS["sidebar_hover"],
-            cursor="pointer",
-            _hover={"bg": COLORS["sidebar_active"]},
+def _collapsed_nav() -> rx.Component:
+    """접힌 상태 상단 네비게이션 (아이콘 세로 정렬)."""
+    return rx.vstack(
+        _logo_expand_button(),
+        _collapsed_icon(
+            "square-pen",
+            ChatState.create_new_conversation,
+            "새 채팅",
         ),
-        padding_x="0.5em",
-        padding_bottom="0.5em",
+        _collapsed_icon(
+            "search",
+            UIState.noop,
+            "채팅 검색",
+        ),
+        spacing="1",
+        align="center",
         width="100%",
+        padding_x="0.75em",
+        padding_y="0.625em",
     )
 
 
 def user_profile() -> rx.Component:
     """인증된 사용자 정보 + 로그아웃."""
-    return rx.hstack(
-        rx.box(
-            rx.icon("user", size=16, color=COLORS["text_primary"]),
-            width="28px",
-            height="28px",
-            border_radius="50%",
-            bg=COLORS["sidebar_hover"],
-            display="flex",
-            align_items="center",
-            justify_content="center",
-            flex_shrink="0",
-        ),
-        rx.vstack(
-            rx.text(
-                AuthState.current_user_nm,
-                size="2",
-                color=COLORS["text_primary"],
-                weight="medium",
+    user_avatar = rx.box(
+        rx.icon("user", size=_ICON_SIZE, color=COLORS["text_primary"]),
+        width="32px",
+        height="32px",
+        border_radius="50%",
+        bg=COLORS["sidebar_hover"],
+        display="flex",
+        align_items="center",
+        justify_content="center",
+        flex_shrink="0",
+    )
+
+    return rx.cond(
+        UIState.sidebar_expanded,
+        # 펼침: 아바타 + 이름 + 로그아웃
+        rx.hstack(
+            user_avatar,
+            rx.vstack(
+                rx.text(
+                    AuthState.current_user_nm,
+                    size="2",
+                    color=COLORS["text_primary"],
+                    weight="medium",
+                ),
+                rx.text(
+                    AuthState.current_emp_no,
+                    size="1",
+                    color=COLORS["text_secondary"],
+                ),
+                spacing="0",
             ),
-            rx.text(
-                AuthState.current_emp_no,
-                size="1",
+            rx.spacer(),
+            rx.box(
+                rx.icon("log-out", size=_ICON_SIZE),
+                display="flex",
+                align_items="center",
+                justify_content="center",
+                width=_ICON_BOX,
+                height=_ICON_BOX,
+                border_radius="8px",
+                cursor="pointer",
+                on_click=AuthState.logout,
                 color=COLORS["text_secondary"],
+                _hover={
+                    "bg": COLORS["sidebar_hover"],
+                    "color": COLORS["text_primary"],
+                },
             ),
-            spacing="0",
+            width="100%",
+            align="center",
+            spacing="2",
+            padding="0.75em",
+            border_radius=SPACING["border_radius_sm"],
         ),
-        rx.spacer(),
-        rx.icon_button(
-            rx.icon("log-out", size=18),
-            variant="ghost",
-            size="1",
-            cursor="pointer",
-            on_click=AuthState.logout,
-            color=COLORS["text_secondary"],
-            _hover={"color": COLORS["text_primary"]},
+        # 접힘: 아바타만
+        rx.center(
+            rx.tooltip(
+                user_avatar,
+                content=AuthState.current_user_nm,
+                side="right",
+            ),
+            width="100%",
+            padding="0.75em",
         ),
-        width="100%",
-        align="center",
-        spacing="2",
-        padding="0.75em",
-        border_radius=SPACING["border_radius_sm"],
     )
 
 
@@ -128,21 +264,61 @@ def sidebar() -> rx.Component:
     """Sidebar 메인 컴포넌트."""
     return rx.box(
         rx.vstack(
-            sidebar_header(),
-            search_box(),
-            conversation_list(),
+            # 상단 영역
+            rx.cond(
+                UIState.sidebar_expanded,
+                rx.vstack(
+                    _expanded_header(),
+                    rx.box(
+                        _nav_item(
+                            "square-pen",
+                            "새 채팅",
+                            ChatState.create_new_conversation,
+                        ),
+                        _nav_item(
+                            "search",
+                            "채팅 검색",
+                            UIState.noop,
+                        ),
+                        padding_x="0.5em",
+                        width="100%",
+                    ),
+                    spacing="0",
+                    width="100%",
+                ),
+                _collapsed_nav(),
+            ),
+            # 대화 목록 / 빈 공간
+            rx.cond(
+                UIState.sidebar_expanded,
+                conversation_list(),
+                rx.box(flex="1"),
+            ),
             sidebar_footer(),
             height="100%",
             width="100%",
             spacing="0",
         ),
         bg=COLORS["sidebar_bg"],
-        width=SPACING["sidebar_width"],
-        min_width=SPACING["sidebar_width"],
-        max_width=SPACING["sidebar_width"],
+        width=rx.cond(
+            UIState.sidebar_expanded,
+            SPACING["sidebar_width"],
+            SPACING["sidebar_collapsed_width"],
+        ),
+        min_width=rx.cond(
+            UIState.sidebar_expanded,
+            SPACING["sidebar_width"],
+            SPACING["sidebar_collapsed_width"],
+        ),
+        max_width=rx.cond(
+            UIState.sidebar_expanded,
+            SPACING["sidebar_width"],
+            SPACING["sidebar_collapsed_width"],
+        ),
         height="100vh",
         border_right=f"1px solid {COLORS['border']}",
-        display=rx.cond(UIState.sidebar_visible, "flex", "none"),
+        display="flex",
         flex_direction="column",
         overflow="hidden",
+        transition="width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease",
     )

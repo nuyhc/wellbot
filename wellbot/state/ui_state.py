@@ -1,6 +1,6 @@
 """UI 상태 관리 - UIState.
 
-Sidebar 토글, 고정/숨기기 등 UI 관련 상태를 담당.
+Sidebar 접힘/펼침 등 UI 관련 상태를 담당.
 """
 
 import reflex as rx
@@ -9,23 +9,19 @@ import reflex as rx
 class UIState(rx.State):
     """UI 관련 상태를 관리하는 State 클래스."""
 
-    sidebar_visible: bool = True
-    sidebar_pinned: bool = True
+    sidebar_expanded: bool = True
 
     def toggle_sidebar(self) -> None:
-        """Sidebar 표시 상태를 토글한다."""
-        self.sidebar_visible = not self.sidebar_visible
+        """Sidebar 접힘/펼침 상태를 토글한다."""
+        self.sidebar_expanded = not self.sidebar_expanded
 
-    def pin_sidebar(self) -> None:
-        """Sidebar를 고정한다."""
-        self.sidebar_pinned = True
-        self.sidebar_visible = True
+    def expand_sidebar(self) -> None:
+        """Sidebar를 펼친다."""
+        self.sidebar_expanded = True
 
-    def unpin_sidebar(self) -> None:
-        """Sidebar 고정을 해제한다."""
-        self.sidebar_pinned = False
+    def collapse_sidebar(self) -> None:
+        """Sidebar를 접는다."""
+        self.sidebar_expanded = False
 
-    def hide_sidebar(self) -> None:
-        """Sidebar를 숨긴다."""
-        self.sidebar_visible = False
-        self.sidebar_pinned = False
+    def noop(self) -> None:
+        """아무 동작도 하지 않는 핸들러."""
