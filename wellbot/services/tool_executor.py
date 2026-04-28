@@ -1,7 +1,9 @@
 """Bedrock Converse tool use 핸들러.
 
-LLM 이 호출할 수 있는 도구(tool) 의 스펙을 정의하고, 실제 실행을 담당한다.
-지금은 `search_attachment` 하나만 제공한다.
+LLM 이 호출할 수 있는 도구(tool) 의 스펙을 정의하고, 실제 실행을 담당.
+
+[Tool List]
+- `search_attachment`
 """
 
 from __future__ import annotations

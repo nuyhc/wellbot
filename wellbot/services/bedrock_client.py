@@ -1,7 +1,7 @@
 """AWS Bedrock ConverseStream 클라이언트.
 
-boto3를 사용하여 Bedrock Runtime의 ConverseStream API를 호출한다.
-동기 스트리밍 제너레이터와 비동기 래퍼를 제공한다.
+boto3를 사용하여 Bedrock Runtime의 ConverseStream API 호출.
+동기 스트리밍 제너레이터와 비동기 래퍼를 제공.
 """
 
 from __future__ import annotations

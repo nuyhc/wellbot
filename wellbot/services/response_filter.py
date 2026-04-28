@@ -1,12 +1,11 @@
 """응답 텍스트 후처리 필터.
 
-LLM 이 사고 과정(chain-of-thought)을 일반 텍스트로 출력하는 경우를 감지하고 제거한다.
-확장 사고(extended thinking)를 지원하지 않는 모델(Nova 등)에서 발생.
+LLM 이 사고 과정(chain-of-thought)을 일반 텍스트로 출력하는 경우를 감지하고 제거.
+확장 사고(extended thinking)를 지원하지 않는 모델(Nova 계열)에서 발생.
 
 패턴:
-  1. <thinking>...</thinking> 태그
-  2. <chain_of_thought>...</chain_of_thought> 태그
-  3. 응답 시작부의 영어 사고 과정 (한국어 답변 앞)
+  1. <thinking>...</thinking> 등 사고 명시 태그
+  2. 응답 시작부의 영어 사고 과정 (한국어 답변 앞)
 """
 
 from __future__ import annotations

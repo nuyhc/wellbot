@@ -51,7 +51,7 @@ def list_conversations(emp_no: str) -> list[dict]:
 def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
     """대화의 메시지 목록 조회 (소유권 검증 포함).
 
-    Phase 4: user 메시지 중 첫 번째(=가장 낮은 seq) 에 대화 전체 첨부파일
+    user 메시지 중 첫 번째(=가장 낮은 seq) 에 대화 전체 첨부파일
     목록을 붙여 반환한다.
 
     Note: 현재 스키마에는 "메시지 ↔ 파일" 의 직접 매핑이 없으므로
