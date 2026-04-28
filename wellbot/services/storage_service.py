@@ -18,7 +18,7 @@ from botocore.exceptions import ClientError
 
 # ── 설정 ──
 MULTIPART_CHUNK_SIZE: int = 5 * 1024 * 1024  # 5MB (S3 multipart 최소 단위)
-PRESIGNED_URL_EXPIRES: int = 3600             # 1시간
+PRESIGNED_URL_EXPIRES: int = 3600            # 1시간
 
 
 def _get_client():
