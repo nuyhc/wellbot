@@ -97,6 +97,18 @@ def _admin_content() -> rx.Component:
                     variant="surface",
                     height="28px",
                 ),
+                rx.cond(
+                    AdminState.admin_label != "SUPER",
+                    rx.button(
+                        rx.icon("message-circle", size=14),
+                        "챗으로 이동",
+                        variant="soft",
+                        color_scheme="blue",
+                        size="2",
+                        height="28px",
+                        on_click=rx.redirect("/"),
+                    ),
+                ),
                 rx.button(
                     rx.icon("log-out", size=14),
                     "로그아웃",
