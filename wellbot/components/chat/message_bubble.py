@@ -12,12 +12,16 @@ from wellbot.state.chat_state import AttachmentInfo, ChatState, Message
 from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 
 
-def _format_token_label(tokens: int) -> str:
-    """토큰 수 라벨 (0 이면 '이미지/처리중')."""
+def _format_token_label(tokens: int, mime: str) -> str:
+    """토큰 수 라벨. 이미지 여부는 MIME 으로 판별."""
     return rx.cond(
         tokens > 0,
         f"{tokens} 토큰",
-        "이미지",
+        rx.cond(
+            mime.contains("image"),
+            "이미지",
+            "문서",
+        ),
     )
 
 
@@ -35,7 +39,19 @@ def _attachment_icon(mime: str) -> rx.Component:
                 rx.cond(
                     mime.contains("presentation"),
                     rx.icon("presentation", size=18, color=COLORS["text_secondary"]),
-                    rx.icon("file", size=18, color=COLORS["text_secondary"]),
+                    rx.cond(
+                        mime.contains("word") | mime.contains("hwp"),
+                        rx.icon("file-pen-line", size=18, color=COLORS["text_secondary"]),
+                        rx.cond(
+                            mime.contains("markdown"),
+                            rx.icon("file-code", size=18, color=COLORS["text_secondary"]),
+                            rx.cond(
+                                mime.contains("text/plain"),
+                                rx.icon("file-type", size=18, color=COLORS["text_secondary"]),
+                                rx.icon("file", size=18, color=COLORS["text_secondary"]),
+                            ),
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -78,7 +94,11 @@ def _attachment_card(att: AttachmentInfo) -> rx.Component:
                             align="center",
                         ),
                         rx.text(
-                            "이미지",
+                            rx.cond(
+                                att.mime.contains("image"),
+                                "이미지",
+                                "문서",
+                            ),
                             size="1",
                             color=COLORS["text_secondary"],
                         ),
