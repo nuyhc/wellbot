@@ -40,7 +40,7 @@ FILE_MAX_PER_CONVERSATION: int = 20       # 대화당 누적 첨부 개수
 FILE_MAX_TOTAL_SIZE_MB: int = 200         # 대화당 누적 최대 용량
 
 # ── 파서 ──
-FILE_PARSER_MODE: str = "local"           # "local" | "upstage" | "hybrid"
+FILE_PARSER_MODE: str = "upstage"           # "local" | "upstage" | "hybrid"
 FILE_PARSER_FALLBACK: bool = True         # local 실패 시 upstage 폴백 (hybrid 모드)
 
 # ── Upstage Document Parse 공식 제약 ──
