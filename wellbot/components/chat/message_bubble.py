@@ -173,6 +173,42 @@ def user_message(message: Message) -> rx.Component:
     )
 
 
+def _action_icon(icon: str, on_click: object, tooltip: str = "") -> rx.Component:
+    """AI 메시지 하단 액션 아이콘 버튼."""
+    return rx.tooltip(
+        rx.el.button(
+            rx.icon(icon, size=15),
+            on_click=on_click,
+            background="transparent",
+            border="none",
+            cursor="pointer",
+            color=str(COLORS["text_secondary"]),
+            padding="0.3em",
+            border_radius="4px",
+            display="flex",
+            align_items="center",
+            _hover={
+                "color": str(COLORS["text_primary"]),
+                "background": str(COLORS["sidebar_hover"]),
+            },
+        ),
+        content=tooltip,
+    )
+
+
+def _ai_message_actions(message: Message) -> rx.Component:
+    """AI 메시지 하단 액션 버튼 바."""
+    return rx.hstack(
+        _action_icon(
+            "copy",
+            on_click=rx.set_clipboard(message.content),  # type: ignore
+            tooltip="응답 복사",
+        ),
+        gap="0.25em",
+        padding_top="0.25em",
+    )
+
+
 def ai_message(message: Message) -> rx.Component:
     """AI 메시지 - 좌측 정렬, 마크다운 렌더링."""
     return rx.box(
@@ -180,6 +216,7 @@ def ai_message(message: Message) -> rx.Component:
             message.content,
             component_map=MARKDOWN_COMPONENT_MAP,
         ),
+        _ai_message_actions(message),
         width="100%",
         color=COLORS["text_primary"],
         padding_x="1em",
