@@ -1,6 +1,6 @@
 """디자인 토큰 및 테마 설정.
 
-ChatGPT/Gemini 스타일 테마. rx.color() 기반으로 다크/라이트 모드 자동 전환.
+rx.color() 기반으로 다크/라이트 모드 자동 전환.
 """
 
 import reflex as rx
@@ -55,6 +55,7 @@ GLOBAL_STYLE = {
     },
     "::-webkit-scrollbar": {
         "width": "6px",
+        "height": "6px",
     },
     "::-webkit-scrollbar-track": {
         "background": "transparent",
@@ -62,6 +63,9 @@ GLOBAL_STYLE = {
     "::-webkit-scrollbar-thumb": {
         "background": str(COLORS["scrollbar_thumb"]),
         "border_radius": "3px",
+    },
+    "::-webkit-scrollbar-thumb:hover": {
+        "background": str(rx.color("gray", 8)),
     },
 }
 
@@ -80,9 +84,63 @@ def _table_border() -> str:
     return f"1px solid {rx.color('gray', 6)}"
 
 
+def _custom_codeblock(value: object, **props) -> rx.Component:
+    """코드블럭 - 언어 라벨 + 복사 버튼 헤더 포함."""
+    from reflex.components.datadisplay.code import CodeBlock
+
+    language = props.pop("language", "")
+    return rx.box(
+        # 헤더: 언어 라벨 + 복사 버튼
+        rx.hstack(
+            rx.hstack(
+                rx.icon("code", size=14, color=rx.color("gray", 10)),
+                rx.text(
+                    language,
+                    size="1",
+                    weight="medium",
+                    color=rx.color("gray", 10),
+                    text_transform="capitalize",
+                ),
+                align="center",
+                gap="0.4em",
+            ),
+            rx.tooltip(
+                rx.el.button(
+                    rx.icon("copy", size=14),
+                    on_click=rx.set_clipboard(value),  # type: ignore
+                    background="transparent",
+                    border="none",
+                    cursor="pointer",
+                    color=str(rx.color("gray", 10)),
+                    padding="0.25em",
+                    border_radius="4px",
+                    display="flex",
+                    align_items="center",
+                    _hover={"color": str(rx.color("gray", 12)), "background": str(rx.color("gray", 5))},
+                ),
+                content="복사",
+            ),
+            width="100%",
+            padding_x="1em",
+            padding_y="0.5em",
+            align="center",
+            justify="between",
+            border_bottom=f"1px solid {rx.color('gray', 5)}",
+        ),
+        # 코드 본문
+        CodeBlock.create(value, wrap_long_lines=True, **props),
+        background=rx.color("gray", 2),
+        border_radius="8px",
+        border=f"1px solid {rx.color('gray', 4)}",
+        overflow="hidden",
+        margin_y="0.75em",
+    )
+
+
 # rx.markdown 공통 component_map (테이블 border 포함)
 MARKDOWN_COMPONENT_MAP: dict = {
     "code": lambda text: rx.code(text, color_scheme="gray", variant="ghost"),
+    "pre": _custom_codeblock,
     "table": lambda *children, **props: rx.el.table(
         *children,
         border_collapse="collapse",
