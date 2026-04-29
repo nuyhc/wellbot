@@ -81,14 +81,33 @@ class AdminState(rx.State):
 
         self.auth_error = "사원번호 또는 비밀번호가 올바르지 않습니다."
 
-    def admin_logout(self) -> rx.event.EventSpec:
-        """로그아웃."""
+    async def admin_logout(self) -> rx.event.EventSpec:
+        """로그아웃: AdminState 초기화 + DB 계정이면 AuthState 세션도 정리."""
+        is_super = self.admin_label == "SUPER"
+
         self.is_authenticated = False
         self.admin_label = ""
         self.auth_emp_no = ""
         self.auth_password = ""
         self.auth_error = ""
-        return rx.redirect("/admin")  # type: ignore[return-value]
+
+        # DB ADMIN 계정인 경우 AuthState 세션도 함께 정리
+        if not is_super:
+            from wellbot.state.auth_state import AuthState
+
+            auth = await self.get_state(AuthState)
+            if auth.auth_token:
+                from wellbot.services import auth_service
+
+                auth_service.invalidate_session_token(auth.auth_token)
+            auth.auth_token = ""
+            auth.is_authenticated = False
+            auth.current_emp_no = ""
+            auth.current_user_nm = ""
+            auth.current_user_role = ""
+            auth.current_dept_cd = ""
+
+        return rx.redirect("/login")  # type: ignore[return-value]
 
     # ── Computed vars ──
 
@@ -149,18 +168,23 @@ class AdminState(rx.State):
 
     async def on_admin_load(self) -> rx.event.EventSpec | None:
         """페이지 로드 시: AuthState ADMIN 역할이면 자동 인증, 아니면 비밀번호 요구."""
-        if not self.is_authenticated:
-            # 메인 로그인에서 ADMIN 역할로 인증된 경우 자동 통과
-            from wellbot.state.auth_state import AuthState
-            auth = await self.get_state(AuthState)
-            if auth.is_authenticated and auth.current_user_role == "ADMIN":
-                self.is_authenticated = True
-                self.admin_label = auth.current_emp_no
-                self._load_all()
-                return None
-            # 미인증 상태 → 관리자 로그인 폼 표시 (리다이렉트 아님)
+        # SUPER(env 비밀번호)로 직접 인증한 경우 → 유지
+        if self.is_authenticated and self.admin_label == "SUPER":
+            self._load_all()
             return None
-        self._load_all()
+
+        # DB ADMIN 계정인 경우 → AuthState 재검증
+        from wellbot.state.auth_state import AuthState
+        auth = await self.get_state(AuthState)
+        if auth.is_authenticated and auth.current_user_role == "ADMIN":
+            self.is_authenticated = True
+            self.admin_label = auth.current_emp_no
+            self._load_all()
+            return None
+
+        # AuthState 인증이 없으면 AdminState도 초기화
+        self.is_authenticated = False
+        self.admin_label = ""
         return None
 
     def set_active_tab(self, tab: str) -> None:
