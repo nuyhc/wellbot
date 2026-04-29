@@ -599,14 +599,15 @@ class ChatState(rx.State):
         current_count = len(self.pending_attachments)
 
         # JS: 파일 선택 → fetch POST /api/upload (백엔드 직접)
-        # env.json 에서 백엔드 URL 을 읽어 사용 (dev: localhost:8000, prod: 동일 도메인)
+        # Nginx/ALB 프록시 환경: 상대 경로 (/api/upload) 사용
+        # 로컬 개발 (포트 분리) 환경: env.json PING origin 과 window.location.origin 비교
         # 완료 알림은 Python 측 polling 으로 DB 에서 감지
         script = f"""
 (async function() {{
   try {{
     // 백엔드 URL 결정
-    // Nginx 리버스 프록시 환경: 상대 경로 (/api/upload) 로 충분
-    // Dev (포트 분리) 환경: env.json 의 PING 에서 origin 추출
+    // 기본: 상대 경로 (Nginx/ALB 리버스 프록시 환경)
+    // 로컬 개발 (localhost 포트 분리) 환경에서만 origin 을 붙인다
     let backendBase = '';
     try {{
       const envResp = await fetch('/env.json');
@@ -614,12 +615,17 @@ class ChatState(rx.State):
       const pingUrl = env.PING || '';
       if (pingUrl) {{
         const u = new URL(pingUrl);
-        // 같은 origin 이면 상대 경로 사용 (Nginx 프록시 환경)
-        if (u.origin === window.location.origin) {{
-          backendBase = '';
-        }} else {{
+        const loc = window.location;
+        // 둘 다 localhost 이고 포트만 다른 경우 = 로컬 개발 환경
+        const isLocalDev = (
+          (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') &&
+          (u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+          u.port !== loc.port
+        );
+        if (isLocalDev) {{
           backendBase = u.origin;  // Dev: e.g. "http://localhost:8000"
         }}
+        // 그 외 (ALB/Nginx 프록시 등): 상대 경로 사용 (backendBase = '')
       }}
     }} catch(e) {{}}
 
