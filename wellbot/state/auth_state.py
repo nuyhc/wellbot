@@ -51,6 +51,17 @@ class AuthState(rx.State):
     current_user_role: str = ""
     current_dept_cd: str = ""
 
+    # ── 이스터에그: 아이콘 연속 클릭 → 관리자 페이지 ──
+    _easter_egg_clicks: int = 0
+
+    def handle_easter_egg_click(self) -> rx.event.EventSpec | None:
+        """로그인 페이지 아이콘 클릭 카운터. 5회 연속 클릭 시 /admin 이동."""
+        self._easter_egg_clicks += 1
+        if self._easter_egg_clicks >= 5:
+            self._easter_egg_clicks = 0
+            return rx.redirect("/admin")
+        return None
+
     # ── 폼 핸들러 ──
 
     def set_login_emp_no(self, value: str) -> None:

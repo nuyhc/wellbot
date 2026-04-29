@@ -39,7 +39,12 @@ def login() -> rx.Component:
                     rx.form(
                         rx.vstack(
                             rx.vstack(
-                                rx.icon("bot", size=48, color=COLORS["accent"]),
+                                rx.icon(
+                                    "bot",
+                                    size=48,
+                                    color=COLORS["accent"],
+                                    on_click=AuthState.handle_easter_egg_click,
+                                ),
                                 rx.heading("WellBot", size="6"),
                                 rx.text(
                                     "사원번호와 비밀번호를 입력하세요.",
