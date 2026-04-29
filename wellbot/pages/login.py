@@ -60,18 +60,7 @@ def login() -> rx.Component:
                                 ),
                             ),
                             rx.vstack(
-                                rx.hstack(
-                                    rx.text("사원번호", size="2", weight="medium"),
-                                    rx.checkbox(
-                                        "기억하기",
-                                        checked=AuthState.remember_me,
-                                        on_change=AuthState.toggle_remember_me,
-                                        size="1",
-                                    ),
-                                    justify="between",
-                                    align="center",
-                                    width="100%",
-                                ),
+                                rx.text("사원번호", size="2", weight="medium"),
                                 rx.input(
                                     value=AuthState.login_emp_no,
                                     placeholder="사원번호를 입력하세요",
@@ -79,6 +68,18 @@ def login() -> rx.Component:
                                     max_length=15,
                                     width="100%",
                                     auto_focus=True,
+                                ),
+                                rx.hstack(
+                                    rx.box(flex="1"),
+                                    rx.checkbox(
+                                        "기억하기",
+                                        checked=AuthState.remember_me,
+                                        on_change=AuthState.toggle_remember_me,
+                                        size="1",
+                                    ),
+                                    width="100%",
+                                    align="center",
+                                    margin_bottom="-16px",
                                 ),
                                 rx.text("비밀번호", size="2", weight="medium"),
                                 rx.input(
