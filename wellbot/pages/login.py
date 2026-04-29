@@ -60,7 +60,18 @@ def login() -> rx.Component:
                                 ),
                             ),
                             rx.vstack(
-                                rx.text("사원번호", size="2", weight="medium"),
+                                rx.hstack(
+                                    rx.text("사원번호", size="2", weight="medium"),
+                                    rx.checkbox(
+                                        "기억하기",
+                                        checked=AuthState.remember_me,
+                                        on_change=AuthState.toggle_remember_me,
+                                        size="1",
+                                    ),
+                                    justify="between",
+                                    align="center",
+                                    width="100%",
+                                ),
                                 rx.input(
                                     value=AuthState.login_emp_no,
                                     placeholder="사원번호를 입력하세요",

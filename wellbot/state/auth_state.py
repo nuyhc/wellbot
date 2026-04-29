@@ -7,7 +7,11 @@ from pathlib import Path
 
 import reflex as rx
 
-from wellbot.constants import PASSWORD_MIN_LENGTH, TOKEN_EXPIRE_SECONDS
+from wellbot.constants import (
+    PASSWORD_MIN_LENGTH,
+    REMEMBER_ME_EXPIRE_SECONDS,
+    TOKEN_EXPIRE_SECONDS,
+)
 from wellbot.services import auth_service
 
 _NOTICE_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "notice.md"
@@ -24,6 +28,14 @@ class AuthState(rx.State):
     login_password: str = ""
     login_error: str = ""
     is_logging_in: bool = False
+
+    # ── 아이디 기억하기 ──
+    remember_me: bool = False
+    remembered_emp_no: str = rx.Cookie(
+        name="wellbot_remember",
+        max_age=REMEMBER_ME_EXPIRE_SECONDS,
+        same_site="lax",
+    )
 
     # ── 세션 (쿠키 연동) ──
     auth_token: str = rx.Cookie(
@@ -49,6 +61,10 @@ class AuthState(rx.State):
         self.login_password = value
         self.login_error = ""
 
+    def toggle_remember_me(self, checked: bool) -> None:
+        """아이디 기억하기 체크박스 토글."""
+        self.remember_me = checked
+
     # ── 로그인 ──
 
     def handle_login(self, _form_data: dict | None = None) -> rx.event.EventSpec | None:
@@ -71,6 +87,12 @@ class AuthState(rx.State):
         # 토큰 생성 + 쿠키 저장
         token = auth_service.create_session_token(emp_no)
         self.auth_token = token
+
+        # 아이디 기억하기 처리
+        if self.remember_me:
+            self.remembered_emp_no = emp_no
+        else:
+            self.remembered_emp_no = ""
 
         user = result["user"]
         self._set_user_info(user)
@@ -117,6 +139,11 @@ class AuthState(rx.State):
     def check_login_page(self) -> rx.event.EventSpec | None:
         """로그인 페이지 로드 시: 이미 인증되었으면 /로 리다이렉트."""
         self._load_notice()
+
+        # 아이디 기억하기 쿠키에서 사원번호 복원
+        if self.remembered_emp_no:
+            self.login_emp_no = self.remembered_emp_no
+            self.remember_me = True
 
         if not self.auth_token:
             return None

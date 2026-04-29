@@ -11,6 +11,8 @@ KST = ZoneInfo("Asia/Seoul")
 # ── 인증/세션 ──
 TOKEN_EXPIRE_HOURS: int = 3
 TOKEN_EXPIRE_SECONDS: int = TOKEN_EXPIRE_HOURS * 3600  # 쿠키 max_age용
+REMEMBER_ME_EXPIRE_DAYS: int = 30  # 아이디 기억하기 쿠키 유효기간(일)
+REMEMBER_ME_EXPIRE_SECONDS: int = REMEMBER_ME_EXPIRE_DAYS * 86400
 LOCK_THRESHOLD: int = 5            # 로그인 실패 잠금 횟수
 LOCK_DURATION_MINUTES: int = 30    # 계정 잠금 시간(분)
 PASSWORD_MIN_LENGTH: int = 8       # 비밀번호 최소 길이
