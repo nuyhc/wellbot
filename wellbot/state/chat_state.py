@@ -217,11 +217,23 @@ class ChatState(rx.State):
         return len(self.current_messages) > 0
 
     @rx.var
+    def has_processing_attachments(self) -> bool:
+        """처리 중인 첨부파일이 있는지 여부."""
+        return any(a.status == "processing" for a in self.pending_attachments)
+
+    @rx.var
     def can_send(self) -> bool:
-        """전송 가능 여부 (대화 선택됨, 입력이 비어있지 않고 로딩 중이 아님)."""
+        """전송 가능 여부.
+
+        처리 중인 첨부파일이 있으면 전송 차단.
+        """
         if self._get_current_index() is None:
             return False
-        return self.current_input.strip() != "" and not self.is_loading
+        if self.is_loading:
+            return False
+        if self.has_processing_attachments:
+            return False
+        return self.current_input.strip() != ""
 
     @rx.var
     def sorted_conversations(self) -> list[Conversation]:
@@ -718,8 +730,11 @@ class ChatState(rx.State):
             "",
             "## 이 대화에 첨부된 파일",
             (
-                "아래 파일들이 대화에 첨부되어 있습니다. 파일 내용에 관한 질문이 있으면 "
-                "`search_attachment` 도구를 호출해 관련 내용을 검색하세요."
+                "아래 파일들이 대화에 첨부되어 있습니다. "
+                "사용자의 질문이 첨부 파일과 조금이라도 관련될 수 있다면, "
+                "반드시 `search_attachment` 도구를 먼저 호출하여 실제 내용을 확인한 뒤 답변하세요. "
+                "파일 내용을 추측하거나 일반 지식으로 대체하지 마세요. "
+                "도구 호출 없이 파일 내용에 대해 답변하는 것은 금지됩니다."
             ),
             "",
         ]

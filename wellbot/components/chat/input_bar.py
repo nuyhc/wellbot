@@ -405,6 +405,21 @@ def input_bar() -> rx.Component:
                     "border_color": COLORS["accent_hover"],
                 },
             ),
+            # 파일 처리 중 안내
+            rx.cond(
+                ChatState.has_processing_attachments,
+                rx.hstack(
+                    rx.icon("loader-circle", size=12, color=COLORS["accent"]),
+                    rx.text(
+                        "첨부 파일을 분석하고 있습니다. 완료 후 전송할 수 있습니다.",
+                        size="1",
+                        color=COLORS["accent"],
+                    ),
+                    align="center",
+                    gap="0.4em",
+                    justify_content="center",
+                ),
+            ),
             # 하단 안내 텍스트
             rx.text(
                 "WellBot은 실수할 수 있습니다. WellBot의 출력 결과를 확인하고 활용하세요.",
