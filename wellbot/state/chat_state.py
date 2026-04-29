@@ -321,6 +321,7 @@ class ChatState(rx.State):
         auth = await self.get_state(AuthState)
         self._emp_no = auth.current_emp_no
 
+
         # 모델/프롬프트 초기화
         try:
             cfg = get_config()
@@ -337,8 +338,9 @@ class ChatState(rx.State):
         # 환영 메시지 초기화
         self._refresh_greeting()
 
-        # 이미 대화가 로드된 상태면 재조회하지 않음
-        if self.conversations:
+        # 이미 DB에서 대화를 로드한 상태면 재조회하지 않음
+        has_db_conversations = any(c.is_persisted for c in self.conversations)
+        if has_db_conversations:
             return
 
         # DB에서 대화 목록 로드
@@ -357,7 +359,12 @@ class ChatState(rx.State):
                 for c in convs
             ]
             if db_conversations:
-                new_conv = _new_conversation()
+                # 기존 빈 새 대화가 있으면 재사용, 없으면 새로 생성
+                existing_new = next(
+                    (c for c in self.conversations if not c.is_persisted and not c.messages),
+                    None,
+                )
+                new_conv = existing_new or _new_conversation()
                 self.conversations = [new_conv, *db_conversations]
                 self.current_conversation_id = new_conv.id
             else:
