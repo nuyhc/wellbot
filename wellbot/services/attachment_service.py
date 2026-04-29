@@ -4,8 +4,7 @@
     1. register_attachment(): 파일 업로드 직후 S3 원본 저장 + DB 레코드 생성
     2. process_attachment(): 파싱 → 청킹 → 임베딩 → S3 파생물 저장
 
-`atch_file_no` 는 BigInteger PK 이며 auto-increment 가 아니므로
-`MAX(atch_file_no) + 1` 로 생성한다 (PoC 기준, 동시성 낮음).
+`atch_file_no` 는 BigInteger PK 이며 DB AUTO_INCREMENT 로 자동 발급.
 """
 
 from __future__ import annotations
@@ -15,8 +14,6 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-
-from sqlalchemy import func
 
 from wellbot.models.attachment import AtchFileM
 from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
@@ -39,15 +36,6 @@ class AttachmentRecord:
     s3_prefix: str
     token_count: int
     mime: str
-
-
-# ── PK 생성 ──
-
-
-def _next_file_no(session) -> int:
-    """다음 atch_file_no 를 발급한다."""
-    max_no = session.query(func.max(AtchFileM.atch_file_no)).scalar()
-    return (int(max_no) if max_no else 0) + 1
 
 
 # ── 원본 파일 S3 업로드 + DB 등록 ──
@@ -75,20 +63,10 @@ def register_attachment(
     now = datetime.now(KST)
 
     with get_session() as session:
-        file_no = _next_file_no(session)
-        s3_prefix = storage_service.build_prefix(emp_no, smry_id, file_no)
-
-        # 원본 S3 업로드 (확장자 유지)
-        ext = Path(filename).suffix.lower()
-        original_key = f"{s3_prefix}original{ext}"
-        with open(file_path, "rb") as f:
-            storage_service.upload_streaming(f, original_key, content_type)
-
-        # atch_file_m INSERT
+        # atch_file_m INSERT (file_no 는 DB AUTO_INCREMENT)
         record = AtchFileM(
-            atch_file_no=file_no,
             atch_file_nm=filename[:300],
-            atch_file_url_addr=s3_prefix[:500],
+            atch_file_url_addr="",  # S3 업로드 후 갱신
             atch_file_tokn_ecnt=None,  # 파싱 후 업데이트
             rgst_dtm=now,
             rgsr_id=emp_no[:20],
@@ -96,6 +74,18 @@ def register_attachment(
             uppr_id=emp_no[:20],
         )
         session.add(record)
+        session.flush()  # DB 에서 auto-increment PK 발급
+        file_no = record.atch_file_no
+
+        # S3 prefix 생성 + 원본 업로드
+        s3_prefix = storage_service.build_prefix(emp_no, smry_id, file_no)
+        ext = Path(filename).suffix.lower()
+        original_key = f"{s3_prefix}original{ext}"
+        with open(file_path, "rb") as f:
+            storage_service.upload_streaming(f, original_key, content_type)
+
+        # S3 prefix 를 DB 에 반영
+        record.atch_file_url_addr = s3_prefix[:500]
 
         # chtb_msg_atch_file_d INSERT (대화 매핑)
         mapping = ChtbMsgAtchFileD(

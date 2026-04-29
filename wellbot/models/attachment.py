@@ -14,7 +14,7 @@ class AtchFileM(Base):
     __tablename__ = "atch_file_m"
 
     atch_file_no: Mapped[int] = mapped_column(
-        "ATCH_FILE_NO", BigInteger, primary_key=True, comment="첨부파일번호",
+        "ATCH_FILE_NO", BigInteger, primary_key=True, autoincrement=True, comment="첨부파일번호",
     )
     atch_file_nm: Mapped[str | None] = mapped_column(
         "ATCH_FILE_NM", String(300), comment="첨부파일명",
