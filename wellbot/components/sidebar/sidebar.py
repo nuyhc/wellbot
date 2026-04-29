@@ -193,52 +193,168 @@ def user_profile() -> rx.Component:
 
     return rx.cond(
         UIState.sidebar_expanded,
-        # 펼침: 아바타 + 이름 + 로그아웃
-        rx.hstack(
-            user_avatar,
-            rx.vstack(
-                rx.text(
-                    AuthState.current_user_nm,
-                    size="2",
-                    color=COLORS["text_primary"],
-                    weight="medium",
+        # 펼침: 프로필 전체가 팝오버 트리거
+        rx.popover.root(
+            rx.popover.trigger(
+                rx.hstack(
+                    user_avatar,
+                    rx.vstack(
+                        rx.text(
+                            AuthState.current_user_nm,
+                            size="2",
+                            color=COLORS["text_primary"],
+                            weight="medium",
+                        ),
+                        rx.text(
+                            AuthState.current_emp_no,
+                            size="1",
+                            color=COLORS["text_secondary"],
+                        ),
+                        spacing="0",
+                    ),
+                    rx.spacer(),
+                    rx.icon(
+                        "ellipsis",
+                        size=_ICON_SIZE,
+                        color=COLORS["text_secondary"],
+                    ),
+                    width="100%",
+                    align="center",
+                    spacing="2",
+                    padding="0.75em",
+                    border_radius=SPACING["border_radius_sm"],
+                    cursor="pointer",
+                    _hover={"bg": COLORS["sidebar_hover"]},
                 ),
-                rx.text(
-                    AuthState.current_emp_no,
-                    size="1",
-                    color=COLORS["text_secondary"],
+            ),
+            rx.popover.content(
+                rx.vstack(
+                    # 사용자 정보
+                    rx.vstack(
+                        rx.text(
+                            AuthState.current_user_nm,
+                            size="2",
+                            weight="medium",
+                        ),
+                        rx.text(
+                            AuthState.current_emp_no,
+                            size="1",
+                            color=COLORS["text_secondary"],
+                        ),
+                        spacing="0",
+                        padding="0.25em 0.5em",
+                    ),
+                    rx.separator(size="4"),
+                    # 메뉴 항목
+                    rx.cond(
+                        AuthState.current_user_role == "ADMIN",
+                        rx.hstack(
+                            rx.icon("settings-2", size=14),
+                            rx.text("관리자 페이지", size="2"),
+                            align="center",
+                            spacing="2",
+                            padding="0.5em 0.75em",
+                            width="100%",
+                            border_radius="6px",
+                            cursor="pointer",
+                            _hover={"bg": COLORS["sidebar_hover"]},
+                            on_click=rx.redirect("/admin"),
+                        ),
+                    ),
+                    rx.hstack(
+                        rx.icon("log-out", size=14),
+                        rx.text("로그아웃", size="2"),
+                        align="center",
+                        spacing="2",
+                        padding="0.5em 0.75em",
+                        width="100%",
+                        border_radius="6px",
+                        cursor="pointer",
+                        color=COLORS["text_secondary"],
+                        _hover={
+                            "bg": COLORS["sidebar_hover"],
+                            "color": COLORS["text_primary"],
+                        },
+                        on_click=AuthState.logout,
+                    ),
+                    spacing="1",
+                    width="100%",
                 ),
-                spacing="0",
+                side="top",
+                align="start",
+                max_width="240px",
             ),
-            rx.spacer(),
-            rx.box(
-                rx.icon("log-out", size=_ICON_SIZE),
-                display="flex",
-                align_items="center",
-                justify_content="center",
-                width=_ICON_BOX,
-                height=_ICON_BOX,
-                border_radius="8px",
-                cursor="pointer",
-                on_click=AuthState.logout,
-                color=COLORS["text_secondary"],
-                _hover={
-                    "bg": COLORS["sidebar_hover"],
-                    "color": COLORS["text_primary"],
-                },
-            ),
-            width="100%",
-            align="center",
-            spacing="2",
-            padding="0.75em",
-            border_radius=SPACING["border_radius_sm"],
         ),
-        # 접힘: 아바타만
+        # 접힘: 아바타만 (클릭 시 메뉴)
         rx.center(
-            rx.tooltip(
-                user_avatar,
-                content=AuthState.current_user_nm,
-                side="right",
+            rx.popover.root(
+                rx.popover.trigger(
+                    rx.box(
+                        user_avatar,
+                        cursor="pointer",
+                    ),
+                ),
+                rx.popover.content(
+                    rx.vstack(
+                        # 사용자 정보
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text(
+                                    AuthState.current_user_nm,
+                                    size="2",
+                                    weight="medium",
+                                ),
+                                rx.text(
+                                    AuthState.current_emp_no,
+                                    size="1",
+                                    color=COLORS["text_secondary"],
+                                ),
+                                spacing="0",
+                            ),
+                            align="center",
+                            spacing="2",
+                            padding="0.25em 0.5em",
+                        ),
+                        rx.separator(size="4"),
+                        # 메뉴 항목
+                        rx.cond(
+                            AuthState.current_user_role == "ADMIN",
+                            rx.hstack(
+                                rx.icon("settings-2", size=14),
+                                rx.text("관리자 페이지", size="2"),
+                                align="center",
+                                spacing="2",
+                                padding="0.5em 0.75em",
+                                width="100%",
+                                border_radius="6px",
+                                cursor="pointer",
+                                _hover={"bg": COLORS["sidebar_hover"]},
+                                on_click=rx.redirect("/admin"),
+                            ),
+                        ),
+                        rx.hstack(
+                            rx.icon("log-out", size=14),
+                            rx.text("로그아웃", size="2"),
+                            align="center",
+                            spacing="2",
+                            padding="0.5em 0.75em",
+                            width="100%",
+                            border_radius="6px",
+                            cursor="pointer",
+                            color=COLORS["text_secondary"],
+                            _hover={
+                                "bg": COLORS["sidebar_hover"],
+                                "color": COLORS["text_primary"],
+                            },
+                            on_click=AuthState.logout,
+                        ),
+                        spacing="1",
+                        width="100%",
+                    ),
+                    side="right",
+                    align="end",
+                    min_width="200px",
+                ),
             ),
             width="100%",
             padding="0.75em",
