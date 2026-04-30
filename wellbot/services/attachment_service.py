@@ -184,7 +184,9 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
         _update_token_count(file_no, emp_no, total_tokens)
 
         # 10. 캐시 무효화 (다음 조회 시 재로드)
-        embedding_service.get_cache().invalidate(_smry_id_from_prefix(s3_prefix))
+        smry_id = _smry_id_from_record(file_no)
+        if smry_id:
+            embedding_service.get_cache().invalidate(smry_id)
 
         log.info(
             "process_attachment 완료: file_no=%s chunks=%d tokens=%d",
@@ -216,10 +218,19 @@ def _update_token_count(file_no: int, emp_no: str, total_tokens: int) -> None:
         record.uppr_id = emp_no[:20]
 
 
-def _smry_id_from_prefix(prefix: str) -> str:
-    """{emp_no}/{smry_id}/{file_no}/ 에서 smry_id 추출."""
-    parts = prefix.strip("/").split("/")
-    return parts[1] if len(parts) >= 2 else ""
+def _smry_id_from_record(file_no: int) -> str:
+    """DB 매핑 테이블에서 smry_id 를 조회한다.
+
+    S3 prefix 파싱은 KEY_PREFIX 길이에 따라 인덱스가 달라지므로
+    DB 를 정본(source of truth)으로 사용한다.
+    """
+    with get_session() as session:
+        row = (
+            session.query(ChtbMsgAtchFileD.chtb_tlk_id)
+            .filter(ChtbMsgAtchFileD.atch_file_no == file_no)
+            .first()
+        )
+        return row[0] if row else ""
 
 
 # ── 조회 ──
@@ -331,6 +342,9 @@ def delete_attachment(file_no: int, emp_no: str) -> bool:
         except Exception as exc:
             log.warning("S3 삭제 실패 (file_no=%s): %s", file_no, exc)
 
+    # 캐시 무효화 (DB 삭제 전에 smry_id 조회)
+    smry_id = _smry_id_from_record(file_no)
+
     # DB 레코드 삭제
     with get_session() as session:
         session.query(ChtbMsgAtchFileD).filter(
@@ -338,8 +352,8 @@ def delete_attachment(file_no: int, emp_no: str) -> bool:
         ).delete()
         session.query(AtchFileM).filter(AtchFileM.atch_file_no == file_no).delete()
 
-    # 캐시 무효화
-    embedding_service.get_cache().invalidate(_smry_id_from_prefix(att.s3_prefix))
+    if smry_id:
+        embedding_service.get_cache().invalidate(smry_id)
     return True
 
 

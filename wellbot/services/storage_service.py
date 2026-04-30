@@ -35,7 +35,13 @@ def _get_bucket() -> str:
     return bucket
 
 
-S3_KEY_PREFIX: str = os.environ.get("S3_KEY_PREFIX", "files")
+def _get_key_prefix() -> str:
+    """S3 키 프리픽스를 환경변수에서 읽는다.
+
+    모듈 로드 시점이 아닌 호출 시점에 평가하여
+    load_dotenv() 이후에도 올바른 값을 반환한다.
+    """
+    return os.environ.get("S3_KEY_PREFIX", "files")
 
 
 def build_prefix(emp_no: str, smry_id: str, file_no: int) -> str:
@@ -43,8 +49,10 @@ def build_prefix(emp_no: str, smry_id: str, file_no: int) -> str:
 
     구조: {S3_KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
     """
-    base = S3_KEY_PREFIX.strip("/")
-    return f"{base}/{emp_no}/{smry_id}/{file_no}/"
+    base = _get_key_prefix().strip("/")
+    if base:
+        return f"{base}/{emp_no}/{smry_id}/{file_no}/"
+    return f"{emp_no}/{smry_id}/{file_no}/"
 
 
 def upload_streaming(
