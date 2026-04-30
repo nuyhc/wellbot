@@ -549,7 +549,7 @@ class ChatState(rx.State):
         url = attachment_service.get_download_url(file_no)
         if not url:
             return None
-        return rx.redirect(url, external=True)
+        return rx.redirect(url, is_external=True)
 
     def _sync_attachments_from_db(self) -> None:
         """현재 대화의 첨부파일 목록을 DB 에서 읽어 pending 갱신."""
