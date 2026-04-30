@@ -25,6 +25,7 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from functools import lru_cache
 from threading import Lock
 from typing import Iterable, Sequence
 
@@ -47,8 +48,9 @@ log = logging.getLogger(__name__)
 # ── Bedrock Titan 임베딩 호출 ──
 
 
+@lru_cache(maxsize=1)
 def _get_client():
-    """Bedrock Runtime 클라이언트. Bedrock 호출과 동일한 자격증명 사용."""
+    """Bedrock Runtime 클라이언트 (싱글턴). Bedrock 호출과 동일한 자격증명 사용."""
     region = os.environ.get(
         "AWS_REGION",
         os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),

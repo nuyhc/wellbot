@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Generator
+from functools import lru_cache
 from typing import Any
 
 import boto3
@@ -16,8 +17,9 @@ import boto3
 from wellbot.services.config import ModelConfig
 
 
+@lru_cache(maxsize=1)
 def _get_client() -> Any:
-    """Bedrock Runtime 클라이언트를 생성한다."""
+    """Bedrock Runtime 클라이언트를 생성한다 (싱글턴)."""
     region = os.environ.get(
         "AWS_REGION",
         os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),

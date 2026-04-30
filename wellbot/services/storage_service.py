@@ -10,6 +10,7 @@ S3 버킷에 저장/조회/삭제.
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
@@ -21,8 +22,9 @@ MULTIPART_CHUNK_SIZE: int = 5 * 1024 * 1024  # 5MB (S3 multipart 최소 단위)
 PRESIGNED_URL_EXPIRES: int = 3600            # 1시간
 
 
+@lru_cache(maxsize=1)
 def _get_client():
-    """S3 클라이언트를 생성한다. boto3 가 환경변수에서 자격증명 자동 로드."""
+    """S3 클라이언트를 생성한다 (싱글턴). boto3 가 환경변수에서 자격증명 자동 로드."""
     region = os.environ.get("S3_REGION", os.environ.get("AWS_REGION", "ap-northeast-2"))
     return boto3.client("s3", region_name=region)
 
