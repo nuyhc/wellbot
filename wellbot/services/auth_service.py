@@ -236,3 +236,40 @@ def list_dept_options() -> list[dict]:
             .all()
         )
         return [{"code": r[0], "name": r[1] or r[0]} for r in rows]
+
+
+def change_password(emp_no: str, current_password: str, new_password: str) -> dict:
+    """비밀번호 변경.
+
+    Args:
+        emp_no: 사원번호.
+        current_password: 현재 비밀번호.
+        new_password: 새 비밀번호.
+
+    Returns:
+        {"success": True} 또는 {"success": False, "error": "에러 메시지"}
+    """
+    if not emp_no or not current_password or not new_password:
+        return {"success": False, "error": "모든 필드를 입력해주세요."}
+
+    with get_session() as session:
+        emp = session.query(EmpM).get(emp_no)
+        if not emp:
+            return {"success": False, "error": "사용자를 찾을 수 없습니다."}
+
+        if emp.acnt_sts_nm != "ACTIVE":
+            return {"success": False, "error": "비활성 계정입니다."}
+
+        # 현재 비밀번호 검증
+        if not emp.ecr_pwd or not bcrypt.checkpw(
+            current_password.encode(), emp.ecr_pwd.encode()
+        ):
+            return {"success": False, "error": "현재 비밀번호가 올바르지 않습니다."}
+
+        # 새 비밀번호 해싱 및 저장
+        hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+        emp.ecr_pwd = hashed
+        emp.upd_dtm = datetime.now(KST)
+        emp.uppr_id = emp_no[:20]
+
+    return {"success": True}

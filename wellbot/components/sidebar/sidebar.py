@@ -191,173 +191,260 @@ def user_profile() -> rx.Component:
         flex_shrink="0",
     )
 
-    return rx.cond(
-        UIState.sidebar_expanded,
-        # 펼침: 프로필 전체가 팝오버 트리거
-        rx.popover.root(
-            rx.popover.trigger(
-                rx.hstack(
-                    user_avatar,
-                    rx.vstack(
-                        rx.text(
-                            AuthState.current_user_nm,
-                            size="2",
-                            color=COLORS["text_primary"],
-                            weight="medium",
-                        ),
-                        rx.text(
-                            AuthState.current_emp_no,
-                            size="1",
-                            color=COLORS["text_secondary"],
-                        ),
-                        spacing="0",
+    # 비밀번호 변경 다이얼로그 (팝오버 밖에 위치)
+    change_pw_dialog = rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("비밀번호 변경", size="4"),
+            rx.dialog.description(
+                "현재 비밀번호를 확인한 후 새 비밀번호를 설정합니다.",
+                size="2",
+                color=COLORS["text_secondary"],
+                margin_bottom="1em",
+            ),
+            # 성공 메시지
+            rx.cond(
+                AuthState.chpw_success,
+                rx.vstack(
+                    rx.callout(
+                        "비밀번호가 변경되었습니다.",
+                        icon="check",
+                        color_scheme="green",
+                        width="100%",
                     ),
-                    rx.spacer(),
-                    rx.icon(
-                        "ellipsis",
-                        size=_ICON_SIZE,
-                        color=COLORS["text_secondary"],
+                    rx.flex(
+                        rx.dialog.close(
+                            rx.button(
+                                "닫기",
+                                variant="solid",
+                                on_click=AuthState.close_change_password,
+                            ),
+                        ),
+                        justify="end",
+                        width="100%",
+                        margin_top="1em",
                     ),
+                    spacing="3",
                     width="100%",
+                ),
+                # 입력 폼
+                rx.form(
+                    rx.vstack(
+                        rx.vstack(
+                            rx.text("현재 비밀번호", size="2", weight="medium"),
+                            rx.input(
+                                placeholder="현재 비밀번호 입력",
+                                type="password",
+                                value=AuthState.chpw_current,
+                                on_change=AuthState.set_chpw_current,
+                                width="100%",
+                                auto_focus=True,
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                        rx.vstack(
+                            rx.text("새 비밀번호", size="2", weight="medium"),
+                            rx.input(
+                                placeholder="새 비밀번호 입력",
+                                type="password",
+                                value=AuthState.chpw_new,
+                                on_change=AuthState.set_chpw_new,
+                                width="100%",
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                        rx.vstack(
+                            rx.text("새 비밀번호 확인", size="2", weight="medium"),
+                            rx.input(
+                                placeholder="새 비밀번호 다시 입력",
+                                type="password",
+                                value=AuthState.chpw_confirm,
+                                on_change=AuthState.set_chpw_confirm,
+                                width="100%",
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                        # 에러 메시지
+                        rx.cond(
+                            AuthState.chpw_error != "",
+                            rx.callout(
+                                AuthState.chpw_error,
+                                icon="triangle_alert",
+                                color_scheme="red",
+                                width="100%",
+                            ),
+                        ),
+                        # 버튼
+                        rx.flex(
+                            rx.dialog.close(
+                                rx.button(
+                                    "취소",
+                                    variant="soft",
+                                    color_scheme="gray",
+                                    on_click=AuthState.close_change_password,
+                                ),
+                            ),
+                            rx.button(
+                                "변경하기",
+                                type="submit",
+                                loading=AuthState.is_changing_password,
+                            ),
+                            justify="end",
+                            gap="0.5em",
+                            width="100%",
+                        ),
+                        spacing="3",
+                        width="100%",
+                    ),
+                    on_submit=AuthState.handle_change_password,
+                    width="100%",
+                ),
+            ),
+            max_width="400px",
+        ),
+        open=AuthState.show_change_password,
+        on_open_change=AuthState.close_change_password,
+    )
+
+    # 팝오버 메뉴 항목 (공통)
+    def _popover_menu() -> rx.Component:
+        return rx.vstack(
+            # 사용자 정보
+            rx.vstack(
+                rx.text(
+                    AuthState.current_user_nm,
+                    size="2",
+                    weight="medium",
+                ),
+                rx.text(
+                    AuthState.current_emp_no,
+                    size="1",
+                    color=COLORS["text_secondary"],
+                ),
+                spacing="0",
+                padding="0.25em 0.5em",
+            ),
+            rx.separator(size="4"),
+            # 메뉴 항목
+            rx.cond(
+                AuthState.current_user_role == "ADMIN",
+                rx.hstack(
+                    rx.icon("settings-2", size=14),
+                    rx.text("관리자 페이지", size="2"),
                     align="center",
                     spacing="2",
-                    padding="0.75em",
-                    border_radius=SPACING["border_radius_sm"],
+                    padding="0.5em 0.75em",
+                    width="100%",
+                    border_radius="6px",
                     cursor="pointer",
                     _hover={"bg": COLORS["sidebar_hover"]},
+                    on_click=rx.redirect("/admin"),
                 ),
             ),
-            rx.popover.content(
-                rx.vstack(
-                    # 사용자 정보
-                    rx.vstack(
-                        rx.text(
-                            AuthState.current_user_nm,
-                            size="2",
-                            weight="medium",
-                        ),
-                        rx.text(
-                            AuthState.current_emp_no,
-                            size="1",
-                            color=COLORS["text_secondary"],
-                        ),
-                        spacing="0",
-                        padding="0.25em 0.5em",
-                    ),
-                    rx.separator(size="4"),
-                    # 메뉴 항목
-                    rx.cond(
-                        AuthState.current_user_role == "ADMIN",
-                        rx.hstack(
-                            rx.icon("settings-2", size=14),
-                            rx.text("관리자 페이지", size="2"),
-                            align="center",
-                            spacing="2",
-                            padding="0.5em 0.75em",
-                            width="100%",
-                            border_radius="6px",
-                            cursor="pointer",
-                            _hover={"bg": COLORS["sidebar_hover"]},
-                            on_click=rx.redirect("/admin"),
-                        ),
-                    ),
-                    rx.hstack(
-                        rx.icon("log-out", size=14),
-                        rx.text("로그아웃", size="2"),
-                        align="center",
-                        spacing="2",
-                        padding="0.5em 0.75em",
-                        width="100%",
-                        border_radius="6px",
-                        cursor="pointer",
-                        color=COLORS["text_secondary"],
-                        _hover={
-                            "bg": COLORS["sidebar_hover"],
-                            "color": COLORS["text_primary"],
-                        },
-                        on_click=AuthState.logout,
-                    ),
-                    spacing="1",
+            rx.popover.close(
+                rx.hstack(
+                    rx.icon("key-round", size=14),
+                    rx.text("비밀번호 변경", size="2"),
+                    align="center",
+                    spacing="2",
+                    padding="0.5em 0.75em",
                     width="100%",
+                    border_radius="6px",
+                    cursor="pointer",
+                    color=COLORS["text_secondary"],
+                    _hover={
+                        "bg": COLORS["sidebar_hover"],
+                        "color": COLORS["text_primary"],
+                    },
+                    on_click=AuthState.open_change_password,
                 ),
-                side="top",
-                align="start",
-                max_width="240px",
             ),
-        ),
-        # 접힘: 아바타만 (클릭 시 메뉴)
-        rx.center(
+            rx.hstack(
+                rx.icon("log-out", size=14),
+                rx.text("로그아웃", size="2"),
+                align="center",
+                spacing="2",
+                padding="0.5em 0.75em",
+                width="100%",
+                border_radius="6px",
+                cursor="pointer",
+                color=COLORS["text_secondary"],
+                _hover={
+                    "bg": COLORS["sidebar_hover"],
+                    "color": COLORS["text_primary"],
+                },
+                on_click=AuthState.logout,
+            ),
+            spacing="1",
+            width="100%",
+        )
+
+    return rx.fragment(
+        change_pw_dialog,
+        rx.cond(
+            UIState.sidebar_expanded,
+            # 펼침: 프로필 전체가 팝오버 트리거
             rx.popover.root(
                 rx.popover.trigger(
-                    rx.box(
+                    rx.hstack(
                         user_avatar,
+                        rx.vstack(
+                            rx.text(
+                                AuthState.current_user_nm,
+                                size="2",
+                                color=COLORS["text_primary"],
+                                weight="medium",
+                            ),
+                            rx.text(
+                                AuthState.current_emp_no,
+                                size="1",
+                                color=COLORS["text_secondary"],
+                            ),
+                            spacing="0",
+                        ),
+                        rx.spacer(),
+                        rx.icon(
+                            "ellipsis",
+                            size=_ICON_SIZE,
+                            color=COLORS["text_secondary"],
+                        ),
+                        width="100%",
+                        align="center",
+                        spacing="2",
+                        padding="0.75em",
+                        border_radius=SPACING["border_radius_sm"],
                         cursor="pointer",
+                        _hover={"bg": COLORS["sidebar_hover"]},
                     ),
                 ),
                 rx.popover.content(
-                    rx.vstack(
-                        # 사용자 정보
-                        rx.hstack(
-                            rx.vstack(
-                                rx.text(
-                                    AuthState.current_user_nm,
-                                    size="2",
-                                    weight="medium",
-                                ),
-                                rx.text(
-                                    AuthState.current_emp_no,
-                                    size="1",
-                                    color=COLORS["text_secondary"],
-                                ),
-                                spacing="0",
-                            ),
-                            align="center",
-                            spacing="2",
-                            padding="0.25em 0.5em",
-                        ),
-                        rx.separator(size="4"),
-                        # 메뉴 항목
-                        rx.cond(
-                            AuthState.current_user_role == "ADMIN",
-                            rx.hstack(
-                                rx.icon("settings-2", size=14),
-                                rx.text("관리자 페이지", size="2"),
-                                align="center",
-                                spacing="2",
-                                padding="0.5em 0.75em",
-                                width="100%",
-                                border_radius="6px",
-                                cursor="pointer",
-                                _hover={"bg": COLORS["sidebar_hover"]},
-                                on_click=rx.redirect("/admin"),
-                            ),
-                        ),
-                        rx.hstack(
-                            rx.icon("log-out", size=14),
-                            rx.text("로그아웃", size="2"),
-                            align="center",
-                            spacing="2",
-                            padding="0.5em 0.75em",
-                            width="100%",
-                            border_radius="6px",
-                            cursor="pointer",
-                            color=COLORS["text_secondary"],
-                            _hover={
-                                "bg": COLORS["sidebar_hover"],
-                                "color": COLORS["text_primary"],
-                            },
-                            on_click=AuthState.logout,
-                        ),
-                        spacing="1",
-                        width="100%",
-                    ),
-                    side="right",
-                    align="end",
-                    min_width="200px",
+                    _popover_menu(),
+                    side="top",
+                    align="start",
+                    max_width="240px",
                 ),
             ),
-            width="100%",
-            padding="0.75em",
+            # 접힘: 아바타만 (클릭 시 메뉴)
+            rx.center(
+                rx.popover.root(
+                    rx.popover.trigger(
+                        rx.box(
+                            user_avatar,
+                            cursor="pointer",
+                        ),
+                    ),
+                    rx.popover.content(
+                        _popover_menu(),
+                        side="right",
+                        align="end",
+                        min_width="200px",
+                    ),
+                ),
+                width="100%",
+                padding="0.75em",
+            ),
         ),
     )
 

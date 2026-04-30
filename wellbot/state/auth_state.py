@@ -266,3 +266,76 @@ class AuthState(rx.State):
 
         self.reg_success = True
         self.is_registering = False
+
+    # ── 비밀번호 변경 ──
+
+    show_change_password: bool = False
+    chpw_current: str = ""
+    chpw_new: str = ""
+    chpw_confirm: str = ""
+    chpw_error: str = ""
+    chpw_success: bool = False
+    is_changing_password: bool = False
+
+    def open_change_password(self) -> None:
+        """비밀번호 변경 다이얼로그를 연다."""
+        self.show_change_password = True
+        self.chpw_current = ""
+        self.chpw_new = ""
+        self.chpw_confirm = ""
+        self.chpw_error = ""
+        self.chpw_success = False
+
+    def close_change_password(self, _value: bool = False) -> None:
+        """비밀번호 변경 다이얼로그를 닫는다."""
+        self.show_change_password = False
+        self.chpw_current = ""
+        self.chpw_new = ""
+        self.chpw_confirm = ""
+        self.chpw_error = ""
+        self.chpw_success = False
+
+    def set_chpw_current(self, value: str) -> None:
+        self.chpw_current = value
+        self.chpw_error = ""
+
+    def set_chpw_new(self, value: str) -> None:
+        self.chpw_new = value
+        self.chpw_error = ""
+
+    def set_chpw_confirm(self, value: str) -> None:
+        self.chpw_confirm = value
+        self.chpw_error = ""
+
+    def handle_change_password(self, _form_data: dict | None = None) -> None:
+        """비밀번호 변경 처리."""
+        current = self.chpw_current
+        new_pw = self.chpw_new
+        confirm = self.chpw_confirm
+
+        if not current or not new_pw or not confirm:
+            self.chpw_error = "모든 필드를 입력해주세요."
+            return
+
+        if new_pw != confirm:
+            self.chpw_error = "새 비밀번호가 일치하지 않습니다."
+            return
+
+        if len(new_pw) < PASSWORD_MIN_LENGTH:
+            self.chpw_error = f"비밀번호는 {PASSWORD_MIN_LENGTH}자 이상이어야 합니다."
+            return
+
+        if current == new_pw:
+            self.chpw_error = "현재 비밀번호와 다른 비밀번호를 입력해주세요."
+            return
+
+        self.is_changing_password = True
+        result = auth_service.change_password(self.current_emp_no, current, new_pw)
+
+        if not result["success"]:
+            self.chpw_error = result["error"]
+            self.is_changing_password = False
+            return
+
+        self.chpw_success = True
+        self.is_changing_password = False
