@@ -574,8 +574,8 @@ class ChatState(rx.State):
                 file_no=r.file_no,
                 name=r.file_name,
                 mime=r.mime,
-                token_count=r.token_count,
-                status="ready" if r.token_count is not None and r.token_count >= 0 else "processing",
+                token_count=r.token_count or 0,
+                status="ready" if r.token_count is not None else "processing",
             )
             for r in rows
             if r.file_no not in assigned
@@ -741,8 +741,8 @@ class ChatState(rx.State):
         for i, a in enumerate(atts, start=1):
             mime = a.mime or ""
             type_label = _mime_to_label(mime)
-            tokens = a.token_count or 0
-            token_str = f"{tokens:,} 토큰" if tokens else "처리 중"
+            tokens = a.token_count
+            token_str = f"{tokens:,} 토큰" if tokens is not None and tokens > 0 else "처리 중"
             lines.append(f"{i}. {a.file_name} ({type_label}, {token_str})")
         return f"{base_prompt}\n\n" + "\n".join(lines)
 

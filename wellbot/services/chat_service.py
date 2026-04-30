@@ -89,7 +89,11 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
                 "name": a.atch_file_nm or "",
                 "mime": file_parser.guess_mime(a.atch_file_nm or ""),
                 "size_bytes": 0,
-                "token_count": int(a.atch_file_tokn_ecnt or 0),
+                "token_count": (
+                    int(a.atch_file_tokn_ecnt)
+                    if a.atch_file_tokn_ecnt is not None
+                    else 0
+                ),
                 "status": (
                     "ready"
                     if a.atch_file_tokn_ecnt is not None

@@ -34,7 +34,7 @@ class AttachmentRecord:
     file_no: int
     file_name: str
     s3_prefix: str
-    token_count: int
+    token_count: int | None  # None = 처리 중, 0 이상 = 처리 완료
     mime: str
 
 
@@ -254,7 +254,11 @@ def get_conversation_attachments(smry_id: str) -> list[AttachmentRecord]:
                 file_no=int(r.atch_file_no),
                 file_name=r.atch_file_nm or "",
                 s3_prefix=r.atch_file_url_addr or "",
-                token_count=int(r.atch_file_tokn_ecnt or 0),
+                token_count=(
+                    int(r.atch_file_tokn_ecnt)
+                    if r.atch_file_tokn_ecnt is not None
+                    else None
+                ),
                 mime=file_parser.guess_mime(r.atch_file_nm or ""),
             )
             for r in rows
@@ -271,7 +275,11 @@ def get_attachment(file_no: int) -> AttachmentRecord | None:
             file_no=int(record.atch_file_no),
             file_name=record.atch_file_nm or "",
             s3_prefix=record.atch_file_url_addr or "",
-            token_count=int(record.atch_file_tokn_ecnt or 0),
+            token_count=(
+                int(record.atch_file_tokn_ecnt)
+                if record.atch_file_tokn_ecnt is not None
+                else None
+            ),
             mime=file_parser.guess_mime(record.atch_file_nm or ""),
         )
 
