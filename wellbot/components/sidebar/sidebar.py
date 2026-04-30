@@ -128,6 +128,13 @@ def _expanded_header() -> rx.Component:
                 north_star_icon(size=_ICON_SIZE),
                 color=COLORS["text_primary"],
             ),
+            rx.text(
+                "WellBot",
+                size="2",
+                weight="bold",
+                color=COLORS["text_primary"],
+                white_space="nowrap",
+            ),
             align="center",
             spacing="2",
         ),

@@ -5,6 +5,7 @@
 
 import reflex as rx
 
+from wellbot.components.icons import north_star_icon
 from wellbot.state.auth_state import AuthState
 from wellbot.styles import COLORS
 
@@ -39,9 +40,8 @@ def login() -> rx.Component:
                     rx.form(
                         rx.vstack(
                             rx.vstack(
-                                rx.icon(
-                                    "bot",
-                                    size=48,
+                                rx.box(
+                                    north_star_icon(size=48),
                                     color=COLORS["accent"],
                                     on_click=AuthState.handle_easter_egg_click,
                                 ),
