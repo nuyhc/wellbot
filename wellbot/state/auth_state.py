@@ -286,7 +286,7 @@ class AuthState(rx.State):
         self.chpw_error = ""
         self.chpw_success = False
 
-    def close_change_password(self, _value: bool = False) -> None:
+    def close_change_password(self) -> None:
         """비밀번호 변경 다이얼로그를 닫는다."""
         self.show_change_password = False
         self.chpw_current = ""

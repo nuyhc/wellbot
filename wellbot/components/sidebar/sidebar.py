@@ -312,7 +312,7 @@ def user_profile() -> rx.Component:
             max_width="400px",
         ),
         open=AuthState.show_change_password,
-        on_open_change=AuthState.close_change_password,
+        on_open_change=lambda open: rx.cond(~open, AuthState.close_change_password, None),  # type: ignore
     )
 
     # 팝오버 메뉴 항목 (공통)
