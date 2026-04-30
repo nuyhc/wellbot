@@ -24,7 +24,7 @@ def _file_icon(mime: str) -> rx.Component:
                 rx.icon("table-2", size=16, color=COLORS["text_secondary"]),
                 rx.cond(
                     mime.contains("presentation"),
-                    rx.icon("presentation", size=16, color=COLORS["text_secondary"]),
+                    rx.icon("file-chart-pie", size=16, color=COLORS["text_secondary"]),
                     rx.cond(
                         mime.contains("word") | mime.contains("hwp"),
                         rx.icon("file-pen-line", size=16, color=COLORS["text_secondary"]),
