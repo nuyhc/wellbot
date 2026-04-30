@@ -64,6 +64,11 @@ CHUNK_OVERLAP_TOKENS: int = 200
 EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
 EMBEDDING_DIMENSION: int = 1024
 
+# ── 임베딩 병렬 처리 ──
+EMBED_MAX_WORKERS: int = 5            # 동시 임베딩 요청 수
+EMBED_MAX_RETRIES: int = 3            # 쓰로틀링 시 최대 재시도 횟수
+EMBED_RETRY_BASE_DELAY: float = 0.5   # 지수 백오프 기본 대기(초)
+
 # ── 검색 ──
 SEARCH_TOP_K: int = 5
 TOOL_USE_MAX_ITERATIONS: int = 3          # tool 호출 무한루프 방지
