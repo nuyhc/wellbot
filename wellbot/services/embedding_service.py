@@ -18,20 +18,30 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
+import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Iterable, Sequence
 
 import boto3
 import numpy as np
+from botocore.exceptions import ClientError
 
 from wellbot.constants import (
+    EMBED_MAX_RETRIES,
+    EMBED_MAX_WORKERS,
+    EMBED_RETRY_BASE_DELAY,
     EMBEDDING_DIMENSION,
     EMBEDDING_MODEL_ID,
     FAISS_CACHE_MAX_CONVERSATIONS,
 )
+
+log = logging.getLogger(__name__)
 
 
 # ── Bedrock Titan 임베딩 호출 ──
@@ -47,34 +57,53 @@ def _get_client():
 
 
 def embed_text(text: str) -> np.ndarray:
-    """단일 텍스트를 임베딩한다.
+    """단일 텍스트를 임베딩한다. 쓰로틀링 시 지수 백오프로 재시도.
 
     Returns:
         shape=(EMBEDDING_DIMENSION,) float32 array.
     """
     client = _get_client()
     body = json.dumps({"inputText": text}).encode("utf-8")
-    response = client.invoke_model(
-        modelId=EMBEDDING_MODEL_ID,
-        body=body,
-        accept="application/json",
-        contentType="application/json",
-    )
-    payload = json.loads(response["body"].read())
-    embedding = payload.get("embedding") or []
-    arr = np.asarray(embedding, dtype=np.float32)
-    if arr.shape[0] != EMBEDDING_DIMENSION:
-        raise RuntimeError(
-            f"임베딩 차원 불일치: 예상 {EMBEDDING_DIMENSION}, 실제 {arr.shape[0]}"
-        )
-    return arr
+
+    for attempt in range(EMBED_MAX_RETRIES + 1):
+        try:
+            response = client.invoke_model(
+                modelId=EMBEDDING_MODEL_ID,
+                body=body,
+                accept="application/json",
+                contentType="application/json",
+            )
+            payload = json.loads(response["body"].read())
+            embedding = payload.get("embedding") or []
+            arr = np.asarray(embedding, dtype=np.float32)
+            if arr.shape[0] != EMBEDDING_DIMENSION:
+                raise RuntimeError(
+                    f"임베딩 차원 불일치: 예상 {EMBEDDING_DIMENSION}, 실제 {arr.shape[0]}"
+                )
+            return arr
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code in ("ThrottlingException", "TooManyRequestsException"):
+                if attempt < EMBED_MAX_RETRIES:
+                    # 지수 백오프 + 지터(jitter)
+                    delay = EMBED_RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
+                    log.warning(
+                        "임베딩 쓰로틀링 (attempt %d/%d), %.1f초 후 재시도",
+                        attempt + 1, EMBED_MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+            raise
+
+    # 여기 도달하면 안 되지만 안전장치
+    raise RuntimeError(f"임베딩 재시도 {EMBED_MAX_RETRIES}회 초과")
 
 
 def embed_texts(texts: Sequence[str]) -> np.ndarray:
-    """여러 텍스트를 배치 임베딩한다.
+    """여러 텍스트를 병렬 임베딩한다.
 
-    Titan V2 는 배치 입력을 지원하지 않아 순차 호출.
-    (향후 Bedrock batch inference 로 최적화 가능)
+    ThreadPoolExecutor 로 동시 요청하여 I/O 대기 시간을 줄인다.
+    빈 텍스트는 API 호출 없이 제로 벡터로 처리.
 
     Returns:
         shape=(N, EMBEDDING_DIMENSION) float32 array.
@@ -82,13 +111,30 @@ def embed_texts(texts: Sequence[str]) -> np.ndarray:
     if not texts:
         return np.empty((0, EMBEDDING_DIMENSION), dtype=np.float32)
 
-    vectors: list[np.ndarray] = []
-    for text in texts:
+    # 빈 텍스트는 제로 벡터로 처리 (API 호출 불필요)
+    results: list[tuple[int, np.ndarray]] = []
+    to_embed: list[tuple[int, str]] = []
+
+    for i, text in enumerate(texts):
         if not text.strip():
-            vectors.append(np.zeros(EMBEDDING_DIMENSION, dtype=np.float32))
-            continue
-        vectors.append(embed_text(text))
-    return np.vstack(vectors)
+            results.append((i, np.zeros(EMBEDDING_DIMENSION, dtype=np.float32)))
+        else:
+            to_embed.append((i, text))
+
+    # 병렬 호출
+    if to_embed:
+        with ThreadPoolExecutor(max_workers=EMBED_MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(embed_text, text): idx
+                for idx, text in to_embed
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                results.append((idx, future.result()))
+
+    # 원래 순서로 정렬 후 합치기
+    results.sort(key=lambda x: x[0])
+    return np.vstack([vec for _, vec in results])
 
 
 # ── FAISS 인덱스 빌드/직렬화 ──
