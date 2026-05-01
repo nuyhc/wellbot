@@ -549,7 +549,11 @@ class ChatState(rx.State):
         url = attachment_service.get_download_url(file_no)
         if not url:
             return None
-        return rx.redirect(url, is_external=True)
+        # 숨겨진 <a> 태그로 새 창 없이 다운로드 트리거
+        safe_url = url.replace("'", "\\'")
+        return rx.call_script(
+            f"(function(){{ var a=document.createElement('a'); a.href='{safe_url}'; a.download=''; document.body.appendChild(a); a.click(); a.remove(); }})()"
+        )
 
     def _sync_attachments_from_db(self) -> None:
         """현재 대화의 첨부파일 목록을 DB 에서 읽어 pending 갱신."""
