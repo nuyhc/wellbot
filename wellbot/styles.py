@@ -67,6 +67,18 @@ GLOBAL_STYLE = {
     "::-webkit-scrollbar-thumb:hover": {
         "background": str(rx.color("gray", 8)),
     },
+    ".codeblock-wrapper pre": {
+        "background": "transparent !important",
+        "margin": "0 !important",
+        "border_radius": "0 !important",
+        "padding": "1em !important",
+    },
+    ".codeblock-wrapper pre code": {
+        "background": "transparent !important",
+    },
+    ".codeblock-wrapper pre code span": {
+        "background": "transparent !important",
+    },
 }
 
 # 앱 테마
@@ -134,6 +146,7 @@ def _custom_codeblock(value: object, **props) -> rx.Component:
         border=f"1px solid {rx.color('gray', 4)}",
         overflow="hidden",
         margin_y="0.75em",
+        class_name="codeblock-wrapper",
     )
 
 
