@@ -25,7 +25,6 @@ AUTO_SCROLL_SCRIPT = """
 
     function setup() {
         var el = document.getElementById('message-area');
-        var btn = document.getElementById('scroll-to-bottom-btn');
         if (!el) return false;
 
         // 이미 설정된 경우 스킵
@@ -43,27 +42,28 @@ AUTO_SCROLL_SCRIPT = """
         }
 
         function updateBtn() {
+            var btn = document.getElementById('scroll-to-bottom-btn');
             if (!btn) return;
             btn.style.display = (userScrolledUp && el.scrollHeight > el.clientHeight) ? 'flex' : 'none';
         }
 
         el.addEventListener('scroll', function() {
             var dist = distFromBottom();
-            userScrolledUp = dist >= BTN_THRESHOLD;
-            updateBtn();
-            // 하단 근처로 돌아오면 자동 스크롤 재개
-            if (dist < SCROLL_THRESHOLD) {
+            if (dist >= SCROLL_THRESHOLD) {
+                userScrolledUp = true;
+            } else if (dist < BTN_THRESHOLD) {
                 userScrolledUp = false;
             }
+            updateBtn();
         });
 
-        if (btn) {
-            btn.addEventListener('click', function() {
+        el.addEventListener('click', function(e) {
+            if (e.target.closest('#scroll-to-bottom-btn')) {
                 userScrolledUp = false;
                 scrollToBottom();
                 updateBtn();
-            });
-        }
+            }
+        });
 
         var observer = new MutationObserver(function() {
             if (!userScrolledUp) {
