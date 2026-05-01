@@ -128,9 +128,10 @@ def _expanded_header() -> rx.Component:
                 north_star_icon(size=_ICON_SIZE),
                 color=COLORS["text_primary"],
             ),
+            rx.spacer(),
             rx.text(
                 "WellBot",
-                size="2",
+                size="4",
                 weight="bold",
                 color=COLORS["text_primary"],
                 white_space="nowrap",
@@ -203,7 +204,7 @@ def user_profile() -> rx.Component:
         rx.dialog.content(
             rx.dialog.title("비밀번호 변경", size="4"),
             rx.dialog.description(
-                "현재 비밀번호를 확인한 후 새 비밀번호를 설정합니다.",
+                "",
                 size="2",
                 color=COLORS["text_secondary"],
                 margin_bottom="1em",
@@ -285,13 +286,12 @@ def user_profile() -> rx.Component:
                         ),
                         # 버튼
                         rx.flex(
-                            rx.dialog.close(
-                                rx.button(
-                                    "취소",
-                                    variant="soft",
-                                    color_scheme="gray",
-                                    on_click=AuthState.close_change_password,
-                                ),
+                            rx.button(
+                                "취소",
+                                type="button",
+                                variant="soft",
+                                color_scheme="gray",
+                                on_click=AuthState.close_change_password,
                             ),
                             rx.button(
                                 "변경하기",
@@ -346,7 +346,11 @@ def user_profile() -> rx.Component:
                     width="100%",
                     border_radius="6px",
                     cursor="pointer",
-                    _hover={"bg": COLORS["sidebar_hover"]},
+                    color=COLORS["text_secondary"],
+                    _hover={
+                        "bg": COLORS["sidebar_hover"],
+                        "color": COLORS["text_primary"],
+                    },
                     on_click=rx.redirect("/admin"),
                 ),
             ),
@@ -367,6 +371,7 @@ def user_profile() -> rx.Component:
                     },
                     on_click=AuthState.open_change_password,
                 ),
+                width="100%",
             ),
             rx.hstack(
                 rx.icon("log-out", size=14),
