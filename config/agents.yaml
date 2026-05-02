@@ -1,0 +1,15 @@
+# 에이전트 모드 설정
+# - id: 내부 식별자
+# - name: UI 에 표시할 이름
+# - description: 모드 설명
+
+agent_modes:
+  - id: chat
+    name: 기본 대화
+    description: 일반 대화 모드
+    icon: message-circle
+
+  - id: report
+    name: Report
+    description: 보고서 작성 모드
+    icon: file-text
