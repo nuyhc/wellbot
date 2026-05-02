@@ -146,6 +146,7 @@ class ChatState(rx.State):
     # ── 첨부파일 ──
     pending_attachments: list[AttachmentInfo] = []
     attachment_error: str = ""
+    conversation_attachments: list[AttachmentInfo] = []
 
     # ── 생성 중지 ──
     _cancel_requested: bool = False
@@ -196,6 +197,7 @@ class ChatState(rx.State):
         """DB에서 대화의 메시지를 로드."""
         conv = self.conversations[idx]
         if conv.is_loaded:
+            self._load_conversation_attachments(conv.id)
             return
         msgs = chat_service.get_conversation_messages(conv.id, self._emp_no)
         loaded = [
@@ -205,13 +207,28 @@ class ChatState(rx.State):
                 timestamp=m["timestamp"],
                 model_name=m.get("model_name", ""),
                 seq=m.get("seq", 0),
-                attachments=[
-                    AttachmentInfo(**a) for a in (m.get("attachments") or [])
-                ],
             )
             for m in msgs
         ]
         self._update_conversation(idx, messages=loaded, is_loaded=True)
+        self._load_conversation_attachments(conv.id)
+
+    def _load_conversation_attachments(self, conv_id: str) -> None:
+        """대화의 첨부파일 목록을 DB에서 로드."""
+        try:
+            rows = attachment_service.get_conversation_attachments(conv_id)
+            self.conversation_attachments = [
+                AttachmentInfo(
+                    file_no=r.file_no,
+                    name=r.file_name,
+                    mime=r.mime,
+                    token_count=r.token_count or 0,
+                    status="ready" if r.token_count is not None else "processing",
+                )
+                for r in rows
+            ]
+        except Exception:
+            self.conversation_attachments = []
 
     # ── Computed vars ──
 
@@ -270,6 +287,16 @@ class ChatState(rx.State):
             return mode.icon if mode else "message-circle"
         except Exception:
             return "message-circle"
+
+    @rx.var
+    def has_conversation_attachments(self) -> bool:
+        """현재 대화에 첨부파일이 있는지 여부."""
+        return len(self.conversation_attachments) > 0
+
+    @rx.var
+    def conversation_attachment_count(self) -> int:
+        """현재 대화의 첨부파일 수."""
+        return len(self.conversation_attachments)
 
     @rx.var
     def has_processing_attachments(self) -> bool:
@@ -491,6 +518,7 @@ class ChatState(rx.State):
         self.conversations = [conv, *self.conversations]
         self.current_conversation_id = conv.id
         self.current_input = ""
+        self.conversation_attachments = []
         self._refresh_greeting()
 
     def switch_conversation(self, conv_id: str) -> None:
@@ -600,22 +628,23 @@ class ChatState(rx.State):
         ]
 
     def download_attachment(self, file_no: int) -> rx.event.EventSpec | None:
-        """첨부파일 presigned URL 을 열어 다운로드한다."""
+        """첨부파일 다운로드 (presigned URL을 새 탭으로 열기)."""
         if not self._emp_no:
             return None
         if not attachment_service.verify_ownership(file_no, self._emp_no):
             return None
-        url = attachment_service.get_download_url(file_no)
-        if not url:
+        info = attachment_service.get_download_info(file_no)
+        if not info:
             return None
-        # 숨겨진 <a> 태그로 새 창 없이 다운로드 트리거
-        safe_url = url.replace("'", "\\'")
-        return rx.call_script(
-            f"(function(){{ var a=document.createElement('a'); a.href='{safe_url}'; a.download=''; document.body.appendChild(a); a.click(); a.remove(); }})()"
-        )
+        url, _ = info
+        return rx.redirect(url, is_external=True)
 
     def _sync_attachments_from_db(self) -> None:
-        """현재 대화의 첨부파일 목록을 DB 에서 읽어 pending 갱신."""
+        """업로드 직후 DB 를 폴링해 pending 상태를 갱신한다.
+
+        conversation_attachments 에 이미 있는 파일(= 전송 완료)은 제외하고,
+        방금 업로드했지만 아직 메시지로 전송하지 않은 파일만 pending 에 표시.
+        """
         if not self._emp_no or not self.current_conversation_id:
             return
         try:
@@ -624,13 +653,7 @@ class ChatState(rx.State):
             )
         except Exception:
             return
-        # 메시지에 이미 할당된 file_no 는 pending 에서 제외 (대화 저장 후 이동)
-        assigned: set[int] = set()
-        idx = self._get_current_index()
-        if idx is not None:
-            for m in self.conversations[idx].messages:
-                for a in (m.attachments or []):
-                    assigned.add(a.file_no)
+        sent: set[int] = {a.file_no for a in self.conversation_attachments}
 
         self.pending_attachments = [
             AttachmentInfo(
@@ -641,7 +664,7 @@ class ChatState(rx.State):
                 status="ready" if r.token_count is not None else "processing",
             )
             for r in rows
-            if r.file_no not in assigned
+            if r.file_no not in sent
         ]
 
     @rx.event(background=True)
@@ -875,7 +898,13 @@ class ChatState(rx.State):
 
             self._update_conversation(idx, title=title, messages=updated_messages)
             self.current_input = ""
-            self.pending_attachments = []  # 메시지에 이동했으므로 초기화
+            # pending → conversation_attachments 로 이동
+            if self.pending_attachments:
+                self.conversation_attachments = [
+                    *self.conversation_attachments,
+                    *self.pending_attachments,
+                ]
+            self.pending_attachments = []
             self.attachment_error = ""
             self.is_loading = True
             self.is_thinking = False

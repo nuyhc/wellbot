@@ -284,17 +284,15 @@ def get_attachment(file_no: int) -> AttachmentRecord | None:
         )
 
 
-def get_download_url(file_no: int) -> str | None:
-    """첨부파일 다운로드용 presigned URL 생성."""
+def get_download_info(file_no: int) -> tuple[str, str] | None:
+    """첨부파일 다운로드용 presigned URL + 파일명 반환."""
     att = get_attachment(file_no)
     if not att or not att.s3_prefix:
         return None
     ext = Path(att.file_name).suffix.lower()
     s3_key = f"{att.s3_prefix}original{ext}"
-    return storage_service.get_presigned_url(
-        s3_key,
-        download_filename=att.file_name,
-    )
+    url = storage_service.get_presigned_url(s3_key)
+    return url, att.file_name
 
 
 def download_original_bytes(file_no: int) -> bytes | None:

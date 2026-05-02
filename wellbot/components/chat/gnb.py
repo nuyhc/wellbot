@@ -1,11 +1,11 @@
 """채팅 영역 상단 GNB (Global Navigation Bar).
 
-좌: 에이전트 모드 드롭다운 | 중앙: 대화 제목 | 우: 다크/라이트 모드 토글
+좌: 에이전트 모드 드롭다운 | 중앙: 대화 제목 | 우: 첨부파일 + 다크/라이트 모드 토글
 """
 
 import reflex as rx
 
-from wellbot.state.chat_state import ChatState
+from wellbot.state.chat_state import AttachmentInfo, ChatState
 from wellbot.styles import COLORS, SPACING
 
 
@@ -71,6 +71,87 @@ def _conversation_title() -> rx.Component:
     )
 
 
+def _attachment_item(att: AttachmentInfo) -> rx.Component:
+    """팝오버 내 첨부파일 한 줄."""
+    return rx.hstack(
+        rx.icon("file", size=14, color=COLORS["text_secondary"]),
+        rx.text(
+            att.name,
+            size="1",
+            color=COLORS["text_primary"],
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+            max_width="200px",
+        ),
+        rx.spacer(),
+        rx.icon_button(
+            rx.icon("download", size=12),
+            variant="ghost",
+            size="1",
+            cursor="pointer",
+            color=COLORS["text_secondary"],
+            _hover={"color": COLORS["text_primary"]},
+            on_click=ChatState.download_attachment(att.file_no),
+        ),
+        align="center",
+        width="100%",
+        padding="0.35em 0.5em",
+        border_radius="4px",
+        _hover={"bg": COLORS["sidebar_hover"]},
+    )
+
+
+def _attachment_popover() -> rx.Component:
+    """첨부파일 팝오버 버튼 (파일 있을 때만 표시)."""
+    return rx.cond(
+        ChatState.has_conversation_attachments,
+        rx.popover.root(
+            rx.popover.trigger(
+                rx.button(
+                    rx.icon("paperclip", size=14),
+                    rx.text(
+                        ChatState.conversation_attachment_count,
+                        size="1",
+                        weight="bold",
+                    ),
+                    variant="ghost",
+                    size="1",
+                    cursor="pointer",
+                    color=COLORS["text_secondary"],
+                    _hover={"color": COLORS["text_primary"]},
+                    gap="0.2em",
+                ),
+            ),
+            rx.popover.content(
+                rx.vstack(
+                    rx.text(
+                        "첨부파일",
+                        size="2",
+                        weight="medium",
+                        color=COLORS["text_primary"],
+                    ),
+                    rx.separator(size="4"),
+                    rx.vstack(
+                        rx.foreach(
+                            ChatState.conversation_attachments,
+                            _attachment_item,
+                        ),
+                        spacing="0",
+                        width="100%",
+                        max_height="240px",
+                        overflow_y="auto",
+                    ),
+                    spacing="2",
+                    width="260px",
+                ),
+                side="bottom",
+                align="end",
+            ),
+        ),
+    )
+
+
 def _color_mode_toggle() -> rx.Component:
     """다크/라이트 모드 전환 버튼."""
     return rx.icon_button(
@@ -105,13 +186,14 @@ def chat_gnb() -> rx.Component:
             justify_content="center",
             align_items="center",
         ),
-        # 우: 다크/라이트 토글
-        rx.box(
+        # 우: 첨부파일 + 다크/라이트 토글
+        rx.hstack(
+            _attachment_popover(),
             _color_mode_toggle(),
             flex="1",
-            display="flex",
-            justify_content="flex-end",
-            align_items="center",
+            justify="end",
+            align="center",
+            gap="0.25em",
         ),
         width="100%",
         height=SPACING["gnb_height"],

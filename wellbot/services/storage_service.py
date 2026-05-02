@@ -151,18 +151,12 @@ def object_exists(s3_key: str) -> bool:
 def get_presigned_url(
     s3_key: str,
     expires_in: int = PRESIGNED_URL_EXPIRES,
-    download_filename: str | None = None,
 ) -> str:
     """presigned GET URL 을 발급한다 (다운로드용)."""
     client = _get_client()
     bucket = _get_bucket()
 
     params: dict = {"Bucket": bucket, "Key": s3_key}
-    if download_filename:
-        params["ResponseContentDisposition"] = (
-            f'attachment; filename="{download_filename}"'
-        )
-
     return client.generate_presigned_url(
         "get_object",
         Params=params,
