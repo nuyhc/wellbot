@@ -646,7 +646,8 @@ class ChatState(rx.State):
           u.port !== loc.port
         );
         if (isLocalDev) {{
-          backendBase = u.origin;  // Dev: e.g. "http://localhost:8000"
+          // 쿠키가 전달되도록 hostname 을 현재 페이지와 동일하게 맞춘다
+          backendBase = loc.protocol + '//' + loc.hostname + ':' + u.port;
         }}
         // 그 외 (ALB/Nginx 프록시 등): 상대 경로 사용 (backendBase = '')
       }}

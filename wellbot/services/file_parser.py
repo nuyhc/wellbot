@@ -121,7 +121,10 @@ class LocalParser:
         raise UnsupportedFileTypeError(f"LocalParser 는 {ext} 를 지원하지 않습니다.")
 
     def _parse_pdf(self, path: Path) -> ParsedDocument:
+        import logging
         import pdfplumber
+
+        logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
         texts: list[str] = []
         with pdfplumber.open(path) as pdf:
