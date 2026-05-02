@@ -32,6 +32,15 @@ from wellbot.services import attachment_service, chat_service, file_parser, resp
 from wellbot.services.config import get_config, get_greetings
 
 
+class AgentModeInfo(BaseModel):
+    """프론트엔드 표시용 에이전트 모드 정보."""
+
+    id: str
+    name: str
+    description: str = ""
+    icon: str = "message-circle"
+
+
 class ModelInfo(BaseModel):
     """프론트엔드 표시용 모델 정보."""
 
@@ -131,6 +140,9 @@ class ChatState(rx.State):
     show_style_panel: bool = False
     greeting_text: str = ""
 
+    # ── 에이전트 모드 ──
+    selected_agent_mode: str = "chat"
+
     # ── 첨부파일 ──
     pending_attachments: list[AttachmentInfo] = []
     attachment_error: str = ""
@@ -215,6 +227,49 @@ class ChatState(rx.State):
     def has_messages(self) -> bool:
         """현재 대화에 메시지가 있는지 여부."""
         return len(self.current_messages) > 0
+
+    @rx.var
+    def current_title(self) -> str:
+        """현재 대화의 제목."""
+        idx = self._get_current_index()
+        if idx is None:
+            return ""
+        return self.conversations[idx].title
+
+    @rx.var
+    def agent_mode_list(self) -> list[AgentModeInfo]:
+        """사용 가능한 에이전트 모드 목록."""
+        try:
+            cfg = get_config()
+            return [
+                AgentModeInfo(
+                    id=a.id, name=a.name,
+                    description=a.description, icon=a.icon,
+                )
+                for a in cfg.agent_modes
+            ]
+        except Exception:
+            return []
+
+    @rx.var
+    def current_agent_mode_name(self) -> str:
+        """현재 선택된 에이전트 모드 이름."""
+        try:
+            cfg = get_config()
+            mode = cfg.get_agent_mode(self.selected_agent_mode)
+            return mode.name if mode else "기본 대화"
+        except Exception:
+            return "기본 대화"
+
+    @rx.var
+    def current_agent_mode_icon(self) -> str:
+        """현재 선택된 에이전트 모드 아이콘."""
+        try:
+            cfg = get_config()
+            mode = cfg.get_agent_mode(self.selected_agent_mode)
+            return mode.icon if mode else "message-circle"
+        except Exception:
+            return "message-circle"
 
     @rx.var
     def has_processing_attachments(self) -> bool:
@@ -319,6 +374,10 @@ class ChatState(rx.State):
             return ""
 
     # ── Event handlers ──
+
+    def set_agent_mode(self, mode_id: str) -> None:
+        """에이전트 모드를 변경한다."""
+        self.selected_agent_mode = mode_id
 
     def stop_generation(self) -> None:
         """사용자가 생성 중지를 요청한다."""

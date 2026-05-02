@@ -49,6 +49,7 @@ class AppConfig:
     system_prompt: str
     models: tuple[ModelConfig, ...]
     prompts: tuple[PromptTemplate, ...]
+    agent_modes: tuple[AgentMode, ...] = ()
 
     def get_model(self, name: str) -> ModelConfig | None:
         """이름으로 모델 설정을 찾는다."""
@@ -79,10 +80,33 @@ class AppConfig:
         """프롬프트 템플릿 이름 목록."""
         return [p.name for p in self.prompts]
 
+    @property
+    def agent_mode_ids(self) -> list[str]:
+        """에이전트 모드 ID 목록."""
+        return [a.id for a in self.agent_modes]
+
+    def get_agent_mode(self, mode_id: str) -> AgentMode | None:
+        """ID로 에이전트 모드를 찾는다."""
+        for a in self.agent_modes:
+            if a.id == mode_id:
+                return a
+        return None
+
+
+@dataclass(frozen=True)
+class AgentMode:
+    """에이전트 모드 설정."""
+
+    id: str
+    name: str
+    description: str = ""
+    icon: str = "message-circle"
+
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "models.yaml"
 _PROMPTS_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "prompts.yaml"
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "config" / "prompts"
+_AGENTS_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "agents.yaml"
 
 _config: AppConfig | None = None
 
@@ -141,6 +165,21 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
     return system_prompt, prompts
 
 
+def _load_agent_modes() -> tuple[AgentMode, ...]:
+    """config/agents.yaml에서 에이전트 모드를 로드한다."""
+    if not _AGENTS_CONFIG_PATH.exists():
+        return (AgentMode(id="chat", name="기본 대화", icon="message-circle"),)
+    try:
+        with open(_AGENTS_CONFIG_PATH, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+        items = raw.get("agent_modes", [])
+        return tuple(AgentMode(**item) for item in items) if items else (
+            AgentMode(id="chat", name="기본 대화", icon="message-circle"),
+        )
+    except Exception:
+        return (AgentMode(id="chat", name="기본 대화", icon="message-circle"),)
+
+
 def load_config(path: Path | None = None) -> AppConfig:
     """YAML 파일에서 설정을 로드한다."""
     if path is None:
@@ -151,11 +190,13 @@ def load_config(path: Path | None = None) -> AppConfig:
 
     models = tuple(ModelConfig(**m) for m in raw.get("models", []))
     system_prompt, prompts = _load_prompt_config()
+    agent_modes = _load_agent_modes()
 
     return AppConfig(
         system_prompt=system_prompt,
         models=models,
         prompts=prompts,
+        agent_modes=agent_modes,
     )
 
 

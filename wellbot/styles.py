@@ -35,6 +35,7 @@ SPACING = {
     "border_radius": "24px",
     "border_radius_sm": "8px",
     "border_radius_md": "16px",
+    "gnb_height": "48px",
     "padding_page": "1.5em",
     "padding_component": "1em",
 }

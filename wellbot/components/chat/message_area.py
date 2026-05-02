@@ -174,7 +174,7 @@ def message_area() -> rx.Component:
         flex="1",
         overflow_y="auto",
         width="100%",
-        padding_top="3em",
+        padding_top="1em",
         position="relative",
         transition="all 0.2s ease",
     )

@@ -6,6 +6,7 @@
 
 import reflex as rx
 
+from wellbot.components.chat.gnb import chat_gnb
 from wellbot.components.chat.input_bar import input_bar
 from wellbot.components.chat.message_area import message_area
 from wellbot.components.layout import chat_layout
@@ -104,8 +105,9 @@ AUTO_SCROLL_SCRIPT = """
 
 
 def chat_main() -> rx.Component:
-    """메인 대화 영역: 메시지 표시 + 입력 바."""
+    """메인 대화 영역: GNB + 메시지 표시 + 입력 바."""
     return rx.vstack(
+        chat_gnb(),
         message_area(),
         input_bar(),
         height="100%",
