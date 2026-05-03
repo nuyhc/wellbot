@@ -25,9 +25,11 @@ SEARCH_ATTACHMENT_TOOL: dict = {
         "name": "search_attachment",
         "description": (
             "현재 대화에 첨부된 문서들에서 관련 내용을 의미 기반으로 검색합니다. "
-            "사용자의 질문이 첨부 파일과 관련될 가능성이 있으면 반드시 이 도구를 호출하세요. "
-            "첨부 파일이 있는 대화에서 파일 내용을 추측하지 말고, 항상 이 도구로 확인 후 답변하세요. "
-            "첨부 파일과 무관한 일반 지식 질문에만 호출하지 마세요."
+            "사용자의 질문이 첨부 파일과 관련될 가능성이 있으면 이 도구를 호출하세요. "
+            "여러 파일에서 정보가 필요하면 한 번의 호출에 file_ids 를 모두 포함하여 "
+            "일괄 검색하세요. 파일별로 분할 호출하지 마세요. "
+            "검색 결과가 비어있으면 같은 의미의 쿼리를 변형해 재시도하지 말고, "
+            "사용자에게 못 찾았다고 안내하거나 보유한 일반 지식으로 답변하세요."
         ),
         "inputSchema": {
             "json": {
@@ -35,21 +37,29 @@ SEARCH_ATTACHMENT_TOOL: dict = {
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "검색할 내용을 설명하는 자연어 쿼리",
+                        "description": "검색할 내용을 설명하는 자연어 쿼리.",
+                    },
+                    "file_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": (
+                            "검색 대상 파일의 정수 ID 배열. system prompt 에 "
+                            "표시된 [#NNN] 의 NNN 숫자를 그대로 사용. "
+                            "권장 경로 - 정확 매칭. 비어있거나 생략하면 "
+                            "대화의 모든 첨부 파일을 대상으로 검색."
+                        ),
                     },
                     "file_names": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "검색 대상 파일명(확장자 포함). 비어있거나 생략하면 "
-                            "대화의 모든 첨부 파일을 대상으로 검색한다."
+                            "fallback. file_ids 를 모를 때만 사용. 부분/유사 "
+                            "매칭 허용. 가능하면 file_ids 를 우선 사용하세요."
                         ),
                     },
                     "top_k": {
                         "type": "integer",
-                        "description": (
-                            "반환할 상위 청크 개수. 기본값 5, 최대 10."
-                        ),
+                        "description": "반환할 상위 청크 개수. 기본 5, 최대 10.",
                     },
                 },
                 "required": ["query"],
@@ -71,13 +81,27 @@ def build_tool_config() -> dict:
 # ── Tool 실행 ──
 
 
-def _format_search_result(results: list[dict]) -> str:
+def _format_search_result(
+    results: list[dict],
+    *,
+    fallback_note: str | None = None,
+    missing_files: list[str] | None = None,
+) -> str:
     """검색 결과를 LLM 이 이해하기 쉬운 구조화 텍스트로 변환."""
     if not results:
-        return (
-            "검색 결과가 없습니다. 쿼리를 다르게 표현해 다시 시도하거나, "
-            "첨부 파일에 해당 내용이 없을 가능성이 있습니다."
-        )
+        lines = [
+            "검색 결과 0건. 첨부 파일에 해당 내용이 존재하지 않을 가능성이 높습니다. "
+            "동일 의도의 쿼리로 재시도하지 말고, 사용자에게 '관련 내용을 찾지 못함'을 "
+            "안내하거나 보유한 일반 지식으로 답변하세요."
+        ]
+        if missing_files:
+            lines.append("")
+            lines.append(
+                "참고: 아래 파일은 인덱스가 아직 준비되지 않아 검색 대상에서 "
+                "제외되었습니다 - " + ", ".join(missing_files)
+            )
+        return "\n".join(lines)
+
     lines: list[str] = [f"총 {len(results)}개의 관련 청크를 찾았습니다.", ""]
     for i, r in enumerate(results, start=1):
         lines.append(
@@ -85,6 +109,12 @@ def _format_search_result(results: list[dict]) -> str:
         )
         lines.append(r["text"])
         lines.append("")
+    if fallback_note:
+        lines.append(f"(참고: {fallback_note})")
+    if missing_files:
+        lines.append(
+            "(참고: 인덱스 미준비 파일 - " + ", ".join(missing_files) + ")"
+        )
     return "\n".join(lines).strip()
 
 
@@ -97,8 +127,11 @@ def execute_tool(
 
     Returns:
         Bedrock Converse `toolResult.content` 블록에 넣을 dict.
-        성공: {"text": "..."}
+        성공: {"text": "...", "_meta": {...}}
         실패: {"text": "...", "status": "error"}
+
+        `_meta` 는 호출자(루프 가드)가 활용할 수 있는 부가 정보 -
+        {result_count: int, fallback: str | None}
     """
     try:
         if tool_name == "search_attachment":
@@ -116,6 +149,17 @@ def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
     if not query:
         return {"text": "query 파라미터가 비어있습니다.", "status": "error"}
 
+    raw_file_ids = tool_input.get("file_ids") or []
+    file_ids: list[int] | None = None
+    if isinstance(raw_file_ids, list):
+        coerced: list[int] = []
+        for v in raw_file_ids:
+            try:
+                coerced.append(int(v))
+            except (TypeError, ValueError):
+                continue
+        file_ids = coerced or None
+
     raw_file_names = tool_input.get("file_names") or []
     file_names = [
         n for n in raw_file_names if isinstance(n, str) and n.strip()
@@ -128,13 +172,36 @@ def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
         top_k = SEARCH_TOP_K
     top_k = max(1, min(top_k, 10))
 
-    results = embedding_service.search_conversation(
+    search_result = embedding_service.search_conversation(
         smry_id=smry_id,
         query=query,
         top_k=top_k,
+        file_ids=file_ids,
         file_names=file_names,
     )
-    return {"text": _format_search_result(results)}
+    results = search_result.get("results", [])
+    fallback = search_result.get("fallback")
+    missing = search_result.get("missing_files") or []
+
+    text = _format_search_result(
+        results,
+        fallback_note=fallback,
+        missing_files=missing,
+    )
+    log.info(
+        "search_attachment: smry=%s query=%r file_ids=%s file_names=%s "
+        "top_k=%d -> %d hits (fallback=%s, missing=%d)",
+        smry_id, query, file_ids, file_names, top_k,
+        len(results), fallback, len(missing),
+    )
+    return {
+        "text": text,
+        "_meta": {
+            "result_count": len(results),
+            "fallback": fallback,
+            "missing_files": list(missing),
+        },
+    }
 
 
 def parse_tool_input(raw_json: str) -> dict:

@@ -218,6 +218,8 @@ class ConversationIndex:
     index: object                          # faiss.Index
     chunks: list[dict] = field(default_factory=list)
     # chunks[i] = {"file_no": int, "file_name": str, "seq": int, "text": str}
+    missing_files: list[str] = field(default_factory=list)
+    # 인덱스 다운로드/정합성 실패로 검색에서 제외된 파일명 목록
 
 
 class FaissCache:
@@ -280,9 +282,11 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
 
     flat_chunks: list[dict] = []
     vectors: list[np.ndarray] = []
+    missing_files: list[str] = []
 
     for att in atts:
         if not att.s3_prefix:
+            # 이미지 등 파생물이 없는 파일은 정상 스킵 (missing 으로 표기 안 함)
             continue
         chunks_key = f"{att.s3_prefix}chunks.jsonl"
         index_key = f"{att.s3_prefix}index.faiss"
@@ -290,8 +294,12 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
         try:
             chunks_bytes = storage_service.download_bytes(chunks_key)
             index_bytes = storage_service.download_bytes(index_key)
-        except Exception:
-            # 처리 중이거나 이미지 등 파생물이 없는 파일 → 스킵
+        except Exception as exc:
+            log.warning(
+                "load_conversation_index: 인덱스 다운로드 실패 file=%s err=%s",
+                att.file_name, exc,
+            )
+            missing_files.append(att.file_name)
             continue
 
         chunks = chunker_mod.chunks_from_jsonl(chunks_bytes)
@@ -300,13 +308,22 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
         # 이 파일의 모든 벡터를 추출하려면 reconstruct 를 사용
         n = file_index.ntotal
         if n != len(chunks) or n == 0:
-            # 정합성 불일치 → 스킵
+            log.warning(
+                "load_conversation_index: 정합성 불일치 file=%s ntotal=%d chunks=%d",
+                att.file_name, n, len(chunks),
+            )
+            missing_files.append(att.file_name)
             continue
         try:
             file_vectors = np.vstack(
                 [file_index.reconstruct(i) for i in range(n)]
             )
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "load_conversation_index: 벡터 reconstruct 실패 file=%s err=%s",
+                att.file_name, exc,
+            )
+            missing_files.append(att.file_name)
             continue
 
         vectors.append(file_vectors)
@@ -332,6 +349,7 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
         smry_id=smry_id,
         index=index,
         chunks=flat_chunks,
+        missing_files=missing_files,
     )
 
 
@@ -345,46 +363,128 @@ def get_or_load(smry_id: str) -> ConversationIndex:
     return conv_index
 
 
+def _normalize_name(s: str) -> str:
+    """파일명 fuzzy 매칭용 정규화 - lower + 공백/언더스코어/하이픈 제거."""
+    return (
+        s.lower()
+        .replace(" ", "")
+        .replace("_", "")
+        .replace("-", "")
+    )
+
+
+def _strip_ext(s: str) -> str:
+    """확장자 제거 (정규화된 문자열에 적용)."""
+    dot = s.rfind(".")
+    return s[:dot] if dot > 0 else s
+
+
+def _matches_file_names(chunk_name: str, allowed_norm: list[str]) -> bool:
+    """정규화 substring 양방향 + 확장자 제거 substring 폴백 매칭."""
+    cn = _normalize_name(chunk_name)
+    cn_no_ext = _strip_ext(cn)
+    for a in allowed_norm:
+        if not a:
+            continue
+        if a in cn or cn in a:
+            return True
+        a_no_ext = _strip_ext(a)
+        if a_no_ext and (a_no_ext in cn_no_ext or cn_no_ext in a_no_ext):
+            return True
+    return False
+
+
 def search_conversation(
     smry_id: str,
     query: str,
     top_k: int = 5,
+    file_ids: Iterable[int] | None = None,
     file_names: Iterable[str] | None = None,
-) -> list[dict]:
+) -> dict:
     """대화 인덱스에서 유사도 top-k 검색.
 
-    Args:
-        smry_id: 대화 ID
-        query: 자연어 쿼리
-        top_k: 반환 개수
-        file_names: 지정 시 해당 파일명만 검색 대상
+    매칭 우선순위:
+      1. file_ids 지정 → chunk["file_no"] 정확 매칭
+      2. file_names 지정 → 정규화 substring 양방향 + 확장자 제거 폴백
+      3. 위 1·2 모두 0건 → 필터 무시하고 전체 검색 (fallback note 부착)
 
     Returns:
-        [{file_no, file_name, seq, text, score}, ...]  (score 내림차순)
+        {
+            "results": [{file_no, file_name, seq, text, score}, ...],
+            "fallback": str | None,         # 필터가 적용/무시된 사유
+            "missing_files": list[str],     # 인덱스 누락 파일명
+        }
     """
     conv_index = get_or_load(smry_id)
+    missing = list(conv_index.missing_files)
+    empty_response: dict = {
+        "results": [],
+        "fallback": None,
+        "missing_files": missing,
+    }
     if conv_index.index is None or conv_index.index.ntotal == 0:
-        return []
+        return empty_response
 
     query_vec = embed_text(query)
 
-    # 탐색은 top_k 의 3배까지 가져와 필터 여유 확보
-    scores, ids = search_index(
-        conv_index.index, query_vec, top_k * 3 if file_names else top_k
-    )
+    has_filter = bool(file_ids) or bool(file_names)
+    fetch_k = top_k * 3 if has_filter else top_k
+    scores, ids = search_index(conv_index.index, query_vec, fetch_k)
 
-    allowed = None
+    allowed_ids: set[int] | None = None
+    if file_ids:
+        allowed_ids = {int(i) for i in file_ids}
+    allowed_names_norm: list[str] | None = None
     if file_names:
-        allowed = {n.strip().lower() for n in file_names if n and n.strip()}
+        allowed_names_norm = [
+            _normalize_name(n) for n in file_names if n and n.strip()
+        ] or None
 
+    def _collect(
+        require_id: bool,
+        require_name: bool,
+    ) -> list[dict]:
+        out: list[dict] = []
+        for score, idx in zip(scores[0].tolist(), ids[0].tolist()):
+            if idx < 0 or idx >= len(conv_index.chunks):
+                continue
+            chunk = conv_index.chunks[idx]
+            if require_id and allowed_ids is not None:
+                if chunk["file_no"] not in allowed_ids:
+                    continue
+            if require_name and allowed_names_norm is not None:
+                if not _matches_file_names(chunk["file_name"], allowed_names_norm):
+                    continue
+            out.append({**chunk, "score": float(score)})
+            if len(out) >= top_k:
+                break
+        return out
+
+    fallback_note: str | None = None
     results: list[dict] = []
-    for score, idx in zip(scores[0].tolist(), ids[0].tolist()):
-        if idx < 0 or idx >= len(conv_index.chunks):
-            continue
-        chunk = conv_index.chunks[idx]
-        if allowed and chunk["file_name"].lower() not in allowed:
-            continue
-        results.append({**chunk, "score": float(score)})
-        if len(results) >= top_k:
-            break
-    return results
+
+    if allowed_ids is not None:
+        results = _collect(require_id=True, require_name=False)
+        if not results and allowed_names_norm is not None:
+            results = _collect(require_id=False, require_name=True)
+            if results:
+                fallback_note = "file_ids 매칭 실패 - file_names 폴백 적용"
+    elif allowed_names_norm is not None:
+        results = _collect(require_id=False, require_name=True)
+
+    # 필터가 있었는데 0건이면 전체 검색 폴백
+    if has_filter and not results:
+        # 필터 무시 전체 검색은 원래 fetch 결과를 그대로 사용
+        results = _collect(require_id=False, require_name=False)
+        if results:
+            fallback_note = (
+                "지정 필터 매칭 실패 - 전체 첨부에서 검색"
+            )
+    elif not has_filter:
+        results = _collect(require_id=False, require_name=False)
+
+    return {
+        "results": results,
+        "fallback": fallback_note,
+        "missing_files": missing,
+    }

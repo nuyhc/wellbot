@@ -71,7 +71,9 @@ EMBED_RETRY_BASE_DELAY: float = 0.5   # 지수 백오프 기본 대기(초)
 
 # ── 검색 ──
 SEARCH_TOP_K: int = 5
-TOOL_USE_MAX_ITERATIONS: int = 3          # tool 호출 무한루프 방지
+TOOL_USE_MAX_ITERATIONS: int = 3          # tool 호출 무한루프 방지 (천장)
+TOOL_USE_EMPTY_RESULT_LIMIT: int = 2      # 연속 빈 결과 시 강제 종료
+TOOL_USE_DUPLICATE_QUERY_LIMIT: int = 1   # 동일 (query, file_ids/names) 재호출 차단
 
 # ── 이미지 ──
 IMAGE_MAX_SIZE_MB: int = 5                # Bedrock Converse 제한

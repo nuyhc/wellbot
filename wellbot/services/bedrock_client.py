@@ -7,6 +7,7 @@ boto3를 사용하여 Bedrock Runtime의 ConverseStream API 호출.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from collections.abc import Generator
 from functools import lru_cache
@@ -15,6 +16,8 @@ from typing import Any
 import boto3
 
 from wellbot.services.config import ModelConfig
+
+log = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -341,6 +344,25 @@ def _stream_one_turn_iter(
     )
 
 
+def _call_signature(name: str, tool_input: dict) -> tuple:
+    """동일 호출 판정용 정규화 키."""
+    inp = tool_input or {}
+    query = (inp.get("query") or "").strip().lower()
+    file_ids = tuple(sorted(int(x) for x in (inp.get("file_ids") or [])
+                            if isinstance(x, (int, str)) and str(x).strip().lstrip("-").isdigit()))
+    file_names = tuple(sorted(
+        (n or "").strip().lower()
+        for n in (inp.get("file_names") or [])
+        if isinstance(n, str) and n.strip()
+    ))
+    return (name, query, file_ids, file_names)
+
+
+def _strip_tool_result_meta(result_content: dict) -> dict:
+    """Bedrock toolResult.content 에 _meta 같은 비표준 키가 들어가지 않도록 정제."""
+    return {k: v for k, v in result_content.items() if not k.startswith("_")}
+
+
 async def astream_chat_with_tools(
     messages: list[dict[str, Any]],
     model: ModelConfig,
@@ -350,6 +372,8 @@ async def astream_chat_with_tools(
     tool_config: dict,
     tool_executor_fn,  # callable(name, input) -> dict (toolResult.content[0])
     max_iterations: int,
+    empty_result_limit: int | None = None,
+    duplicate_query_limit: int | None = None,
 ):
     """Tool use 루프를 내장한 스트리밍 래퍼.
 
@@ -360,12 +384,32 @@ async def astream_chat_with_tools(
       4. 다시 LLM 호출 (최대 `max_iterations` 회)
     `end_turn` 또는 다른 이유로 종료하면 루프 종료.
 
+    가드:
+      - `duplicate_query_limit`: 동일 (name, query, file_ids, file_names)
+        호출이 발생하면 LLM 우회하고 즉시 toolResult 주입.
+      - `empty_result_limit`: 결과 0건이 연속 N회 발생하면 루프 강제 종료
+        후 도구 비활성 폴백 답변 턴 1회 진행.
+      - max_iterations 도달: 폴백 답변 턴 진입.
+
     Yields:
         ("thinking", str), ("text", str), ("usage", dict),
         ("tool_use", {name, input}),
         ("tool_result", {name, text}).
     """
+    from wellbot.constants import (
+        TOOL_USE_DUPLICATE_QUERY_LIMIT,
+        TOOL_USE_EMPTY_RESULT_LIMIT,
+    )
+
+    if empty_result_limit is None:
+        empty_result_limit = TOOL_USE_EMPTY_RESULT_LIMIT
+    if duplicate_query_limit is None:
+        duplicate_query_limit = TOOL_USE_DUPLICATE_QUERY_LIMIT
+
     bedrock_messages = _build_messages(messages)
+    seen_calls: dict[tuple, int] = {}
+    empty_streak = 0
+    end_reason = "end_turn"
 
     for iteration in range(max_iterations + 1):
         gen = _stream_one_turn_iter(
@@ -402,44 +446,162 @@ async def astream_chat_with_tools(
             elif event_type == "stop_reason":
                 stop_reason = payload
 
-        # 종료 조건
+        # 정상 종료
         if stop_reason != "tool_use" or not pending_tool_uses:
-            return
-        if iteration >= max_iterations:
-            # 최대 반복 초과 → 안내 텍스트 주고 종료
-            yield (
-                "text",
-                "\n\n(도구 호출 횟수 한도에 도달하여 추가 검색을 중단합니다.)",
+            end_reason = stop_reason or "end_turn"
+            log.info(
+                "tool_loop end: smry_iter=%d reason=%s empty_streak=%d seen=%d",
+                iteration, end_reason, empty_streak, len(seen_calls),
             )
             return
 
-        # 1. assistant 턴 메시지로 추가 (toolUse 포함)
+        # 한도 도달 → 폴백 답변 턴
+        if iteration >= max_iterations:
+            end_reason = "max_iter"
+            log.info(
+                "tool_loop forced fallback: reason=%s empty_streak=%d seen=%d",
+                end_reason, empty_streak, len(seen_calls),
+            )
+            # assistant 의 마지막 tool_use 응답을 history 에 반영하지 않고 폴백 진입
+            async for ev in _emit_no_tool_fallback(
+                bedrock_messages, model, system_prompt, thinking_enabled,
+                reason=end_reason,
+            ):
+                yield ev
+            return
+
+        # 1. assistant 턴 메시지로 추가
         if assistant_blocks:
             bedrock_messages.append(
                 {"role": "assistant", "content": assistant_blocks}
             )
 
-        # 2. 각 toolUse 에 대한 결과를 user 턴으로 추가
+        # 2. 각 toolUse 실행 (중복/빈결과 가드 포함)
         tool_result_blocks: list[dict] = []
         for tu in pending_tool_uses:
-            result_content = await asyncio.to_thread(
-                tool_executor_fn, tu.get("name", ""), tu.get("input", {}) or {}
-            )
-            tool_result_blocks.append(
-                {
+            name = tu.get("name", "") or ""
+            tool_input = tu.get("input", {}) or {}
+            sig = _call_signature(name, tool_input)
+            seen_calls[sig] = seen_calls.get(sig, 0) + 1
+
+            if seen_calls[sig] > duplicate_query_limit:
+                # 동일 호출 차단 - LLM 우회 즉시 합성 결과
+                synthetic = {
+                    "text": (
+                        "동일한 쿼리/필터로 이미 검색한 호출입니다. "
+                        "결과가 변하지 않으므로 재호출을 중단하고, "
+                        "지금까지의 검색 결과로 사용자 질문에 답변하거나 "
+                        "'관련 내용을 찾지 못함'을 안내하세요."
+                    ),
+                }
+                tool_result_blocks.append({
                     "toolResult": {
                         "toolUseId": tu.get("toolUseId", ""),
-                        "content": [result_content],
+                        "content": [synthetic],
                     }
-                }
+                })
+                yield ("tool_result", {"name": name, "text": synthetic["text"]})
+                log.info("tool_loop duplicate blocked: sig=%s count=%d",
+                         sig, seen_calls[sig])
+                continue
+
+            result_content = await asyncio.to_thread(
+                tool_executor_fn, name, tool_input
             )
-            yield (
-                "tool_result",
-                {
-                    "name": tu.get("name"),
-                    "text": result_content.get("text", ""),
-                },
+            meta = result_content.get("_meta") if isinstance(result_content, dict) else None
+            result_count = (meta or {}).get("result_count", 0) if meta else 0
+            if result_count == 0:
+                empty_streak += 1
+            else:
+                empty_streak = 0
+
+            sanitized = _strip_tool_result_meta(result_content)
+            tool_result_blocks.append({
+                "toolResult": {
+                    "toolUseId": tu.get("toolUseId", ""),
+                    "content": [sanitized],
+                }
+            })
+            yield ("tool_result", {"name": name, "text": sanitized.get("text", "")})
+
+            log.info(
+                "tool_loop call: iter=%d name=%s sig=%s result_count=%d "
+                "empty_streak=%d duplicate_count=%d",
+                iteration, name, sig, result_count, empty_streak,
+                seen_calls[sig],
             )
 
         bedrock_messages.append({"role": "user", "content": tool_result_blocks})
-        # 다음 반복에서 LLM 재호출
+
+        # 연속 빈 결과 한도 초과 → 폴백 답변 턴
+        if empty_streak >= empty_result_limit:
+            end_reason = "empty_limit"
+            log.info(
+                "tool_loop forced fallback: reason=%s empty_streak=%d",
+                end_reason, empty_streak,
+            )
+            async for ev in _emit_no_tool_fallback(
+                bedrock_messages, model, system_prompt, thinking_enabled,
+                reason=end_reason,
+            ):
+                yield ev
+            return
+
+
+async def _emit_no_tool_fallback(
+    bedrock_messages: list[dict],
+    model: ModelConfig,
+    system_prompt: str,
+    thinking_enabled: bool,
+    *,
+    reason: str,
+):
+    """도구 비활성 상태로 한 턴 더 호출해 사용자에게 답변을 전달."""
+    if reason == "max_iter":
+        guidance = (
+            "추가 검색이 차단되었습니다 (호출 한도 도달). "
+            "지금까지 누적된 toolResult 만 근거로 사용자 질문에 최대한 답하세요. "
+            "근거가 부족하면 '첨부 파일에서 관련 내용을 찾지 못했다'고 명시하세요. "
+            "이번 응답에서는 도구를 호출하지 마세요."
+        )
+    else:
+        guidance = (
+            "추가 검색이 차단되었습니다 (반복된 빈 결과). "
+            "보유한 toolResult 또는 일반 지식으로 사용자 질문에 답하세요. "
+            "관련 내용을 찾지 못했으면 그 사실을 솔직히 안내하세요. "
+            "이번 응답에서는 도구를 호출하지 마세요."
+        )
+
+    augmented_system = (
+        (system_prompt + "\n\n" if system_prompt else "") + guidance
+    )
+
+    gen = _stream_one_turn_iter(
+        bedrock_messages,
+        model,
+        augmented_system,
+        thinking_enabled,
+        tool_config=None,
+    )
+
+    yielded_any_text = False
+    while True:
+        has_value, value = await asyncio.to_thread(_safe_next, gen)
+        if not has_value:
+            break
+        event_type, payload = value  # type: ignore[misc]
+        if event_type == "text":
+            yielded_any_text = True
+            yield ("text", payload)
+        elif event_type == "thinking":
+            yield ("thinking", payload)
+        elif event_type == "usage":
+            yield ("usage", payload)
+        # tool_use / assistant_content / stop_reason 무시 (도구 비활성)
+
+    if not yielded_any_text:
+        # 폴백 자체가 비었으면 최소한의 안내 송출
+        yield (
+            "text",
+            "첨부 파일에서 관련 내용을 찾지 못했습니다. 다른 표현으로 다시 질문해 주세요.",
+        )
