@@ -163,6 +163,54 @@ def _expanded_header() -> rx.Component:
     )
 
 
+def _search_input() -> rx.Component:
+    """대화 검색 입력 박스. 제목 부분 일치(대소문자 무시) 필터."""
+    return rx.box(
+        rx.hstack(
+            rx.icon(
+                "search",
+                size=14,
+                color=COLORS["text_secondary"],
+                flex_shrink="0",
+            ),
+            rx.input(
+                placeholder="대화 제목 검색...",
+                value=ChatState.search_query,
+                on_change=ChatState.set_search_query,
+                variant="soft",
+                size="1",
+                auto_focus=True,
+                width="100%",
+            ),
+            rx.cond(
+                ChatState.is_searching,
+                rx.box(
+                    rx.icon("x", size=14),
+                    color=COLORS["text_secondary"],
+                    cursor="pointer",
+                    display="flex",
+                    align_items="center",
+                    justify_content="center",
+                    padding="2px",
+                    border_radius="4px",
+                    flex_shrink="0",
+                    on_click=ChatState.clear_search_query,
+                    _hover={
+                        "bg": COLORS["sidebar_hover"],
+                        "color": COLORS["text_primary"],
+                    },
+                ),
+            ),
+            align="center",
+            spacing="2",
+            width="100%",
+        ),
+        padding_x="0.75em",
+        padding_y="0.375em",
+        width="100%",
+    )
+
+
 def _collapsed_nav() -> rx.Component:
     """접힌 상태 상단 네비게이션 (아이콘 세로 정렬)."""
     return rx.vstack(
@@ -174,7 +222,7 @@ def _collapsed_nav() -> rx.Component:
         ),
         _collapsed_icon(
             "search",
-            UIState.noop,
+            UIState.open_search,
             "채팅 검색",
         ),
         spacing="1",
@@ -493,10 +541,14 @@ def sidebar() -> rx.Component:
                         _nav_item(
                             "search",
                             "채팅 검색",
-                            UIState.noop,
+                            UIState.toggle_search,
                         ),
                         padding_x="0.5em",
                         width="100%",
+                    ),
+                    rx.cond(
+                        UIState.show_search,
+                        _search_input(),
                     ),
                     spacing="0",
                     width="100%",

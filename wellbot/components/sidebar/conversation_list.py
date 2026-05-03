@@ -60,7 +60,7 @@ def conversation_list() -> rx.Component:
     return rx.box(
         rx.vstack(
             rx.text(
-                "최근 대화",
+                rx.cond(ChatState.is_searching, "검색 결과", "최근 대화"),
                 size="1",
                 color=COLORS["category_text"],
                 weight="medium",
@@ -68,9 +68,19 @@ def conversation_list() -> rx.Component:
                 padding_top="0.5em",
                 padding_bottom="0.25em",
             ),
-            rx.foreach(
-                ChatState.sorted_conversations,
-                conversation_item,
+            rx.cond(
+                ChatState.is_searching & ~ChatState.has_search_results,
+                rx.text(
+                    "일치하는 대화가 없습니다.",
+                    size="1",
+                    color=COLORS["text_secondary"],
+                    padding_x="0.75em",
+                    padding_y="0.5em",
+                ),
+                rx.foreach(
+                    ChatState.sorted_conversations,
+                    conversation_item,
+                ),
             ),
             spacing="0",
             width="100%",

@@ -143,6 +143,9 @@ class ChatState(rx.State):
     # ── 에이전트 모드 ──
     selected_agent_mode: str = "chat"
 
+    # ── 대화 검색 ──
+    search_query: str = ""
+
     # ── 첨부파일 ──
     pending_attachments: list[AttachmentInfo] = []
     attachment_error: str = ""
@@ -322,13 +325,27 @@ class ChatState(rx.State):
         """시간 역순으로 정렬된 대화 목록.
 
         빈 미저장 대화는 숨기되, 현재 활성 대화는 항상 표시.
+        검색어가 있으면 제목 부분 일치(대소문자 무시)로 필터링.
         """
         current_id = self.current_conversation_id
         visible = [
             c for c in self.conversations
             if c.is_persisted or c.messages or c.id == current_id
         ]
+        query = self.search_query.strip().lower()
+        if query:
+            visible = [c for c in visible if query in (c.title or "").lower()]
         return sorted(visible, key=lambda c: c.created_at, reverse=True)
+
+    @rx.var
+    def is_searching(self) -> bool:
+        """검색어가 입력된 상태인지 여부."""
+        return self.search_query.strip() != ""
+
+    @rx.var
+    def has_search_results(self) -> bool:
+        """검색 결과가 하나 이상 있는지 여부."""
+        return len(self.sorted_conversations) > 0
 
     @rx.var
     def model_names(self) -> list[str]:
@@ -525,6 +542,7 @@ class ChatState(rx.State):
         """대화를 전환한다. 미로드 시 DB에서 메시지 로드."""
         self.current_conversation_id = conv_id
         self.current_input = ""
+        self.search_query = ""
         idx = self._get_current_index()
         if idx is not None:
             self._load_messages_for(idx)
@@ -557,6 +575,14 @@ class ChatState(rx.State):
     def set_input(self, value: str) -> None:
         """입력 필드 값을 설정한다."""
         self.current_input = value
+
+    def set_search_query(self, value: str) -> None:
+        """대화 검색어를 설정한다."""
+        self.search_query = value
+
+    def clear_search_query(self) -> None:
+        """검색어를 초기화한다."""
+        self.search_query = ""
 
     # ── 첨부파일 ──
 
