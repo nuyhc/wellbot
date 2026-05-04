@@ -83,7 +83,7 @@ def _search_results() -> rx.Component:
                     ),
                     rx.text(
                         "일치하는 대화가 없습니다.",
-                        size="1",
+                        size="2",
                         color=COLORS["text_secondary"],
                         padding_x="1em",
                         padding_y="0.75em",
