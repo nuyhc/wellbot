@@ -9,7 +9,8 @@ CREATE TABLE `dept_m` (
   `UPD_DTM` datetime DEFAULT NULL COMMENT '수정일시',
   `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '수정자아이디',
   PRIMARY KEY (`DEPT_CD`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='부서마스터';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='부서마스터'
+
 
 CREATE TABLE `emp_m` (
   `EMP_NO` varchar(15) COLLATE utf8mb4_general_ci NOT NULL COMMENT '사원번호',
@@ -27,25 +28,12 @@ CREATE TABLE `emp_m` (
   `USER_UUID` varchar(36) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '사용자UUID',
   `ACNT_STS_NM` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '계정상태명',
   PRIMARY KEY (`EMP_NO`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='사원마스터';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='사원마스터'
 
-CREATE TABLE `crtf_tokn_n` (
-  `CRTF_TOKN_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '인증토큰아이디',
-  `EMP_NO` varchar(15) COLLATE utf8mb4_general_ci NOT NULL COMMENT '사원번호',
-  `CRTF_ECR_TOKN_VAL` varchar(300) COLLATE utf8mb4_general_ci NOT NULL COMMENT '인증암호화토큰값',
-  `DISS_YN` varchar(1) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '폐기여부',
-  `TRTN_DTM` datetime DEFAULT NULL COMMENT '만료일시',
-  `DISS_DTM` datetime DEFAULT NULL COMMENT '폐기일시',
-  `RGST_DTM` datetime NOT NULL COMMENT '등록일시',
-  `RGSR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '등록자아이디',
-  `UPD_DTM` datetime NOT NULL COMMENT '수정일시',
-  `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '수정자아이디',
-  PRIMARY KEY (`CRTF_TOKN_ID`,`EMP_NO`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='인증토큰내역';
 
 CREATE TABLE `agnt_m` (
   `AGNT_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '에이전트아이디',
-  `AGNT_SEQ` decimal(10,0) NOT NULL COMMENT '에이전트순번',
+  `AGNT_SEQ` decimal(10,0) NOT NULL COMMENT '대행순번',
   `AGNT_NM` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '에이전트명',
   `AGNT_FRWK_NM` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '에이전트프레임워크명',
   `AGNT_PATH_ADDR` varchar(300) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '에이전트경로주소',
@@ -56,11 +44,12 @@ CREATE TABLE `agnt_m` (
   `UPD_DTM` datetime DEFAULT NULL COMMENT '수정일시',
   `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '수정자아이디',
   PRIMARY KEY (`AGNT_ID`,`AGNT_SEQ`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='에이전트마스터';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='에이전트마스터'
+
 
 CREATE TABLE `agnt_mmry_use_n` (
   `AGNT_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '에이전트아이디',
-  `AGNT_SEQ` decimal(10,0) NOT NULL COMMENT '에이전트순번',
+  `AGNT_SEQ` decimal(10,0) NOT NULL COMMENT '대행순번',
   `EMP_NO` varchar(15) COLLATE utf8mb4_general_ci NOT NULL COMMENT '사원번호',
   `AGNT_MMRY_PATH_ADDR` varchar(300) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '에이전트메모리경로주소',
   `AGNT_TYPE_DSCR_CNTT` mediumtext COLLATE utf8mb4_general_ci COMMENT '에이전트유형설명내용',
@@ -71,29 +60,8 @@ CREATE TABLE `agnt_mmry_use_n` (
   `UPD_DTM` datetime DEFAULT NULL COMMENT '수정일시',
   `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '수정자아이디',
   PRIMARY KEY (`AGNT_ID`,`AGNT_SEQ`,`EMP_NO`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='에이전트메모리사용내역';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='에이전트메모리사용내역'
 
-CREATE TABLE `atch_file_m` (
-  `ATCH_FILE_NO` bigint NOT NULL COMMENT '첨부파일번호',
-  `ATCH_FILE_NM` varchar(300) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '첨부파일명',
-  `ATCH_FILE_URL_ADDR` varchar(500) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '첨부파일URL주소',
-  `ATCH_FILE_TOKN_ECNT` decimal(10,0) DEFAULT NULL COMMENT '첨부파일토큰개수',
-  `RGST_DTM` datetime NOT NULL COMMENT '등록일시',
-  `RGSR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '등록자아이디',
-  `UPD_DTM` datetime NOT NULL COMMENT '수정일시',
-  `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '수정자아이디',
-  PRIMARY KEY (`ATCH_FILE_NO`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='첨부파일마스터';
-
-CREATE TABLE `chtb_msg_atch_file_d` (
-  `CHTB_TLK_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '챗봇대화아이디',
-  `ATCH_FILE_NO` bigint NOT NULL COMMENT '첨부파일번호',
-  `RGST_DTM` datetime DEFAULT NULL COMMENT '등록일시',
-  `RGSR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '등록자아이디',
-  `UPD_DTM` datetime DEFAULT NULL COMMENT '수정일시',
-  `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '수정자아이디',
-  PRIMARY KEY (`CHTB_TLK_ID`,`ATCH_FILE_NO`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇메시지첨부파일상세';
 
 CREATE TABLE `chtb_smry_d` (
   `CHTB_TLK_SMRY_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '챗봇대화요약아이디',
@@ -106,7 +74,8 @@ CREATE TABLE `chtb_smry_d` (
   `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '수정자아이디',
   `UPD_DTM` datetime NOT NULL COMMENT '수정일시',
   PRIMARY KEY (`CHTB_TLK_SMRY_ID`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇요약상세';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇요약상세'
+
 
 CREATE TABLE `chtb_msg_d` (
   `CHTB_TLK_SMRY_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '챗봇대화요약아이디',
@@ -127,5 +96,28 @@ CREATE TABLE `chtb_msg_d` (
   `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '수정자아이디',
   `UPD_DTM` datetime NOT NULL COMMENT '수정일시',
   PRIMARY KEY (`CHTB_TLK_ID`,`CHTB_TLK_SMRY_ID`,`CHTB_TLK_SEQ`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇메시지상세';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇메시지상세'
 
+
+CREATE TABLE `chtb_msg_atch_file_d` (
+  `CHTB_TLK_ID` varchar(50) COLLATE utf8mb4_general_ci NOT NULL COMMENT '챗봇대화아이디',
+  `ATCH_FILE_NO` bigint NOT NULL COMMENT '첨부파일번호',
+  `RGST_DTM` datetime DEFAULT NULL COMMENT '등록일시',
+  `RGSR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '등록자아이디',
+  `UPD_DTM` datetime DEFAULT NULL COMMENT '수정일시',
+  `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '수정자아이디',
+  PRIMARY KEY (`CHTB_TLK_ID`,`ATCH_FILE_NO`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='챗봇메시지첨부파일상세'
+
+
+CREATE TABLE `atch_file_m` (
+  `ATCH_FILE_NO` bigint NOT NULL AUTO_INCREMENT,
+  `ATCH_FILE_NM` varchar(300) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '첨부파일명',
+  `ATCH_FILE_URL_ADDR` varchar(500) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '첨부파일URL주소',
+  `ATCH_FILE_TOKN_ECNT` decimal(10,0) DEFAULT NULL COMMENT '첨부파일토큰개수',
+  `RGST_DTM` datetime NOT NULL COMMENT '등록일시',
+  `RGSR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '등록자아이디',
+  `UPD_DTM` datetime NOT NULL COMMENT '수정일시',
+  `UPPR_ID` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '수정자아이디',
+  PRIMARY KEY (`ATCH_FILE_NO`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='첨부파일마스터'
