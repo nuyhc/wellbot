@@ -224,10 +224,12 @@ def _update_token_count(file_no: int, emp_no: str, total_tokens: int) -> None:
 def _smry_id_from_record(file_no: int) -> str:
     """DB 매핑 테이블에서 smry_id 를 조회한다.
 
-    chtb_msg_atch_file_d.chtb_tlk_id → chtb_msg_d.chtb_tlk_id 를 경유하여
-    chtb_msg_d.chtb_tlk_smry_id 를 반환한다.
+    1차: chtb_msg_atch_file_d → chtb_msg_d 경유 (메시지 저장 완료 상태)
+    2차: atch_file_m.atch_file_url_addr (S3 prefix) 에서 추출 (폴백)
+         prefix 구조: {KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
     """
     with get_session() as session:
+        # 1차: 메시지 경유
         row = (
             session.query(ChtbMsgD.chtb_tlk_smry_id)
             .join(
@@ -237,7 +239,19 @@ def _smry_id_from_record(file_no: int) -> str:
             .filter(ChtbMsgAtchFileD.atch_file_no == file_no)
             .first()
         )
-        return row[0] if row else ""
+        if row and row[0]:
+            return row[0]
+
+        # 2차: S3 prefix 에서 추출
+        record = session.query(AtchFileM).get(file_no)
+        if record and record.atch_file_url_addr:
+            parts = record.atch_file_url_addr.strip("/").split("/")
+            # prefix 구조: {KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
+            # smry_id 는 뒤에서 두 번째 세그먼트
+            if len(parts) >= 3:
+                return parts[-2]
+
+        return ""
 
 
 # ── 조회 ──

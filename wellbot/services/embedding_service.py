@@ -367,9 +367,12 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
 
 
 def get_or_load(smry_id: str) -> ConversationIndex:
-    """캐시 우선 → 없으면 S3 에서 로드."""
+    """캐시 우선 → 없으면 S3 에서 로드.
+
+    missing_files 가 있는 캐시는 재로드하여 처리 완료된 파일을 반영한다.
+    """
     cached = _cache.get(smry_id)
-    if cached is not None:
+    if cached is not None and not cached.missing_files:
         return cached
     conv_index = load_conversation_index(smry_id)
     _cache.set(smry_id, conv_index)
