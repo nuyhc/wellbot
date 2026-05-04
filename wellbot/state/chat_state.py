@@ -657,7 +657,7 @@ class ChatState(rx.State):
         ]
 
     def download_attachment(self, file_no: int) -> rx.event.EventSpec | None:
-        """첨부파일 다운로드 (presigned URL을 새 탭으로 열기)."""
+        """첨부파일 다운로드 (현재 탭에서 바로 다운로드)."""
         if not self._emp_no:
             return None
         if not attachment_service.verify_ownership(file_no, self._emp_no):
@@ -665,8 +665,21 @@ class ChatState(rx.State):
         info = attachment_service.get_download_info(file_no)
         if not info:
             return None
-        url, _ = info
-        return rx.redirect(url, is_external=True)
+        url, filename = info
+        # 숨겨진 <a> 태그로 다운로드 트리거 (새 탭 없이)
+        return rx.call_script(
+            f"""
+            (function() {{
+                var a = document.createElement('a');
+                a.href = {url!r};
+                a.download = {filename!r};
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }})();
+            """
+        )
 
     def _sync_attachments_from_db(self) -> None:
         """업로드 직후 DB 를 폴링해 pending 상태를 갱신한다.

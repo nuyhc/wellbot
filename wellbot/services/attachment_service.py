@@ -355,7 +355,7 @@ def get_download_info(file_no: int) -> tuple[str, str] | None:
         return None
     ext = Path(att.file_name).suffix.lower()
     s3_key = f"{att.s3_prefix}original{ext}"
-    url = storage_service.get_presigned_url(s3_key)
+    url = storage_service.get_presigned_url(s3_key, filename=att.file_name)
     return url, att.file_name
 
 

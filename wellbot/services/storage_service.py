@@ -151,12 +151,19 @@ def object_exists(s3_key: str) -> bool:
 def get_presigned_url(
     s3_key: str,
     expires_in: int = PRESIGNED_URL_EXPIRES,
+    filename: str = "",
 ) -> str:
-    """presigned GET URL 을 발급한다 (다운로드용)."""
+    """presigned GET URL 을 발급한다 (다운로드용).
+
+    filename 이 지정되면 Content-Disposition: attachment 헤더를 포함하여
+    브라우저가 파일을 직접 다운로드하도록 유도한다.
+    """
     client = _get_client()
     bucket = _get_bucket()
 
     params: dict = {"Bucket": bucket, "Key": s3_key}
+    if filename:
+        params["ResponseContentDisposition"] = f'attachment; filename="{filename}"'
     return client.generate_presigned_url(
         "get_object",
         Params=params,
