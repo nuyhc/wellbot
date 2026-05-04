@@ -1,6 +1,5 @@
 """메시지 표시 영역 컴포넌트.
 
-ChatGPT/Gemini 스타일 메시지 영역.
 대화 메시지 목록, 스트리밍 응답, 사고 과정 인디케이터, 환영 메시지.
 자동 스크롤: 하단 근처에 있으면 새 메시지 시 자동 스크롤, 위로 스크롤하면 중단.
 """
@@ -167,10 +166,9 @@ def message_nav_panel() -> rx.Component:
         flex_shrink="0",
         margin_bottom="2.5em",
         margin_right="0.5em",
-        # 초기 상태: 숨김 (공간은 유지)
-        visibility="hidden",
-        opacity="0",
-        transition="opacity 0.15s ease, visibility 0.15s ease",
+        # 초기 상태: 항상 표시
+        visibility="visible",
+        opacity="1",
     )
 
 

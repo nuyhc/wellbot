@@ -50,37 +50,29 @@ AUTO_SCROLL_SCRIPT = """
         }
 
         function updateNavPanel() {
-            var panel = document.getElementById('msg-nav-panel');
-            if (!panel) return;
-            var msgs = getMessages();
-            var hasContent = msgs.length > 0;
-            var isScrollable = el.scrollHeight > el.clientHeight;
-            // 메시지가 있고 스크롤 가능할 때만 표시 (visibility로 제어)
-            if (hasContent && isScrollable) {
-                panel.style.visibility = 'visible';
-                panel.style.opacity = '1';
-            } else {
-                panel.style.visibility = 'hidden';
-                panel.style.opacity = '0';
-            }
-
-            // 버튼 disabled 상태 업데이트
+            // 버튼별 개별 disabled 판단
             var prevBtn = document.getElementById('nav-prev-msg');
             var nextBtn = document.getElementById('nav-next-msg');
             var bottomBtn = document.getElementById('nav-scroll-bottom');
 
+            var msgs = getMessages();
+            var total = msgs.length;
+            var visIdx = total > 0 ? findVisibleMsgIndex() : -1;
+            var atBottom = distFromBottom() < BTN_THRESHOLD;
+
             if (prevBtn) {
-                // 최상단이면 이전 버튼 비활성화
-                prevBtn.disabled = (el.scrollTop <= 5);
+                // 이전 메시지가 있을 때만 활성화
+                prevBtn.disabled = (visIdx <= 0);
                 prevBtn.style.opacity = prevBtn.disabled ? '0.3' : '';
             }
             if (nextBtn) {
-                // 최하단이면 다음 버튼 비활성화
-                nextBtn.disabled = (distFromBottom() < BTN_THRESHOLD);
+                // 다음 메시지가 있을 때만 활성화
+                nextBtn.disabled = (visIdx < 0 || visIdx >= total - 1);
                 nextBtn.style.opacity = nextBtn.disabled ? '0.3' : '';
             }
             if (bottomBtn) {
-                bottomBtn.disabled = (distFromBottom() < BTN_THRESHOLD);
+                // 최하단이 아닐 때만 활성화
+                bottomBtn.disabled = (total === 0 || atBottom);
                 bottomBtn.style.opacity = bottomBtn.disabled ? '0.3' : '';
             }
         }
