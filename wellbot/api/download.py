@@ -1,7 +1,6 @@
 """파일 다운로드 프록시 엔드포인트.
 
-망분리 환경에서 브라우저가 S3 presigned URL 에 직접 접근할 수 없으므로,
-백엔드가 S3 에서 파일을 읽어 클라이언트로 스트리밍한다.
+백엔드가 S3 에서 파일을 읽어 클라이언트로 스트리밍.
 
 흐름:
     브라우저 → GET /api/download/{file_no} → 백엔드 → S3 → 브라우저
@@ -23,12 +22,15 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["download"])
 
 
-@router.get("/download/{file_no}")
+@router.post("/download/{file_no}")
 async def download_file(
     file_no: int,
     wellbot_auth: str | None = Cookie(default=None),
 ) -> StreamingResponse:
     """첨부파일을 S3 에서 읽어 클라이언트로 스트리밍한다.
+
+    일부 프록시/SPA 환경에서 GET /api/* 요청이
+    프론트엔드 라우터에 의해 가로채질 수 있으므로 POST 로 통일.
 
     Path:
         file_no: 첨부파일 번호 (atch_file_m PK)

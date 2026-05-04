@@ -657,13 +657,15 @@ class ChatState(rx.State):
         ]
 
     def download_attachment(self, file_no: int) -> rx.event.EventSpec | None:
-        """첨부파일 다운로드 (백엔드 프록시 경유)."""
+        """첨부파일 다운로드 (백엔드 프록시 경유).
+
+        upload 과 동일한 fetch POST 패턴을 사용하여
+        프론트엔드 라우터 간섭을 회피한다.
+        """
         if not self._emp_no:
             return None
         if not attachment_service.verify_ownership(file_no, self._emp_no):
             return None
-        # hidden iframe 으로 백엔드 프록시 엔드포인트 호출
-        # Content-Disposition: attachment 가 있으므로 현재 페이지를 떠나지 않고 다운로드
         return rx.call_script(
             f"""
             (async function() {{
@@ -687,13 +689,28 @@ class ChatState(rx.State):
                         }}
                     }} catch(e) {{}}
 
-                    var iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = backendBase + '/api/download/{file_no}';
-                    document.body.appendChild(iframe);
-                    setTimeout(function() {{
-                        document.body.removeChild(iframe);
-                    }}, 30000);
+                    const resp = await fetch(backendBase + '/api/download/{file_no}', {{
+                        method: 'POST',
+                        credentials: 'include',
+                    }});
+                    if (!resp.ok) {{
+                        const err = await resp.json().catch(function() {{ return {{}}; }});
+                        alert(err.detail || '다운로드 실패');
+                        return;
+                    }}
+                    const blob = await resp.blob();
+                    const cd = resp.headers.get('Content-Disposition') || '';
+                    const fnMatch = cd.match(/filename\\*=UTF-8''(.+)/);
+                    const filename = fnMatch ? decodeURIComponent(fnMatch[1]) : 'download';
+                    const objUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = objUrl;
+                    a.download = filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(objUrl);
                 }} catch (e) {{
                     console.error('[wellbot download]', e);
                 }}
