@@ -74,17 +74,28 @@ def _conversation_title() -> rx.Component:
 def _attachment_item(att: AttachmentInfo) -> rx.Component:
     """팝오버 내 첨부파일 한 줄."""
     return rx.hstack(
-        rx.icon("file", size=14, color=COLORS["text_secondary"]),
-        rx.text(
-            att.name,
-            size="1",
-            color=COLORS["text_primary"],
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
-            max_width="200px",
+        rx.icon(
+            "file",
+            size=14,
+            color=COLORS["text_secondary"],
+            flex_shrink="0",
         ),
-        rx.spacer(),
+        rx.box(
+            rx.tooltip(
+                rx.text(
+                    att.name,
+                    size="1",
+                    color=COLORS["text_primary"],
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                ),
+                content=att.name,
+            ),
+            flex="1",
+            min_width="0",
+            overflow="hidden",
+        ),
         rx.icon_button(
             rx.icon("download", size=12),
             variant="ghost",
@@ -93,10 +104,13 @@ def _attachment_item(att: AttachmentInfo) -> rx.Component:
             color=COLORS["text_secondary"],
             _hover={"color": COLORS["text_primary"]},
             on_click=ChatState.download_attachment(att.file_no),
+            flex_shrink="0",
         ),
         align="center",
         width="100%",
+        height="32px",
         padding="0.35em 0.5em",
+        gap="0.5em",
         border_radius="4px",
         _hover={"bg": COLORS["sidebar_hover"]},
     )
