@@ -37,8 +37,7 @@ def _search_result_item(conv: Conversation) -> rx.Component:
             flex="1",
         ),
         width="100%",
-        max_width="100%",
-        padding_x="0.75em",
+        padding_x="1em",
         padding_y="0.5em",
         align="center",
         spacing="2",
@@ -61,18 +60,17 @@ def _search_result_item(conv: Conversation) -> rx.Component:
 def _search_results() -> rx.Component:
     """검색 결과 목록."""
     return rx.vstack(
-        # 검색 중일 때
         rx.cond(
             ChatState.is_searching,
+            # ── 검색어가 있을 때 ──
             rx.fragment(
                 rx.text(
                     "검색 결과",
                     size="1",
                     color=COLORS["category_text"],
                     weight="medium",
-                    padding_x="0.75em",
-                    padding_top="0.5em",
-                    padding_bottom="0.25em",
+                    padding_x="1em",
+                    padding_top="0.25em",
                 ),
                 rx.cond(
                     ChatState.has_search_results,
@@ -88,50 +86,20 @@ def _search_results() -> rx.Component:
                         "일치하는 대화가 없습니다.",
                         size="1",
                         color=COLORS["text_secondary"],
-                        padding_x="0.75em",
-                        padding_y="0.5em",
+                        padding_x="1em",
+                        padding_y="0.75em",
                     ),
                 ),
             ),
-            # 검색어 없을 때: 최근 대화 표시
+            # ── 검색어 없을 때: 최근 대화 ──
             rx.fragment(
-                # 새 채팅 버튼
-                rx.hstack(
-                    rx.icon(
-                        "square-pen",
-                        size=_ICON_SIZE,
-                        color=COLORS["text_secondary"],
-                        flex_shrink="0",
-                    ),
-                    rx.text(
-                        "새 채팅",
-                        size="2",
-                        color=COLORS["text_secondary"],
-                        weight="medium",
-                    ),
-                    width="100%",
-                    padding_x="0.75em",
-                    padding_y="0.5em",
-                    align="center",
-                    spacing="2",
-                    cursor="pointer",
-                    border_radius=SPACING["border_radius_sm"],
-                    _hover={"bg": COLORS["sidebar_hover"]},
-                    on_click=[
-                        ChatState.create_new_conversation,
-                        UIState.close_search,
-                    ],
-                ),
-                rx.separator(size="4", color_scheme="gray"),
-                # 최근 대화 섹션
                 rx.text(
                     "최근 대화",
                     size="1",
                     color=COLORS["category_text"],
                     weight="medium",
-                    padding_x="0.75em",
-                    padding_top="0.5em",
-                    padding_bottom="0.25em",
+                    padding_x="1em",
+                    padding_top="0.25em",
                 ),
                 rx.vstack(
                     rx.foreach(
@@ -143,20 +111,17 @@ def _search_results() -> rx.Component:
                 ),
             ),
         ),
-        spacing="1",
+        spacing="0",
         width="100%",
     )
 
 
 def search_modal() -> rx.Component:
-    """ChatGPT 스타일 채팅 검색 모달.
-
-    화면 중앙에 오버레이로 표시되는 검색 팝업.
-    """
+    """채팅 검색 모달 - 화면 중앙에 오버레이 팝업."""
     return rx.cond(
         UIState.show_search_modal,
         rx.box(
-            # 배경 오버레이 (클릭 시 닫기)
+            # 배경 오버레이
             rx.box(
                 position="fixed",
                 top="0",
@@ -196,7 +161,6 @@ def search_modal() -> rx.Component:
                                 "outline": "none",
                             },
                         ),
-                        # 닫기 버튼
                         rx.box(
                             rx.icon("x", size=_ICON_SIZE),
                             display="flex",
@@ -220,17 +184,17 @@ def search_modal() -> rx.Component:
                         width="100%",
                         align="center",
                         spacing="3",
-                        padding_x="1em",
-                        padding_y="0.75em",
+                        padding_x="0.75em",
+                        padding_y="0.625em",
                         border_bottom=f"1px solid {COLORS['border']}",
                     ),
-                    # 결과 영역 (스크롤 가능)
+                    # 결과 영역
                     rx.box(
                         _search_results(),
                         flex="1",
                         overflow_y="auto",
                         overflow_x="hidden",
-                        padding_y="0.5em",
+                        padding_y="0.25em",
                         max_height="400px",
                     ),
                     spacing="0",
@@ -249,7 +213,6 @@ def search_modal() -> rx.Component:
                 z_index="1000",
                 overflow="hidden",
                 box_shadow="0 16px 48px rgba(0, 0, 0, 0.3)",
-                # 모달 클릭 시 이벤트 전파 방지
                 on_click=UIState.noop,
             ),
         ),
