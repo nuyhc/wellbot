@@ -662,12 +662,12 @@ class ChatState(rx.State):
             return None
         if not attachment_service.verify_ownership(file_no, self._emp_no):
             return None
-        # 백엔드 프록시 엔드포인트로 다운로드 (S3 직접 접근 불필요)
+        # hidden iframe 으로 백엔드 프록시 엔드포인트 호출
+        # Content-Disposition: attachment 가 있으므로 현재 페이지를 떠나지 않고 다운로드
         return rx.call_script(
             f"""
             (async function() {{
                 try {{
-                    // 백엔드 URL 결정 (upload 와 동일한 로직)
                     let backendBase = '';
                     try {{
                         const envResp = await fetch('/env.json');
@@ -687,28 +687,13 @@ class ChatState(rx.State):
                         }}
                     }} catch(e) {{}}
 
-                    var resp = await fetch(backendBase + '/api/download/{file_no}', {{
-                        credentials: 'include',
-                    }});
-                    if (!resp.ok) {{
-                        var err = await resp.json().catch(function() {{ return {{}}; }});
-                        alert(err.detail || '다운로드 실패');
-                        return;
-                    }}
-                    var blob = await resp.blob();
-                    // Content-Disposition 에서 파일명 추출
-                    var cd = resp.headers.get('Content-Disposition') || '';
-                    var fnMatch = cd.match(/filename\\*=UTF-8''(.+)/);
-                    var filename = fnMatch ? decodeURIComponent(fnMatch[1]) : 'download';
-                    var objUrl = URL.createObjectURL(blob);
-                    var a = document.createElement('a');
-                    a.href = objUrl;
-                    a.download = filename;
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(objUrl);
+                    var iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = backendBase + '/api/download/{file_no}';
+                    document.body.appendChild(iframe);
+                    setTimeout(function() {{
+                        document.body.removeChild(iframe);
+                    }}, 30000);
                 }} catch (e) {{
                     console.error('[wellbot download]', e);
                 }}
