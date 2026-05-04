@@ -56,7 +56,7 @@ AUTO_SCROLL_SCRIPT = """
             var hasContent = msgs.length > 0;
             var isScrollable = el.scrollHeight > el.clientHeight;
             // 메시지가 있고 스크롤 가능할 때만 표시
-            panel.style.display = (hasContent && isScrollable) ? 'block' : 'none';
+            panel.style.display = (hasContent && isScrollable) ? 'flex' : 'none';
 
             // 버튼 disabled 상태 업데이트
             var prevBtn = document.getElementById('nav-prev-msg');

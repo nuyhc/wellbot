@@ -1,6 +1,5 @@
 """메시지 버블 컴포넌트.
 
-ChatGPT/Gemini 스타일 메시지 표시.
 사용자: 우측 정렬, 둥근 배경 버블.
 AI: 좌측 정렬, 배경 없이 마크다운 렌더링.
 첨부파일은 GNB 팝오버에서 대화 단위로 표시.
@@ -93,5 +92,6 @@ def message_bubble(message: Message) -> rx.Component:
             user_message(message),
             ai_message(message),
         ),
+        width="100%",
         class_name="chat-message",
     )
