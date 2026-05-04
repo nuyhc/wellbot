@@ -87,8 +87,11 @@ def ai_message(message: Message) -> rx.Component:
 
 def message_bubble(message: Message) -> rx.Component:
     """개별 메시지 - 역할에 따라 분기."""
-    return rx.cond(
-        message.role == "user",
-        user_message(message),
-        ai_message(message),
+    return rx.box(
+        rx.cond(
+            message.role == "user",
+            user_message(message),
+            ai_message(message),
+        ),
+        class_name="chat-message",
     )
