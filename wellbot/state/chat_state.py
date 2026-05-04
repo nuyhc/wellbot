@@ -993,6 +993,9 @@ class ChatState(rx.State):
             text = self.current_input.strip()
             if not text or self.is_loading:
                 return
+            # 첨부파일 처리 중에는 Enter 키 제출을 차단 (버튼 disabled 우회 방지)
+            if self.has_processing_attachments:
+                return
 
             idx = self._get_current_index()
             if idx is None:
