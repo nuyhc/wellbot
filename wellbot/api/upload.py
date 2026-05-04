@@ -140,13 +140,15 @@ def _stream_to_tempfile(upload: UploadFile, max_bytes: int) -> tuple[Path, int]:
 async def upload_attachment(
     background: BackgroundTasks,
     conversation_id: str = Form(...),
+    message_id: str = Form(""),
     file: UploadFile = FastAPIFile(...),
     wellbot_auth: str | None = Cookie(default=None),
 ) -> dict:
     """대화에 첨부파일을 업로드한다.
 
     Form 필드:
-        conversation_id: 대화 ID (chtb_tlk_smry_id)
+        conversation_id: 대화 세션 ID (chtb_tlk_smry_id)
+        message_id: 메시지 고유 ID (chtb_tlk_id). 미지정 시 빈 문자열.
         file: 업로드 파일
     Cookie:
         wellbot_auth: 로그인 세션 토큰 (JWT)
@@ -173,12 +175,15 @@ async def upload_attachment(
             detail="conversation_id 가 필요합니다.",
         )
 
+    # 2-1. message_id 정규화
+    msg_id = (message_id or "").strip()
+
     # 3. 파일 확장자 검증
     filename, ext = _validate_file(file)
 
     # 4. 대화당 개수/용량 한도 체크
     file_count, total_tokens = (
-        attachment_service.count_conversation_attachments(smry_id)
+        attachment_service.count_conversation_attachments(smry_id, pending_msg_id=msg_id)
     )
     if file_count >= FILE_MAX_PER_CONVERSATION:
         raise HTTPException(
@@ -216,6 +221,7 @@ async def upload_attachment(
                 filename=filename,
                 content_type=content_type,
                 file_path=tmp_path,
+                msg_id=msg_id,
             )
         except Exception as exc:
             log.exception("register_attachment 실패: %s", exc)

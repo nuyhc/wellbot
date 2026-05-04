@@ -1,5 +1,6 @@
 """채팅 서비스 - 대화 및 메시지 DB CRUD."""
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
 
@@ -71,6 +72,7 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
                 "timestamp": r.rgst_dtm.timestamp() if r.rgst_dtm else 0.0,
                 "model_name": r.chtb_mdl_nm or "",
                 "seq": int(r.chtb_tlk_seq) if r.chtb_tlk_seq is not None else 0,
+                "msg_id": r.chtb_tlk_id or "",
             }
             for r in rows
         ]
@@ -140,14 +142,23 @@ def save_message(
     input_tokens: int = 0,
     output_tokens: int = 0,
     reply_time: float | None = None,
-) -> None:
-    """메시지 DB 저장."""
+    msg_id: str | None = None,
+) -> str:
+    """메시지 DB 저장.
+
+    Args:
+        msg_id: 메시지 고유 ID. 미지정 시 UUID 자동 생성.
+
+    Returns:
+        저장된 메시지의 chtb_tlk_id (개별 메시지 고유 ID).
+    """
     now = datetime.now(KST)
     total_tokens = input_tokens + output_tokens
+    tlk_id = msg_id or uuid.uuid4().hex[:50]
     with get_session() as session:
         record = ChtbMsgD(
             chtb_tlk_smry_id=smry_id,
-            chtb_tlk_id=smry_id,
+            chtb_tlk_id=tlk_id,
             chtb_tlk_seq=seq,
             msg_role_nm=role,
             chtb_msg_cntt=content,
@@ -163,16 +174,52 @@ def save_message(
             upd_dtm=now,
         )
         session.add(record)
+    return tlk_id
 
 
 def delete_conversation(smry_id: str, emp_no: str) -> None:
-    """대화 및 관련 메시지 삭제 (소유권 검증 포함)."""
+    """대화 및 관련 메시지·첨부파일 삭제 (소유권 검증 포함)."""
+    from wellbot.models.attachment import AtchFileM
+    from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
+
     with get_session() as session:
         if not _verify_ownership(session, smry_id, emp_no):
             return
+
+        # 대화에 속한 메시지의 chtb_tlk_id 목록 조회
+        msg_ids = [
+            row[0]
+            for row in session.query(ChtbMsgD.chtb_tlk_id)
+            .filter(ChtbMsgD.chtb_tlk_smry_id == smry_id)
+            .all()
+        ]
+
+        if msg_ids:
+            # 해당 메시지에 연결된 첨부파일 번호 조회
+            file_nos = [
+                row[0]
+                for row in session.query(ChtbMsgAtchFileD.atch_file_no)
+                .filter(ChtbMsgAtchFileD.chtb_tlk_id.in_(msg_ids))
+                .all()
+            ]
+
+            # 첨부파일 매핑 삭제
+            session.query(ChtbMsgAtchFileD).filter(
+                ChtbMsgAtchFileD.chtb_tlk_id.in_(msg_ids)
+            ).delete(synchronize_session="fetch")
+
+            # 첨부파일 마스터 삭제
+            if file_nos:
+                session.query(AtchFileM).filter(
+                    AtchFileM.atch_file_no.in_(file_nos)
+                ).delete(synchronize_session="fetch")
+
+        # 메시지 삭제
         session.query(ChtbMsgD).filter(
             ChtbMsgD.chtb_tlk_smry_id == smry_id
         ).delete()
+
+        # 대화 요약 삭제
         session.query(ChtbSmryD).filter(
             ChtbSmryD.chtb_tlk_smry_id == smry_id
         ).delete()

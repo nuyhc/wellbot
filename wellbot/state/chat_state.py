@@ -157,6 +157,9 @@ class ChatState(rx.State):
     # 인증된 사용자 (on_load에서 캐시)
     _emp_no: str = ""
 
+    # 첨부파일 업로드 시 미리 생성한 메시지 ID (send_message에서 재사용)
+    _pending_msg_id: str = ""
+
     def _refresh_greeting(self) -> None:
         """환영 메시지를 랜덤으로 갱신."""
         self.greeting_text = random.choice(get_greetings())
@@ -670,13 +673,21 @@ class ChatState(rx.State):
 
         conversation_attachments 에 이미 있는 파일(= 전송 완료)은 제외하고,
         방금 업로드했지만 아직 메시지로 전송하지 않은 파일만 pending 에 표시.
+
+        메시지가 아직 DB 에 저장되기 전이면 _pending_msg_id 로 직접 조회한다.
         """
         if not self._emp_no or not self.current_conversation_id:
             return
         try:
-            rows = attachment_service.get_conversation_attachments(
-                self.current_conversation_id
-            )
+            if self._pending_msg_id:
+                # 메시지 미저장 상태: msg_id 로 직접 조회
+                rows = attachment_service.get_attachments_by_msg_id(
+                    self._pending_msg_id
+                )
+            else:
+                rows = attachment_service.get_conversation_attachments(
+                    self.current_conversation_id
+                )
         except Exception:
             return
         sent: set[int] = {a.file_no for a in self.conversation_attachments}
@@ -723,6 +734,11 @@ class ChatState(rx.State):
                 f"메시지당 최대 {FILE_MAX_PER_MESSAGE}개까지 첨부 가능합니다."
             )
             return None
+
+        # 첨부파일-메시지 매핑용 msg_id 를 미리 생성 (send_message 에서 재사용)
+        if not self._pending_msg_id:
+            self._pending_msg_id = uuid.uuid4().hex[:50]
+        msg_id = self._pending_msg_id
 
         accept = self.accepted_file_extensions
         max_mb = FILE_MAX_SIZE_MB
@@ -793,6 +809,7 @@ class ChatState(rx.State):
       const form = new FormData();
       form.append('file', file);
       form.append('conversation_id', '{conv_id}');
+      form.append('message_id', '{msg_id}');
       try {{
         const resp = await fetch(backendBase + '/api/upload', {{
           method: 'POST',
@@ -962,6 +979,10 @@ class ChatState(rx.State):
             use_thinking = self.thinking_enabled
             prompt_name = self.selected_prompt
 
+            # 첨부파일이 있으면 미리 생성한 msg_id 사용, 없으면 새로 생성
+            pending_msg_id = self._pending_msg_id or ""
+            self._pending_msg_id = ""  # 소비 후 초기화
+
             # API 호출용 메시지 준비 (기존 대화의 텍스트만 - 이미지 중복 방지)
             api_messages = [
                 {"role": m.role, "content": m.content}
@@ -993,6 +1014,7 @@ class ChatState(rx.State):
                 role="user", content=text,
                 emp_no=emp_no, model_name=model_name,
                 provider=prompt_name,
+                msg_id=pending_msg_id or None,
             )
 
         # is_persisted 업데이트

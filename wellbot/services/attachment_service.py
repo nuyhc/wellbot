@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from wellbot.models.attachment import AtchFileM
+from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
 from wellbot.constants import KST
 from wellbot.services import chunker, embedding_service, file_parser, storage_service
@@ -47,15 +48,17 @@ def register_attachment(
     filename: str,
     content_type: str,
     file_path: Path,
+    msg_id: str = "",
 ) -> int:
     """업로드된 원본 파일을 S3 에 저장하고 DB 에 등록한다.
 
     Args:
         emp_no: 업로드한 사원 번호.
-        smry_id: 대화 ID.
+        smry_id: 대화 세션 ID (S3 prefix 생성용).
         filename: 원본 파일명 (확장자 포함).
         content_type: MIME 타입.
         file_path: 서버에 임시 저장된 파일 경로.
+        msg_id: 메시지 고유 ID (chtb_tlk_id). 첨부파일-메시지 매핑에 사용.
 
     Returns:
         생성된 atch_file_no.
@@ -87,9 +90,9 @@ def register_attachment(
         # S3 prefix 를 DB 에 반영
         record.atch_file_url_addr = s3_prefix[:500]
 
-        # chtb_msg_atch_file_d INSERT (대화 매핑)
+        # chtb_msg_atch_file_d INSERT (메시지-첨부파일 매핑)
         mapping = ChtbMsgAtchFileD(
-            chtb_tlk_id=smry_id,
+            chtb_tlk_id=msg_id,
             atch_file_no=file_no,
             rgst_dtm=now,
             rgsr_id=emp_no[:20],
@@ -221,12 +224,16 @@ def _update_token_count(file_no: int, emp_no: str, total_tokens: int) -> None:
 def _smry_id_from_record(file_no: int) -> str:
     """DB 매핑 테이블에서 smry_id 를 조회한다.
 
-    S3 prefix 파싱은 KEY_PREFIX 길이에 따라 인덱스가 달라지므로
-    DB 를 정본(source of truth)으로 사용한다.
+    chtb_msg_atch_file_d.chtb_tlk_id → chtb_msg_d.chtb_tlk_id 를 경유하여
+    chtb_msg_d.chtb_tlk_smry_id 를 반환한다.
     """
     with get_session() as session:
         row = (
-            session.query(ChtbMsgAtchFileD.chtb_tlk_id)
+            session.query(ChtbMsgD.chtb_tlk_smry_id)
+            .join(
+                ChtbMsgAtchFileD,
+                ChtbMsgAtchFileD.chtb_tlk_id == ChtbMsgD.chtb_tlk_id,
+            )
             .filter(ChtbMsgAtchFileD.atch_file_no == file_no)
             .first()
         )
@@ -237,7 +244,11 @@ def _smry_id_from_record(file_no: int) -> str:
 
 
 def get_conversation_attachments(smry_id: str) -> list[AttachmentRecord]:
-    """대화에 연결된 모든 첨부파일 목록 반환."""
+    """대화에 연결된 모든 첨부파일 목록 반환.
+
+    chtb_msg_atch_file_d → chtb_msg_d 를 경유하여
+    해당 세션(smry_id)에 속한 첨부파일을 조회한다.
+    """
     with get_session() as session:
         rows = (
             session.query(AtchFileM)
@@ -245,7 +256,46 @@ def get_conversation_attachments(smry_id: str) -> list[AttachmentRecord]:
                 ChtbMsgAtchFileD,
                 ChtbMsgAtchFileD.atch_file_no == AtchFileM.atch_file_no,
             )
-            .filter(ChtbMsgAtchFileD.chtb_tlk_id == smry_id)
+            .join(
+                ChtbMsgD,
+                ChtbMsgD.chtb_tlk_id == ChtbMsgAtchFileD.chtb_tlk_id,
+            )
+            .filter(ChtbMsgD.chtb_tlk_smry_id == smry_id)
+            .order_by(AtchFileM.atch_file_no.asc())
+            .all()
+        )
+        return [
+            AttachmentRecord(
+                file_no=int(r.atch_file_no),
+                file_name=r.atch_file_nm or "",
+                s3_prefix=r.atch_file_url_addr or "",
+                token_count=(
+                    int(r.atch_file_tokn_ecnt)
+                    if r.atch_file_tokn_ecnt is not None
+                    else None
+                ),
+                mime=file_parser.guess_mime(r.atch_file_nm or ""),
+            )
+            for r in rows
+        ]
+
+
+def get_attachments_by_msg_id(msg_id: str) -> list[AttachmentRecord]:
+    """메시지 ID(chtb_tlk_id)로 첨부파일 목록을 직접 조회한다.
+
+    메시지가 아직 chtb_msg_d 에 저장되기 전(업로드 직후 polling)에도
+    chtb_msg_atch_file_d 에서 바로 조회할 수 있다.
+    """
+    if not msg_id:
+        return []
+    with get_session() as session:
+        rows = (
+            session.query(AtchFileM)
+            .join(
+                ChtbMsgAtchFileD,
+                ChtbMsgAtchFileD.atch_file_no == AtchFileM.atch_file_no,
+            )
+            .filter(ChtbMsgAtchFileD.chtb_tlk_id == msg_id)
             .order_by(AtchFileM.atch_file_no.asc())
             .all()
         )
@@ -313,15 +363,24 @@ def download_original_bytes(file_no: int) -> bytes | None:
 
 
 def verify_ownership(file_no: int, emp_no: str) -> bool:
-    """사원이 해당 파일의 대화 소유자인지 확인."""
+    """사원이 해당 파일의 대화 소유자인지 확인.
+
+    1차: chtb_msg_atch_file_d → chtb_msg_d → chtb_smry_d 경유 (메시지 저장 완료 상태)
+    2차: atch_file_m.rgsr_id 확인 (메시지 미저장 pending 상태 폴백)
+    """
     from wellbot.models.chat_summary import ChtbSmryD
 
     with get_session() as session:
+        # 1차: 메시지 경유 소유권 검증
         row = (
             session.query(ChtbSmryD)
             .join(
+                ChtbMsgD,
+                ChtbMsgD.chtb_tlk_smry_id == ChtbSmryD.chtb_tlk_smry_id,
+            )
+            .join(
                 ChtbMsgAtchFileD,
-                ChtbMsgAtchFileD.chtb_tlk_id == ChtbSmryD.chtb_tlk_smry_id,
+                ChtbMsgAtchFileD.chtb_tlk_id == ChtbMsgD.chtb_tlk_id,
             )
             .filter(
                 ChtbMsgAtchFileD.atch_file_no == file_no,
@@ -329,7 +388,15 @@ def verify_ownership(file_no: int, emp_no: str) -> bool:
             )
             .first()
         )
-        return row is not None
+        if row is not None:
+            return True
+
+        # 2차: 메시지 미저장 상태 (pending) - 등록자 확인
+        record = session.query(AtchFileM).get(file_no)
+        if record and record.rgsr_id == emp_no[:20]:
+            return True
+
+        return False
 
 
 def delete_attachment(file_no: int, emp_no: str) -> bool:
@@ -363,22 +430,51 @@ def delete_attachment(file_no: int, emp_no: str) -> bool:
     return True
 
 
-def count_conversation_attachments(smry_id: str) -> tuple[int, int]:
+def count_conversation_attachments(
+    smry_id: str,
+    pending_msg_id: str = "",
+) -> tuple[int, int]:
     """대화 내 첨부파일 개수 및 총 토큰 수.
+
+    chtb_msg_d 에 저장된 메시지 경유 조회 + 아직 메시지 미저장 상태인
+    pending_msg_id 의 첨부파일을 합산한다.
+
+    Args:
+        smry_id: 대화 세션 ID.
+        pending_msg_id: 아직 chtb_msg_d 에 없는 메시지 ID (업로드 중).
 
     Returns:
         (file_count, total_tokens)
     """
     with get_session() as session:
-        rows = (
-            session.query(AtchFileM.atch_file_tokn_ecnt)
+        # 1. 이미 메시지에 연결된 첨부파일
+        base_query = (
+            session.query(AtchFileM.atch_file_no, AtchFileM.atch_file_tokn_ecnt)
             .join(
                 ChtbMsgAtchFileD,
                 ChtbMsgAtchFileD.atch_file_no == AtchFileM.atch_file_no,
             )
-            .filter(ChtbMsgAtchFileD.chtb_tlk_id == smry_id)
-            .all()
+            .join(
+                ChtbMsgD,
+                ChtbMsgD.chtb_tlk_id == ChtbMsgAtchFileD.chtb_tlk_id,
+            )
+            .filter(ChtbMsgD.chtb_tlk_smry_id == smry_id)
         )
+
+        # 2. 아직 메시지 미저장 상태인 첨부파일 (pending)
+        if pending_msg_id:
+            pending_query = (
+                session.query(AtchFileM.atch_file_no, AtchFileM.atch_file_tokn_ecnt)
+                .join(
+                    ChtbMsgAtchFileD,
+                    ChtbMsgAtchFileD.atch_file_no == AtchFileM.atch_file_no,
+                )
+                .filter(ChtbMsgAtchFileD.chtb_tlk_id == pending_msg_id)
+            )
+            rows = base_query.union(pending_query).all()
+        else:
+            rows = base_query.all()
+
         file_count = len(rows)
-        total_tokens = sum(int(r[0] or 0) for r in rows)
+        total_tokens = sum(int(r[1] or 0) for r in rows)
         return file_count, total_tokens
