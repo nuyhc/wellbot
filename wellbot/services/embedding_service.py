@@ -288,6 +288,16 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
         if not att.s3_prefix:
             # 이미지 등 파생물이 없는 파일은 정상 스킵 (missing 으로 표기 안 함)
             continue
+
+        # 처리 미완료 파일은 S3 호출 없이 스킵
+        if att.token_count is None:
+            log.info(
+                "load_conversation_index: 처리 미완료 스킵 file=%s (file_no=%d)",
+                att.file_name, att.file_no,
+            )
+            missing_files.append(att.file_name)
+            continue
+
         chunks_key = f"{att.s3_prefix}chunks.jsonl"
         index_key = f"{att.s3_prefix}index.faiss"
 

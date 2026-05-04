@@ -706,14 +706,26 @@ class ChatState(rx.State):
 
     @rx.event(background=True)
     async def poll_attachments(self) -> None:
-        """업로드 트리거 후 일정 시간 동안 DB 를 폴링해 UI 갱신."""
-        deadline = time.time() + 30.0  # 최대 30초
+        """업로드 트리거 후 DB 를 폴링해 UI 갱신.
+
+        모든 pending 파일이 ready 가 되면 조기 종료.
+        대용량 파일 처리를 고려해 최대 120초까지 폴링.
+        """
+        deadline = time.time() + 120.0
         interval = 1.0
         while time.time() < deadline:
             async with self:
                 self._sync_attachments_from_db()
+                # 모든 pending 파일이 ready 면 폴링 종료
+                if self.pending_attachments and all(
+                    a.status == "ready" for a in self.pending_attachments
+                ):
+                    break
+                # pending 이 비었으면 (전송 완료 등) 종료
+                if not self.pending_attachments and not self._pending_msg_id:
+                    break
             await asyncio.sleep(interval)
-            interval = min(2.0, interval + 0.5)
+            interval = min(3.0, interval + 0.5)
 
     def trigger_upload(self) -> rx.event.EventSpec | None:
         """파일 선택 다이얼로그를 열고 업로드를 트리거한다.
@@ -938,6 +950,26 @@ class ChatState(rx.State):
                 return
 
             # 이번 turn 에 첨부될 파일 (pending → message 로 이동)
+            # DB 에서 최신 상태를 다시 읽어 처리 완료 여부를 반영
+            if self.pending_attachments and self._pending_msg_id:
+                try:
+                    fresh = attachment_service.get_attachments_by_msg_id(
+                        self._pending_msg_id
+                    )
+                    refreshed: list[AttachmentInfo] = [
+                        AttachmentInfo(
+                            file_no=r.file_no,
+                            name=r.file_name,
+                            mime=r.mime,
+                            token_count=r.token_count or 0,
+                            status="ready" if r.token_count is not None else "processing",
+                        )
+                        for r in fresh
+                    ]
+                    if refreshed:
+                        self.pending_attachments = refreshed
+                except Exception:
+                    pass
             turn_attachments = list(self.pending_attachments)
 
             user_msg = Message(
