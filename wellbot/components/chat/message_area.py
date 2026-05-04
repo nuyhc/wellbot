@@ -148,6 +148,7 @@ def message_nav_panel() -> rx.Component:
     """메시지 네비게이션 패널 (이전/다음/최하단).
 
     input_bar 우측에 배치되는 VStack 형태.
+    visibility로 표시를 제어하여 항상 레이아웃 공간을 확보한다.
     """
     return rx.box(
         rx.vstack(
@@ -158,16 +159,18 @@ def message_nav_panel() -> rx.Component:
             align="center",
         ),
         id="msg-nav-panel",
-        style={
-            "display": "none",
-            "padding": "0.35em",
-            "border_radius": "20px",
-            "background": str(COLORS["sidebar_bg"]),
-            "border": f"1px solid {COLORS['border']}",
-            "box_shadow": "0 2px 12px rgba(0,0,0,0.18)",
-            "flex_shrink": "0",
-            "margin_bottom": "2.5em",
-        },
+        padding="0.35em",
+        border_radius="20px",
+        background=COLORS["sidebar_bg"],
+        border=f"1px solid {COLORS['border']}",
+        box_shadow="0 2px 12px rgba(0,0,0,0.18)",
+        flex_shrink="0",
+        margin_bottom="2.5em",
+        margin_right="0.5em",
+        # 초기 상태: 숨김 (공간은 유지)
+        visibility="hidden",
+        opacity="0",
+        transition="opacity 0.15s ease, visibility 0.15s ease",
     )
 
 
