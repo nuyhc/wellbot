@@ -1,0 +1,256 @@
+"""채팅 검색 모달 컴포넌트.
+
+중앙 오버레이 팝업으로 대화를 검색하고 선택.
+"""
+
+import reflex as rx
+
+from wellbot.state.chat_state import ChatState, Conversation
+from wellbot.state.ui_state import UIState
+from wellbot.styles import COLORS, SPACING
+
+# 사이드바와 동일한 아이콘 크기 토큰
+_ICON_SIZE = 18
+_ICON_BOX = "36px"
+
+
+def _search_result_item(conv: Conversation) -> rx.Component:
+    """검색 결과 개별 대화 항목."""
+    is_active = ChatState.current_conversation_id == conv.id
+
+    return rx.hstack(
+        rx.icon(
+            "message-circle",
+            size=_ICON_SIZE,
+            color=COLORS["text_secondary"],
+            flex_shrink="0",
+        ),
+        rx.text(
+            conv.title,
+            size="2",
+            color=rx.cond(is_active, COLORS["text_primary"], COLORS["text_secondary"]),
+            weight=rx.cond(is_active, "medium", "regular"),
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+            min_width="0",
+            flex="1",
+        ),
+        width="100%",
+        max_width="100%",
+        padding_x="0.75em",
+        padding_y="0.5em",
+        align="center",
+        spacing="2",
+        cursor="pointer",
+        border_radius=SPACING["border_radius_sm"],
+        bg=rx.cond(is_active, COLORS["sidebar_active"], "transparent"),
+        _hover={
+            "bg": rx.cond(
+                is_active, COLORS["sidebar_active"], COLORS["sidebar_hover"]
+            ),
+        },
+        on_click=[
+            ChatState.switch_conversation(conv.id),
+            UIState.close_search,
+        ],
+        overflow="hidden",
+    )
+
+
+def _search_results() -> rx.Component:
+    """검색 결과 목록."""
+    return rx.vstack(
+        # 검색 중일 때
+        rx.cond(
+            ChatState.is_searching,
+            rx.fragment(
+                rx.text(
+                    "검색 결과",
+                    size="1",
+                    color=COLORS["category_text"],
+                    weight="medium",
+                    padding_x="0.75em",
+                    padding_top="0.5em",
+                    padding_bottom="0.25em",
+                ),
+                rx.cond(
+                    ChatState.has_search_results,
+                    rx.vstack(
+                        rx.foreach(
+                            ChatState.sorted_conversations,
+                            _search_result_item,
+                        ),
+                        spacing="0",
+                        width="100%",
+                    ),
+                    rx.text(
+                        "일치하는 대화가 없습니다.",
+                        size="1",
+                        color=COLORS["text_secondary"],
+                        padding_x="0.75em",
+                        padding_y="0.5em",
+                    ),
+                ),
+            ),
+            # 검색어 없을 때: 최근 대화 표시
+            rx.fragment(
+                # 새 채팅 버튼
+                rx.hstack(
+                    rx.icon(
+                        "square-pen",
+                        size=_ICON_SIZE,
+                        color=COLORS["text_secondary"],
+                        flex_shrink="0",
+                    ),
+                    rx.text(
+                        "새 채팅",
+                        size="2",
+                        color=COLORS["text_secondary"],
+                        weight="medium",
+                    ),
+                    width="100%",
+                    padding_x="0.75em",
+                    padding_y="0.5em",
+                    align="center",
+                    spacing="2",
+                    cursor="pointer",
+                    border_radius=SPACING["border_radius_sm"],
+                    _hover={"bg": COLORS["sidebar_hover"]},
+                    on_click=[
+                        ChatState.create_new_conversation,
+                        UIState.close_search,
+                    ],
+                ),
+                rx.separator(size="4", color_scheme="gray"),
+                # 최근 대화 섹션
+                rx.text(
+                    "최근 대화",
+                    size="1",
+                    color=COLORS["category_text"],
+                    weight="medium",
+                    padding_x="0.75em",
+                    padding_top="0.5em",
+                    padding_bottom="0.25em",
+                ),
+                rx.vstack(
+                    rx.foreach(
+                        ChatState.sorted_conversations,
+                        _search_result_item,
+                    ),
+                    spacing="0",
+                    width="100%",
+                ),
+            ),
+        ),
+        spacing="1",
+        width="100%",
+    )
+
+
+def search_modal() -> rx.Component:
+    """ChatGPT 스타일 채팅 검색 모달.
+
+    화면 중앙에 오버레이로 표시되는 검색 팝업.
+    """
+    return rx.cond(
+        UIState.show_search_modal,
+        rx.box(
+            # 배경 오버레이 (클릭 시 닫기)
+            rx.box(
+                position="fixed",
+                top="0",
+                left="0",
+                width="100vw",
+                height="100vh",
+                bg="rgba(0, 0, 0, 0.5)",
+                z_index="999",
+                on_click=[
+                    ChatState.clear_search_query,
+                    UIState.close_search,
+                ],
+            ),
+            # 모달 본체
+            rx.box(
+                rx.vstack(
+                    # 검색 입력 헤더
+                    rx.hstack(
+                        rx.icon(
+                            "search",
+                            size=_ICON_SIZE,
+                            color=COLORS["text_secondary"],
+                            flex_shrink="0",
+                        ),
+                        rx.input(
+                            placeholder="채팅 검색...",
+                            value=ChatState.search_query,
+                            on_change=ChatState.set_search_query,
+                            auto_focus=True,
+                            variant="surface",
+                            size="2",
+                            width="100%",
+                            style={
+                                "background": "transparent",
+                                "border": "none",
+                                "box_shadow": "none",
+                                "outline": "none",
+                            },
+                        ),
+                        # 닫기 버튼
+                        rx.box(
+                            rx.icon("x", size=_ICON_SIZE),
+                            display="flex",
+                            align_items="center",
+                            justify_content="center",
+                            width=_ICON_BOX,
+                            height=_ICON_BOX,
+                            border_radius="8px",
+                            cursor="pointer",
+                            color=COLORS["text_secondary"],
+                            flex_shrink="0",
+                            _hover={
+                                "bg": COLORS["sidebar_hover"],
+                                "color": COLORS["text_primary"],
+                            },
+                            on_click=[
+                                ChatState.clear_search_query,
+                                UIState.close_search,
+                            ],
+                        ),
+                        width="100%",
+                        align="center",
+                        spacing="3",
+                        padding_x="1em",
+                        padding_y="0.75em",
+                        border_bottom=f"1px solid {COLORS['border']}",
+                    ),
+                    # 결과 영역 (스크롤 가능)
+                    rx.box(
+                        _search_results(),
+                        flex="1",
+                        overflow_y="auto",
+                        overflow_x="hidden",
+                        padding_y="0.5em",
+                        max_height="400px",
+                    ),
+                    spacing="0",
+                    width="100%",
+                    height="100%",
+                ),
+                position="fixed",
+                top="50%",
+                left="50%",
+                transform="translate(-50%, -50%)",
+                width="min(560px, 90vw)",
+                max_height="500px",
+                bg=COLORS["sidebar_bg"],
+                border=f"1px solid {COLORS['border']}",
+                border_radius="12px",
+                z_index="1000",
+                overflow="hidden",
+                box_shadow="0 16px 48px rgba(0, 0, 0, 0.3)",
+                # 모달 클릭 시 이벤트 전파 방지
+                on_click=UIState.noop,
+            ),
+        ),
+    )

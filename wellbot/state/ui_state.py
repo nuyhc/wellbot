@@ -11,6 +11,7 @@ class UIState(rx.State):
 
     sidebar_expanded: bool = True
     show_search: bool = False
+    show_search_modal: bool = False
 
     def toggle_sidebar(self) -> None:
         """Sidebar 접힘/펼침 상태를 토글한다."""
@@ -25,21 +26,16 @@ class UIState(rx.State):
         self.sidebar_expanded = False
 
     def open_search(self) -> None:
-        """채팅 검색을 활성화한다. 사이드바가 접혀 있으면 펼친다."""
-        self.sidebar_expanded = True
-        self.show_search = True
+        """채팅 검색 모달을 연다."""
+        self.show_search_modal = True
 
     def close_search(self) -> None:
-        """채팅 검색을 비활성화한다."""
-        self.show_search = False
+        """채팅 검색 모달을 닫는다."""
+        self.show_search_modal = False
 
     def toggle_search(self) -> None:
-        """채팅 검색 표시 상태를 토글한다. 켤 때 사이드바도 펼친다."""
-        if self.show_search:
-            self.show_search = False
-        else:
-            self.sidebar_expanded = True
-            self.show_search = True
+        """채팅 검색 모달을 토글한다."""
+        self.show_search_modal = not self.show_search_modal
 
     def noop(self) -> None:
         """아무 동작도 하지 않는 핸들러."""
