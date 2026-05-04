@@ -9,6 +9,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from wellbot.api.upload import router as upload_router
+from wellbot.api.download import router as download_router
 
 api_app = FastAPI(title="WellBot API", docs_url=None, redoc_url=None)
 api_app.include_router(upload_router)
+api_app.include_router(download_router)

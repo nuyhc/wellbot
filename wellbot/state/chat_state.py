@@ -657,26 +657,61 @@ class ChatState(rx.State):
         ]
 
     def download_attachment(self, file_no: int) -> rx.event.EventSpec | None:
-        """첨부파일 다운로드 (현재 탭에서 바로 다운로드)."""
+        """첨부파일 다운로드 (백엔드 프록시 경유)."""
         if not self._emp_no:
             return None
         if not attachment_service.verify_ownership(file_no, self._emp_no):
             return None
-        info = attachment_service.get_download_info(file_no)
-        if not info:
-            return None
-        url, filename = info
-        # 숨겨진 <a> 태그로 다운로드 트리거 (새 탭 없이)
+        # 백엔드 프록시 엔드포인트로 다운로드 (S3 직접 접근 불필요)
         return rx.call_script(
             f"""
-            (function() {{
-                var a = document.createElement('a');
-                a.href = {url!r};
-                a.download = {filename!r};
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+            (async function() {{
+                try {{
+                    // 백엔드 URL 결정 (upload 와 동일한 로직)
+                    let backendBase = '';
+                    try {{
+                        const envResp = await fetch('/env.json');
+                        const env = await envResp.json();
+                        const pingUrl = env.PING || '';
+                        if (pingUrl) {{
+                            const u = new URL(pingUrl);
+                            const loc = window.location;
+                            const isLocalDev = (
+                                (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') &&
+                                (u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+                                u.port !== loc.port
+                            );
+                            if (isLocalDev) {{
+                                backendBase = loc.protocol + '//' + loc.hostname + ':' + u.port;
+                            }}
+                        }}
+                    }} catch(e) {{}}
+
+                    var resp = await fetch(backendBase + '/api/download/{file_no}', {{
+                        credentials: 'include',
+                    }});
+                    if (!resp.ok) {{
+                        var err = await resp.json().catch(function() {{ return {{}}; }});
+                        alert(err.detail || '다운로드 실패');
+                        return;
+                    }}
+                    var blob = await resp.blob();
+                    // Content-Disposition 에서 파일명 추출
+                    var cd = resp.headers.get('Content-Disposition') || '';
+                    var fnMatch = cd.match(/filename\\*=UTF-8''(.+)/);
+                    var filename = fnMatch ? decodeURIComponent(fnMatch[1]) : 'download';
+                    var objUrl = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
+                    a.href = objUrl;
+                    a.download = filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(objUrl);
+                }} catch (e) {{
+                    console.error('[wellbot download]', e);
+                }}
             }})();
             """
         )
