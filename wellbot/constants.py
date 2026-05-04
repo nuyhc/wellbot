@@ -21,6 +21,7 @@ PASSWORD_MIN_LENGTH: int = 8       # 비밀번호 최소 길이
 CONVERSATION_LIMIT: int = 30       # 사이드바 대화 목록 최대 수
 TITLE_MAX_LENGTH: int = 30         # 임시 제목 최대 글자 수
 DEFAULT_CONVERSATION_TITLE: str = "새 대화"
+MESSAGE_SEQ_MAX_RETRIES: int = 5   # 메시지 seq 동시 발급 충돌 시 재시도 횟수
 
 # ── 제목 생성 (경량 모델) ──
 TITLE_MODEL_ID: str = "apac.amazon.nova-lite-v1:0"
@@ -42,7 +43,7 @@ FILE_MAX_PER_CONVERSATION: int = 20       # 대화당 누적 첨부 개수
 FILE_MAX_TOTAL_SIZE_MB: int = 200         # 대화당 누적 최대 용량
 
 # ── 파서 ──
-FILE_PARSER_MODE: str = "upstage"           # "local" | "upstage" | "hybrid"
+FILE_PARSER_MODE: str = "local"           # "local" | "upstage" | "hybrid"
 FILE_PARSER_FALLBACK: bool = True         # local 실패 시 upstage 폴백 (hybrid 모드)
 
 # ── Upstage Document Parse 공식 제약 ──

@@ -519,9 +519,8 @@ class ChatState(rx.State):
                     sys_content = prompt.content if prompt else ""
                     if sys_content:
                         conv_id = self.conversations[idx].id
-                        seq = chat_service.get_next_seq(conv_id)
-                        chat_service.save_message(
-                            smry_id=conv_id, seq=seq,
+                        chat_service.append_message(
+                            smry_id=conv_id,
                             role="system", content=sys_content,
                             emp_no=self._emp_no, model_name=name,
                         )
@@ -1080,9 +1079,8 @@ class ChatState(rx.State):
                     cfg = get_config()
                     prompt = cfg.get_prompt(prompt_name)
                     sys_content = prompt.content if prompt else cfg.system_prompt
-                    sys_seq = chat_service.get_next_seq(conv_id)
-                    chat_service.save_message(
-                        smry_id=conv_id, seq=sys_seq,
+                    chat_service.append_message(
+                        smry_id=conv_id,
                         role="system", content=sys_content,
                         emp_no=emp_no, model_name=prompt_name,
                     )
@@ -1090,9 +1088,8 @@ class ChatState(rx.State):
                     pass
             elif is_first_msg:
                 chat_service.update_conversation_title(conv_id, title, emp_no)
-            user_seq = chat_service.get_next_seq(conv_id)
-            chat_service.save_message(
-                smry_id=conv_id, seq=user_seq,
+            chat_service.append_message(
+                smry_id=conv_id,
                 role="user", content=text,
                 emp_no=emp_no, model_name=model_name,
                 provider=prompt_name,
@@ -1227,9 +1224,8 @@ class ChatState(rx.State):
         # DB 저장: AI 응답 메시지 (State 락 밖) — 텍스트 없이 중단된 경우 저장 안 함
         if emp_no and content:
             elapsed = round(time.time() - start_time, 2)
-            ai_seq = chat_service.get_next_seq(conv_id)
-            chat_service.save_message(
-                smry_id=conv_id, seq=ai_seq,
+            chat_service.append_message(
+                smry_id=conv_id,
                 role="assistant", content=content,
                 emp_no=emp_no, model_name=model_name,
                 provider=provider,

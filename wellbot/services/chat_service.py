@@ -5,8 +5,9 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
-from wellbot.constants import CONVERSATION_LIMIT, KST
+from wellbot.constants import CONVERSATION_LIMIT, KST, MESSAGE_SEQ_MAX_RETRIES
 from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_summary import ChtbSmryD
 from wellbot.services.database import get_session
@@ -61,7 +62,11 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
                 ChtbMsgD.chtb_tlk_smry_id == smry_id,
                 ChtbMsgD.msg_role_nm != "system",
             )
-            .order_by(ChtbMsgD.chtb_tlk_seq.asc())
+            .order_by(
+                ChtbMsgD.chtb_tlk_seq.asc(),
+                ChtbMsgD.rgst_dtm.asc(),
+                ChtbMsgD.chtb_tlk_id.asc(),
+            )
             .all()
         )
 
@@ -118,22 +123,8 @@ def update_conversation_title(smry_id: str, title: str, emp_no: str) -> None:
             record.uppr_id = emp_no[:20]
 
 
-def get_next_seq(smry_id: str) -> int:
-    """다음 메시지 순번 반환."""
-    with get_session() as session:
-        result = (
-            session.query(func.max(ChtbMsgD.chtb_tlk_seq))
-            .filter(ChtbMsgD.chtb_tlk_smry_id == smry_id)
-            .scalar()
-        )
-        if result is None:
-            return 1
-        return int(result) + 1
-
-
-def save_message(
+def append_message(
     smry_id: str,
-    seq: int,
     role: str,
     content: str,
     emp_no: str,
@@ -144,37 +135,58 @@ def save_message(
     reply_time: float | None = None,
     msg_id: str | None = None,
 ) -> str:
-    """메시지 DB 저장.
+    """메시지 DB 저장 (seq 자동 발급).
+
+    동일 트랜잭션 내에서 ``MAX(chtb_tlk_seq) + 1`` 계산과 INSERT 를 수행하고,
+    UNIQUE(smry_id, seq) 충돌 시 제한된 횟수만큼 재시도한다.
 
     Args:
         msg_id: 메시지 고유 ID. 미지정 시 UUID 자동 생성.
 
     Returns:
         저장된 메시지의 chtb_tlk_id (개별 메시지 고유 ID).
+
+    Raises:
+        IntegrityError: 재시도 한도 초과 시 마지막 충돌을 그대로 전파.
     """
-    now = datetime.now(KST)
     total_tokens = input_tokens + output_tokens
     tlk_id = msg_id or uuid.uuid4().hex[:50]
-    with get_session() as session:
-        record = ChtbMsgD(
-            chtb_tlk_smry_id=smry_id,
-            chtb_tlk_id=tlk_id,
-            chtb_tlk_seq=seq,
-            msg_role_nm=role,
-            chtb_msg_cntt=content,
-            chtb_mdl_nm=model_name or None,
-            chtb_offr_mdl_nm=provider or None,
-            chtb_inpt_tokn_ecnt=input_tokens or None,
-            chtb_otpt_tokn_ecnt=output_tokens or None,
-            chtb_tot_tokn_ecnt=total_tokens or None,
-            rply_time=Decimal(str(reply_time)) if reply_time else None,
-            rgsr_id=emp_no[:20],
-            rgst_dtm=now,
-            uppr_id=emp_no[:20],
-            upd_dtm=now,
-        )
-        session.add(record)
-    return tlk_id
+
+    for attempt in range(MESSAGE_SEQ_MAX_RETRIES):
+        try:
+            now = datetime.now(KST)
+            with get_session() as session:
+                max_seq = (
+                    session.query(func.max(ChtbMsgD.chtb_tlk_seq))
+                    .filter(ChtbMsgD.chtb_tlk_smry_id == smry_id)
+                    .scalar()
+                )
+                seq = (int(max_seq) if max_seq is not None else 0) + 1
+                record = ChtbMsgD(
+                    chtb_tlk_smry_id=smry_id,
+                    chtb_tlk_id=tlk_id,
+                    chtb_tlk_seq=seq,
+                    msg_role_nm=role,
+                    chtb_msg_cntt=content,
+                    chtb_mdl_nm=model_name or None,
+                    chtb_offr_mdl_nm=provider or None,
+                    chtb_inpt_tokn_ecnt=input_tokens or None,
+                    chtb_otpt_tokn_ecnt=output_tokens or None,
+                    chtb_tot_tokn_ecnt=total_tokens or None,
+                    rply_time=Decimal(str(reply_time)) if reply_time else None,
+                    rgsr_id=emp_no[:20],
+                    rgst_dtm=now,
+                    uppr_id=emp_no[:20],
+                    upd_dtm=now,
+                )
+                session.add(record)
+            return tlk_id
+        except IntegrityError:
+            if attempt == MESSAGE_SEQ_MAX_RETRIES - 1:
+                raise
+            continue
+
+    return tlk_id  # unreachable: 위 루프는 성공/예외로만 종료
 
 
 def delete_conversation(smry_id: str, emp_no: str) -> None:
