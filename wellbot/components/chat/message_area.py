@@ -109,66 +109,30 @@ def streaming_message() -> rx.Component:
     )
 
 
-def _nav_button(icon_name: str, btn_id: str, tooltip: str) -> rx.Component:
-    """메시지 네비게이션 개별 버튼."""
-    return rx.tooltip(
-        rx.el.button(
-            rx.icon(icon_name, size=16, color=COLORS["text_secondary"]),
-            id=btn_id,
-            style={
-                "width": "32px",
-                "height": "32px",
-                "border_radius": "50%",
-                "background": str(COLORS["input_bg"]),
-                "border": f"1px solid {COLORS['border']}",
-                "display": "flex",
-                "align_items": "center",
-                "justify_content": "center",
-                "cursor": "pointer",
-                "padding": "0",
-                "outline": "none",
-                "transition": "all 0.15s ease",
-                "opacity": "0.7",
-                "&:hover": {
-                    "opacity": "1",
-                    "background": str(COLORS["sidebar_hover"]),
-                },
-                "&:disabled": {
-                    "opacity": "0.3",
-                    "cursor": "default",
-                },
-            },
-        ),
-        content=tooltip,
-    )
-
-
-def message_nav_panel() -> rx.Component:
-    """메시지 네비게이션 패널 (이전/다음/최하단).
-
-    input_bar 우측에 배치되는 VStack 형태.
-    visibility로 표시를 제어하여 항상 레이아웃 공간을 확보한다.
-    """
-    return rx.box(
-        rx.vstack(
-            _nav_button("chevron-up", "nav-prev-msg", "이전 메시지"),
-            _nav_button("chevron-down", "nav-next-msg", "다음 메시지"),
-            _nav_button("chevrons-down", "nav-scroll-bottom", "최하단으로"),
-            spacing="1",
-            align="center",
-        ),
-        id="msg-nav-panel",
-        padding="0.35em",
-        border_radius="20px",
-        background=COLORS["sidebar_bg"],
-        border=f"1px solid {COLORS['border']}",
-        box_shadow="0 2px 12px rgba(0,0,0,0.18)",
-        flex_shrink="0",
-        margin_bottom="2.5em",
-        margin_right="0.5em",
-        # 초기 상태: 항상 표시
-        visibility="visible",
-        opacity="1",
+def scroll_to_bottom_button() -> rx.Component:
+    """맨 아래로 이동 플로팅 버튼."""
+    return rx.el.button(
+        rx.icon("chevron-down", size=18, color=COLORS["text_secondary"]),
+        id="scroll-to-bottom-btn",
+        style={
+            "width": "36px",
+            "height": "36px",
+            "border_radius": "50%",
+            "background": str(COLORS["input_bg"]),
+            "border": f"1px solid {COLORS['border']}",
+            "display": "none",
+            "align_items": "center",
+            "justify_content": "center",
+            "cursor": "pointer",
+            "position": "absolute",
+            "bottom": "0.75em",
+            "left": "50%",
+            "transform": "translateX(-50%)",
+            "z_index": "5",
+            "box_shadow": "0 2px 8px rgba(0,0,0,0.15)",
+            "padding": "0",
+            "outline": "none",
+        },
     )
 
 
@@ -204,6 +168,7 @@ def message_area() -> rx.Component:
             ),
             welcome_message(),
         ),
+        scroll_to_bottom_button(),
         id="message-area",
         flex="1",
         overflow_y="auto",
