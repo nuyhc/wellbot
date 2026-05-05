@@ -989,14 +989,24 @@ class ChatState(rx.State):
     async def send_message(self, form_data: dict | None = None) -> None:
         """메시지를 전송하고 Bedrock 스트리밍 응답을 처리한다."""
         # 1. 사용자 메시지 추가 및 상태 초기화
+        blocked_processing = False
         async with self:
             text = self.current_input.strip()
             if not text or self.is_loading:
                 return
             # 첨부파일 처리 중에는 Enter 키 제출을 차단 (버튼 disabled 우회 방지)
             if self.has_processing_attachments:
-                return
+                blocked_processing = True
 
+        if blocked_processing:
+            yield rx.toast.info(
+                "첨부 파일 분석이 끝나면 전송할 수 있어요.",
+                duration=2500,
+                position="bottom-center",
+            )
+            return
+
+        async with self:
             idx = self._get_current_index()
             if idx is None:
                 return

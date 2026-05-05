@@ -293,12 +293,39 @@ def _style_panel() -> rx.Component:
     )
 
 
+def _processing_toast() -> rx.Component:
+    """첨부 분석 중 안내 — 입력 박스 직상단의 persistent pill."""
+    return rx.cond(
+        ChatState.has_processing_attachments,
+        rx.hstack(
+            rx.spinner(size="1"),
+            rx.text(
+                "첨부 파일을 분석하고 있어요. 완료 후 전송할 수 있습니다.",
+                size="2",
+                color=COLORS["text_primary"],
+                weight="medium",
+            ),
+            align="center",
+            spacing="2",
+            padding="0.5em 0.9em",
+            bg=COLORS["user_bubble"],
+            border=f"1px solid {COLORS['input_border']}",
+            border_radius="9999px",
+            box_shadow="0 2px 8px rgba(0,0,0,0.08)",
+            margin_x="auto",
+            margin_bottom="0.5em",
+        ),
+    )
+
+
 def input_bar() -> rx.Component:
     """하단 고정 메시지 입력 바."""
     return rx.box(
         rx.vstack(
             # 스타일 선택 패널
             _style_panel(),
+            # 첨부 분석 중 안내 (입력 박스 위 pill)
+            _processing_toast(),
             # 입력 컨테이너 (둥근 박스)
             rx.box(
                 rx.form(
@@ -404,21 +431,6 @@ def input_bar() -> rx.Component:
                 _focus_within={
                     "border_color": COLORS["accent_hover"],
                 },
-            ),
-            # 파일 처리 중 안내
-            rx.cond(
-                ChatState.has_processing_attachments,
-                rx.hstack(
-                    rx.icon("loader-circle", size=12, color=COLORS["accent"]),
-                    rx.text(
-                        "첨부 파일을 분석하고 있습니다. 완료 후 전송할 수 있습니다.",
-                        size="1",
-                        color=COLORS["accent"],
-                    ),
-                    align="center",
-                    gap="0.4em",
-                    justify_content="center",
-                ),
             ),
             # 하단 안내 텍스트
             rx.text(
