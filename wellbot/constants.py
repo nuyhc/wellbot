@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 KST = ZoneInfo("Asia/Seoul")
 
 # ── 인증/세션 ──
-TOKEN_EXPIRE_HOURS: int = 3
+TOKEN_EXPIRE_HOURS: int = 6
 TOKEN_EXPIRE_SECONDS: int = TOKEN_EXPIRE_HOURS * 3600  # 쿠키 max_age용
 REMEMBER_ME_EXPIRE_DAYS: int = 30  # 아이디 기억하기 쿠키 유효기간(일)
 REMEMBER_ME_EXPIRE_SECONDS: int = REMEMBER_ME_EXPIRE_DAYS * 86400
@@ -43,7 +43,7 @@ FILE_MAX_PER_CONVERSATION: int = 20       # 대화당 누적 첨부 개수
 FILE_MAX_TOTAL_SIZE_MB: int = 200         # 대화당 누적 최대 용량
 
 # ── 파서 ──
-FILE_PARSER_MODE: str = "local"           # "local" | "upstage" | "hybrid"
+FILE_PARSER_MODE: str = "upstage"           # "local" | "upstage" | "hybrid"
 FILE_PARSER_FALLBACK: bool = True         # local 실패 시 upstage 폴백 (hybrid 모드)
 
 # ── Upstage Document Parse 공식 제약 ──
