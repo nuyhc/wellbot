@@ -363,3 +363,4 @@ known-first-party = ["wellbot"]
 - [ ] 5-B `.gitignore` 점검
 - [ ] 5-C `ruff` 도입
 - [ ] 5-D (옵션) `scripts/` 패키지화
+- [ ] 6 docstring·주석 스타일 정리 — [style-guide.md](./style-guide.md) 기준으로 전체 코드 점검
