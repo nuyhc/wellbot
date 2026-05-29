@@ -15,6 +15,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Cookie, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+from wellbot import log_context
 from wellbot.services.auth import auth_service
 from wellbot.services.files import attachment_service, storage_service
 
@@ -51,6 +52,7 @@ async def download_file(
             detail="세션이 만료되었습니다. 다시 로그인해주세요.",
         )
     emp_no = user["emp_no"]
+    log_context.bind(emp_no=emp_no)
 
     # 2. 소유권 확인
     if not attachment_service.verify_ownership(file_no, emp_no):

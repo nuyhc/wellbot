@@ -1,0 +1,245 @@
+"""중앙 로깅 설정.
+
+`setup_logging()` 을 엔트리포인트에서 1회 호출하여 전체 로깅을 구성한다.
+환경변수로 동작을 제어하므로 코드 수정 없이 운영/개발 전환이 가능하다.
+
+환경변수
+--------
+LOG_LEVEL     : 루트 wellbot 로거 레벨. 기본 INFO.
+LOG_FORMAT    : "console" | "json". 미설정 시 LOG_ENV 로 자동 결정.
+LOG_ENV       : "dev" | "prod". 기본 dev (LOG_FORMAT 미설정 시 console).
+LOG_TO_FILE   : "true"|"false". 기본 prod=true, dev=false.
+LOG_DIR       : 로그 파일 디렉토리. 기본 <project>/logs (paths.LOG_DIR).
+LOG_FILE_MAX_MB    : 회전 파일 1개 최대 크기(MB). 기본 50.
+LOG_FILE_BACKUPS   : 보관할 회전 파일 수. 기본 5.
+LOG_COLOR     : "true"|"false". console 포맷 컬러 출력. 기본 dev=true.
+
+설계 원칙
+--------
+- root 가 아닌 "wellbot" 네임스페이스 로거에 핸들러를 부착한다.
+  → uvicorn/sqlalchemy/boto3 의 자체 로깅과 충돌하지 않는다.
+- 모든 LogRecord 에 log_context (emp_no/conversation_id/request_id) 를
+  ContextFilter 로 주입한다.
+- 외부 라이브러리 소음(boto3/botocore/pdfminer/sqlalchemy.engine)은
+  WARNING 으로 일괄 하향한다.
+- 재호출은 무시(idempotent)한다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import logging.config
+import os
+from pathlib import Path
+
+from wellbot import log_context
+from wellbot.paths import LOG_DIR as DEFAULT_LOG_DIR
+
+# 우리 앱 최상위 로거 네임스페이스. 모든 wellbot.* 로거가 이 아래로 모인다.
+ROOT_LOGGER = "wellbot"
+
+# 소음이 큰 외부 라이브러리 (기본 WARNING 으로 하향)
+_NOISY_LIBRARIES = (
+    "boto3",
+    "botocore",
+    "urllib3",
+    "pdfminer",
+    "sqlalchemy.engine",
+    "asyncio",
+)
+
+# context 필드 (LogRecord 에 항상 존재하도록 보장)
+_CONTEXT_FIELDS = ("emp_no", "conversation_id", "request_id")
+
+_configured = False
+
+
+# ── Filter: log_context 값 주입 ──────────────────────────────────────
+
+
+class ContextFilter(logging.Filter):
+    """모든 레코드에 log_context 의 상관관계 필드를 주입한다."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        ctx = log_context.current()
+        for field in _CONTEXT_FIELDS:
+            setattr(record, field, ctx.get(field, "-"))
+        return True
+
+
+# ── Formatter: 사람이 읽는 컬러 콘솔 ─────────────────────────────────
+
+
+class ConsoleFormatter(logging.Formatter):
+    """개발용 사람이 읽기 좋은 포맷. 선택적으로 레벨에 컬러를 입힌다."""
+
+    _COLORS = {
+        "DEBUG": "\033[36m",     # cyan
+        "INFO": "\033[32m",      # green
+        "WARNING": "\033[33m",   # yellow
+        "ERROR": "\033[31m",     # red
+        "CRITICAL": "\033[41m",  # red bg
+    }
+    _RESET = "\033[0m"
+
+    def __init__(self, *, use_color: bool) -> None:
+        super().__init__(
+            fmt=(
+                "%(asctime)s %(levelname)-7s %(name)s "
+                "[emp=%(emp_no)s conv=%(conversation_id)s req=%(request_id)s] "
+                "%(message)s"
+            ),
+            datefmt="%H:%M:%S",
+        )
+        self.use_color = use_color
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        if self.use_color:
+            color = self._COLORS.get(record.levelname, "")
+            if color:
+                return f"{color}{msg}{self._RESET}"
+        return msg
+
+
+# ── Formatter: 구조화 JSON (운영) ────────────────────────────────────
+
+
+class JsonFormatter(logging.Formatter):
+    """운영용 1줄 JSON 포맷. 로그 수집기(CloudWatch/Loki/ELK) 적재에 적합."""
+
+    # LogRecord 표준 속성 (extra 추출 시 제외)
+    _RESERVED = frozenset(
+        logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys()
+    ) | {"message", "asctime", "taskName"}
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "emp_no": getattr(record, "emp_no", "-"),
+            "conversation_id": getattr(record, "conversation_id", "-"),
+            "request_id": getattr(record, "request_id", "-"),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+
+        # log.info("msg", extra={...}) 로 넘긴 임의 필드 포함
+        for key, value in record.__dict__.items():
+            if key not in self._RESERVED and key not in payload:
+                payload[key] = value
+
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+# ── 환경변수 헬퍼 ───────────────────────────────────────────────────
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_options() -> dict[str, object]:
+    """환경변수에서 설정 옵션을 해석한다."""
+    env = os.environ.get("LOG_ENV", "dev").strip().lower()
+    is_prod = env == "prod"
+
+    fmt = os.environ.get("LOG_FORMAT", "").strip().lower()
+    if fmt not in ("console", "json"):
+        fmt = "json" if is_prod else "console"
+
+    log_dir = Path(os.environ.get("LOG_DIR") or DEFAULT_LOG_DIR)
+
+    return {
+        "level": os.environ.get("LOG_LEVEL", "INFO").strip().upper() or "INFO",
+        "format": fmt,
+        "to_file": _env_bool("LOG_TO_FILE", default=is_prod),
+        "log_dir": log_dir,
+        "max_mb": int(os.environ.get("LOG_FILE_MAX_MB", "50")),
+        "backups": int(os.environ.get("LOG_FILE_BACKUPS", "5")),
+        "use_color": _env_bool("LOG_COLOR", default=not is_prod),
+    }
+
+
+def setup_logging(*, force: bool = False) -> None:
+    """전체 로깅을 구성한다. 엔트리포인트에서 1회 호출.
+
+    재호출은 무시한다 (force=True 시 강제 재구성).
+    """
+    global _configured
+    if _configured and not force:
+        return
+
+    opts = _resolve_options()
+
+    handlers: dict[str, dict] = {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "filters": ["context"],
+            "formatter": opts["format"],
+        }
+    }
+    handler_names = ["console"]
+
+    if opts["to_file"]:
+        log_dir: Path = opts["log_dir"]  # type: ignore[assignment]
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handlers["file"] = {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(log_dir / "wellbot.log"),
+            "maxBytes": int(opts["max_mb"]) * 1024 * 1024,
+            "backupCount": int(opts["backups"]),
+            "encoding": "utf-8",
+            "filters": ["context"],
+            # 파일은 분석 용이성을 위해 항상 JSON 으로 적재
+            "formatter": "json",
+        }
+        handler_names.append("file")
+
+    config: dict[str, object] = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "filters": {
+            "context": {"()": "wellbot.logging_config.ContextFilter"},
+        },
+        "formatters": {
+            "console": {
+                "()": "wellbot.logging_config.ConsoleFormatter",
+                "use_color": opts["use_color"],
+            },
+            "json": {
+                "()": "wellbot.logging_config.JsonFormatter",
+            },
+        },
+        "handlers": handlers,
+        "loggers": {
+            ROOT_LOGGER: {
+                "level": opts["level"],
+                "handlers": handler_names,
+                "propagate": False,
+            },
+        },
+    }
+
+    logging.config.dictConfig(config)
+
+    # 외부 라이브러리 소음 하향
+    for name in _NOISY_LIBRARIES:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    _configured = True
+
+    log = logging.getLogger(f"{ROOT_LOGGER}.logging_config")
+    log.info(
+        "logging initialized: format=%s level=%s to_file=%s",
+        opts["format"],
+        opts["level"],
+        opts["to_file"],
+    )

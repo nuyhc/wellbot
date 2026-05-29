@@ -5,11 +5,14 @@ DB 연동으로 대화 이력을 영속화(persistence) 보장.
 """
 
 import asyncio
+import logging
 import random
 import time
 import uuid
 
 import reflex as rx
+
+from wellbot import log_context
 
 from wellbot.constants import (
     DEFAULT_CONVERSATION_TITLE,
@@ -46,6 +49,8 @@ from wellbot.state.chat_models import (
     PromptInfo,
     new_conversation,
 )
+
+log = logging.getLogger(__name__)
 
 
 class ChatState(rx.State):
@@ -320,8 +325,8 @@ class ChatState(rx.State):
                 PromptInfo(name=p.name, content=p.content, description=p.description)
                 for p in cfg.prompts
             ]
-        except Exception as e:
-            print(f"[prompt_list] 프롬프트 로드 실패: {e}")
+        except Exception as exc:
+            log.exception("프롬프트 로드 실패: %s", exc)
             return []
 
     @rx.var
@@ -662,6 +667,12 @@ class ChatState(rx.State):
     @rx.event(background=True)
     async def send_message(self, form_data: dict | None = None) -> None:
         """메시지를 전송하고 Bedrock 스트리밍 응답을 처리한다."""
+        # 이번 turn 의 로그 상관관계 바인딩 (이후 모든 로그에 emp/conv/req 표기)
+        log_context.bind(
+            emp_no=self._emp_no or None,
+            conversation_id=self.current_conversation_id or None,
+            request_id=log_context.new_request_id(),
+        )
         # 1. 사용자 메시지 추가 및 상태 초기화
         blocked_processing = False
         async with self:
