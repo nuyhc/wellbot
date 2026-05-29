@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 def generate_title(user_msg: str, assistant_msg: str) -> str:
-    """경량 모델로 대화 제목을 생성한다."""
+    """경량 모델로 대화 제목 생성. 생성 실패 시 빈 문자열 반환"""
     cfg = get_config().title
     client = get_client()
     messages = [

@@ -1,4 +1,4 @@
-"""챗봇메시지상세 (chtb_msg_d) model."""
+"""챗봇메시지상세 ORM 모델 (DB 테이블: chtb_msg_d)"""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from .base import Base
 
 
 class ChatMessage(Base):
-    """챗봇메시지상세."""
+    """챗봇메시지상세 (DB 테이블: chtb_msg_d)"""
 
     __tablename__ = "chtb_msg_d"
 

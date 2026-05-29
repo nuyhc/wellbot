@@ -1,7 +1,7 @@
 """시스템 프롬프트 가공 헬퍼.
 
 ChatState 의 send_message 가 LLM 호출 직전 system prompt 에
-첨부파일 메타 목록을 append 할 때 사용한다.
+첨부파일 메타 목록을 append 할 때 사용.
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from wellbot.state.chat_models import mime_to_label
 
 
 def augment_system_with_attachments(base_prompt: str, conv_id: str) -> str:
-    """system prompt 에 현재 대화의 첨부파일 메타 목록을 append 한다.
+    """system prompt 에 현재 대화의 첨부파일 메타 목록 추가.
 
-    파일은 `[#file_no] file_name` 형식으로 노출하여, LLM 이
-    `search_attachment` 호출 시 file_ids 로 정확 매칭하도록 유도한다.
+    파일은 [#file_no] file_name 형식으로 노출하여, LLM 이
+    search_attachment 호출 시 file_ids 로 정확 매칭하도록 유도.
     """
     if not conv_id:
         return base_prompt
@@ -25,7 +25,7 @@ def augment_system_with_attachments(base_prompt: str, conv_id: str) -> str:
     if not atts:
         return base_prompt
 
-    # 인덱스 누락 파일 조회 (캐시 hit 가정, 실패 시 무시)
+    # 캐시 hit 가정. 실패 시 무시
     missing_set: set[str] = set()
     try:
         from wellbot.services.ai import embedding_service

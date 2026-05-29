@@ -1,4 +1,4 @@
-"""에이전트마스터 (agnt_m) model."""
+"""에이전트마스터 ORM 모델 (DB 테이블: agnt_m)"""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from .base import Base
 
 
 class Agent(Base):
-    """에이전트마스터 (DB 테이블: agnt_m)."""
+    """에이전트마스터 (DB 테이블: agnt_m)"""
 
     __tablename__ = "agnt_m"
 

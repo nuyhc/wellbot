@@ -186,14 +186,12 @@ def _color_mode_toggle() -> rx.Component:
 def chat_gnb() -> rx.Component:
     """채팅 영역 GNB."""
     return rx.hstack(
-        # 좌: 채팅 모드
         rx.box(
             _chat_mode_dropdown(),
             flex="1",
             display="flex",
             align_items="center",
         ),
-        # 중앙: 대화 제목
         rx.box(
             _conversation_title(),
             flex="1",
@@ -201,7 +199,6 @@ def chat_gnb() -> rx.Component:
             justify_content="center",
             align_items="center",
         ),
-        # 우: 첨부파일 + 다크/라이트 토글
         rx.hstack(
             _attachment_popover(),
             _color_mode_toggle(),

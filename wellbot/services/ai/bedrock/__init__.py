@@ -13,9 +13,9 @@ from wellbot.services.ai.bedrock.image import image_format
 from wellbot.services.ai.bedrock.title import generate_title
 from wellbot.services.ai.bedrock.tool_loop import astream_chat_with_tools
 
-# `build_messages`, `stream_one_turn`, `safe_next`, `stream_one_turn_iter`, `get_client`
-# 등은 패키지 내부에서만 사용하는 헬퍼이므로 공개 API 에 포함하지 않는다.
-# 새로 직접 호출이 필요하면 해당 모듈에서 명시적으로 import 할 것.
+# build_messages, stream_one_turn, safe_next, stream_one_turn_iter, get_client 는
+# 패키지 내부 헬퍼이므로 공개 API 에 포함하지 않음.
+# 직접 호출이 필요하면 해당 모듈에서 명시적으로 import 할 것.
 __all__ = [
     "astream_chat",
     "astream_chat_with_tools",

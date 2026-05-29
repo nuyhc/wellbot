@@ -1,9 +1,9 @@
 """파일 다운로드 프록시 엔드포인트.
 
-백엔드가 S3 에서 파일을 읽어 클라이언트로 스트리밍.
+백엔드가 S3 에서 파일을 읽어 클라이언트로 스트리밍 응답.
 
 흐름:
-    브라우저 → GET /api/download/{file_no} → 백엔드 → S3 → 브라우저
+    브라우저 → POST /api/download/{file_no} → 백엔드 → S3 → 브라우저
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ async def download_file(
     file_no: int,
     wellbot_auth: str | None = Cookie(default=None),
 ) -> StreamingResponse:
-    """첨부파일을 S3 에서 읽어 클라이언트로 스트리밍한다.
+    """첨부파일을 S3 에서 읽어 클라이언트로 스트리밍.
 
     일부 프록시/SPA 환경에서 GET /api/* 요청이
     프론트엔드 라우터에 의해 가로채질 수 있으므로 POST 로 통일.
@@ -85,8 +85,8 @@ async def download_file(
     encoded = quote(filename)
 
     # 6. S3 스트리밍 응답
-    # cross-origin 환경에서 JS 가 Content-Disposition 을 읽으려면
-    # Access-Control-Expose-Headers 에 명시되어야 한다.
+    # cross-origin 환경에서 JS 가 Content-Disposition 헤더를 읽으려면
+    # Access-Control-Expose-Headers 에 명시 필요
     return StreamingResponse(
         content=storage_service.iter_download_stream(s3_key),
         media_type=content_type,

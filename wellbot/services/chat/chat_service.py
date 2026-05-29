@@ -1,4 +1,4 @@
-"""채팅 서비스 - 대화 및 메시지 DB CRUD."""
+"""채팅 서비스 - 대화 및 메시지 DB CRUD"""
 
 import uuid
 from datetime import datetime
@@ -14,7 +14,7 @@ from wellbot.services.core.database import get_session
 
 
 def _verify_ownership(session, smry_id: str, emp_no: str) -> ChatSummary | None:
-    """대화 소유권 검증. 소유자가 아니면 None 반환."""
+    """대화 소유권 검증. 소유자가 아니면 None 반환"""
     record = (
         session.query(ChatSummary)
         .filter(
@@ -27,7 +27,7 @@ def _verify_ownership(session, smry_id: str, emp_no: str) -> ChatSummary | None:
 
 
 def list_conversations(emp_no: str) -> list[dict]:
-    """사원의 대화 목록 조회 (최근 30개, 메시지 제외)."""
+    """사원의 대화 목록 조회 (최근 30개, 메시지 제외)"""
     with get_session() as session:
         rows = (
             session.query(ChatSummary)
@@ -50,7 +50,7 @@ def list_conversations(emp_no: str) -> list[dict]:
 def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
     """대화의 메시지 목록 조회 (소유권 검증 포함).
 
-    첨부파일은 GNB 팝오버에서 별도 표시하므로 메시지에 포함하지 않는다.
+    첨부파일은 GNB 팝오버에서 별도 표시하므로 메시지에 미포함.
     """
     with get_session() as session:
         if not _verify_ownership(session, smry_id, emp_no):
@@ -89,7 +89,7 @@ def save_conversation(
     title: str,
     model_name: str = "",
 ) -> None:
-    """대화 저장 (없으면 INSERT, 있으면 소유자 확인 후 UPDATE)."""
+    """대화 저장 (없으면 INSERT, 있으면 소유자 확인 후 UPDATE)"""
     now = datetime.now(KST)
     with get_session() as session:
         existing = _verify_ownership(session, conv_id, emp_no)
@@ -114,7 +114,7 @@ def save_conversation(
 
 
 def update_conversation_title(smry_id: str, title: str, emp_no: str) -> None:
-    """대화 제목 업데이트 (소유권 검증 포함)."""
+    """대화 제목 업데이트 (소유권 검증 포함)"""
     with get_session() as session:
         record = _verify_ownership(session, smry_id, emp_no)
         if record:
@@ -137,17 +137,17 @@ def append_message(
 ) -> str:
     """메시지 DB 저장 (seq 자동 발급).
 
-    동일 트랜잭션 내에서 ``MAX(chtb_tlk_seq) + 1`` 계산과 INSERT 를 수행하고,
-    UNIQUE(smry_id, seq) 충돌 시 제한된 횟수만큼 재시도한다.
+    동일 트랜잭션 내에서 MAX(chtb_tlk_seq) + 1 계산과 INSERT 수행.
+    UNIQUE(smry_id, seq) 충돌 시 제한된 횟수만큼 재시도.
 
     Args:
-        msg_id: 메시지 고유 ID. 미지정 시 UUID 자동 생성.
+        msg_id: 메시지 고유 ID. 미지정 시 UUID 자동 생성
 
     Returns:
-        저장된 메시지의 chtb_tlk_id (개별 메시지 고유 ID).
+        저장된 메시지의 chtb_tlk_id (개별 메시지 고유 ID)
 
     Raises:
-        IntegrityError: 재시도 한도 초과 시 마지막 충돌을 그대로 전파.
+        IntegrityError: 재시도 한도 초과 시 마지막 충돌 전파
     """
     total_tokens = input_tokens + output_tokens
     tlk_id = msg_id or uuid.uuid4().hex[:50]
@@ -190,7 +190,7 @@ def append_message(
 
 
 def delete_conversation(smry_id: str, emp_no: str) -> None:
-    """대화 및 관련 메시지·첨부파일 삭제 (소유권 검증 포함)."""
+    """대화 및 관련 메시지·첨부파일 삭제 (소유권 검증 포함)"""
     from wellbot.models.attachment import Attachment
     from wellbot.models.chat_message_attachment import ChatMessageAttachment
 
@@ -198,7 +198,6 @@ def delete_conversation(smry_id: str, emp_no: str) -> None:
         if not _verify_ownership(session, smry_id, emp_no):
             return
 
-        # 대화에 속한 메시지의 chtb_tlk_id 목록 조회
         msg_ids = [
             row[0]
             for row in session.query(ChatMessage.chtb_tlk_id)
@@ -207,7 +206,6 @@ def delete_conversation(smry_id: str, emp_no: str) -> None:
         ]
 
         if msg_ids:
-            # 해당 메시지에 연결된 첨부파일 번호 조회
             file_nos = [
                 row[0]
                 for row in session.query(ChatMessageAttachment.atch_file_no)
@@ -215,23 +213,19 @@ def delete_conversation(smry_id: str, emp_no: str) -> None:
                 .all()
             ]
 
-            # 첨부파일 매핑 삭제
             session.query(ChatMessageAttachment).filter(
                 ChatMessageAttachment.chtb_tlk_id.in_(msg_ids)
             ).delete(synchronize_session="fetch")
 
-            # 첨부파일 마스터 삭제
             if file_nos:
                 session.query(Attachment).filter(
                     Attachment.atch_file_no.in_(file_nos)
                 ).delete(synchronize_session="fetch")
 
-        # 메시지 삭제
         session.query(ChatMessage).filter(
             ChatMessage.chtb_tlk_smry_id == smry_id
         ).delete()
 
-        # 대화 요약 삭제
         session.query(ChatSummary).filter(
             ChatSummary.chtb_tlk_smry_id == smry_id
         ).delete()

@@ -1,8 +1,8 @@
 """소요시간 로깅 헬퍼.
 
-"시작 → 완료 + elapsed_ms" 패턴을 반복 작성하지 않도록 컨텍스트 매니저와
-데코레이터로 묶는다. 모든 로그에는 log_context (emp/conv/req) 가 자동 주입되고,
-소요시간은 `elapsed_ms` extra 필드로 기록되어 JSON 로그에서 쿼리·집계할 수 있다.
+"시작 → 완료 + elapsed_ms" 패턴을 컨텍스트 매니저와 데코레이터로 추상화.
+모든 로그에는 log_context (emp/conv/req) 가 자동 주입되고,
+소요시간은 elapsed_ms extra 필드로 기록되어 JSON 로그에서 쿼리·집계 가능.
 
 사용:
     from wellbot.log_timing import log_timing
@@ -23,7 +23,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Callable, Generator, TypeVar
 
-# 기본 로거 (호출부가 logger 를 넘기지 않으면 이걸 사용)
+# 호출부가 logger 를 넘기지 않으면 사용하는 기본 로거
 _DEFAULT_LOGGER = logging.getLogger("wellbot.timing")
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -38,18 +38,18 @@ def log_timing(
     log_start: bool = False,
     **fields: Any,
 ) -> Generator[dict[str, Any], None, None]:
-    """블록 실행 시간을 로깅한다.
+    """블록 실행 시간 로깅.
 
     Args:
-        operation: 작업 이름 (로그 메시지 접두사).
-        logger: 사용할 로거. 미지정 시 wellbot.timing.
-        level: 완료 로그 레벨 (기본 INFO).
-        log_start: True 면 시작 시점에도 "<op> start" 를 남긴다.
-        **fields: 로그에 함께 남길 extra 필드 (예: model="claude").
+        operation: 작업 이름 (로그 메시지 접두사)
+        logger: 사용할 로거. 미지정 시 wellbot.timing
+        level: 완료 로그 레벨 (기본 INFO)
+        log_start: True 면 시작 시점에도 "<op> start" 기록
+        **fields: 로그에 함께 남길 extra 필드 (예: model="claude")
 
     Yields:
         실행 중 동적으로 필드를 채워 넣을 수 있는 dict (예: ctx["tokens"] = 123).
-        여기 담긴 값은 완료 로그의 extra 에 병합된다.
+        여기 담긴 값은 완료 로그의 extra 에 병합.
     """
     log = logger or _DEFAULT_LOGGER
     dynamic: dict[str, Any] = {}
@@ -84,10 +84,10 @@ def timed(
     logger: logging.Logger | None = None,
     level: int = logging.INFO,
 ) -> Callable[[F], F]:
-    """함수 실행 시간을 로깅하는 데코레이터.
+    """함수 실행 시간 로깅 데코레이터.
 
-    operation 미지정 시 함수 이름을 사용한다.
-    동기 함수 전용 (async 함수는 log_timing 컨텍스트 매니저를 직접 사용).
+    operation 미지정 시 함수 이름 사용.
+    동기 함수 전용 — async 함수는 log_timing 컨텍스트 매니저를 직접 사용.
     """
 
     def decorator(func: F) -> F:

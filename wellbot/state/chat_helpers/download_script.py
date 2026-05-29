@@ -1,15 +1,15 @@
 """파일 다운로드용 JS 스크립트 빌더.
 
-ChatState.download_attachment 가 `rx.call_script` 로 실행할 JS 본문을 생성한다.
-백엔드 프록시(`POST /api/download/{file_no}`) 경유로 다운로드한 뒤
-브라우저에서 a[download] 트릭으로 저장한다.
+ChatState.download_attachment 가 rx.call_script 로 실행할 JS 본문 생성.
+백엔드 프록시(POST /api/download/{file_no}) 경유로 다운로드한 뒤
+브라우저에서 a[download] 트릭으로 저장.
 """
 
 from __future__ import annotations
 
 
 def build_download_script(file_no: int) -> str:
-    """첨부파일 다운로드를 실행하는 JS 본문을 반환."""
+    """첨부파일 다운로드를 실행하는 JS 본문 반환"""
     return f"""
             (async function() {{
                 try {{

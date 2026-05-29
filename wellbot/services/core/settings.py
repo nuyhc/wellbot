@@ -1,6 +1,6 @@
 """앱 설정 로드.
 
-config/models.yaml에서 모델 정의를, config/prompts.yaml에서 프롬프트 설정 로드.
+config/models.yaml 에서 모델 정의를, config/prompts.yaml 에서 프롬프트 설정 로드.
 """
 
 from __future__ import annotations
@@ -76,14 +76,14 @@ class AppConfig:
     chat_modes: tuple[ChatMode, ...] = ()
 
     def get_model(self, name: str) -> ModelConfig | None:
-        """이름으로 모델 설정을 찾는다."""
+        """이름으로 모델 설정 조회. 없으면 None"""
         for m in self.models:
             if m.name == name:
                 return m
         return None
 
     def get_prompt(self, name: str) -> PromptTemplate | None:
-        """이름으로 프롬프트 템플릿을 찾는다."""
+        """이름으로 프롬프트 템플릿 조회. 없으면 None"""
         for p in self.prompts:
             if p.name == name:
                 return p
@@ -91,26 +91,26 @@ class AppConfig:
 
     @property
     def default_model(self) -> ModelConfig:
-        """첫 번째 모델을 기본값으로 반환한다."""
+        """첫 번째 모델을 기본값으로 반환"""
         return self.models[0]
 
     @property
     def model_names(self) -> list[str]:
-        """모델 이름 목록."""
+        """모델 이름 목록"""
         return [m.name for m in self.models]
 
     @property
     def prompt_names(self) -> list[str]:
-        """프롬프트 템플릿 이름 목록."""
+        """프롬프트 템플릿 이름 목록"""
         return [p.name for p in self.prompts]
 
     @property
     def chat_mode_ids(self) -> list[str]:
-        """채팅 모드 ID 목록."""
+        """채팅 모드 ID 목록"""
         return [a.id for a in self.chat_modes]
 
     def get_chat_mode(self, mode_id: str) -> ChatMode | None:
-        """ID로 채팅 모드를 찾는다."""
+        """ID 로 채팅 모드 조회. 없으면 None"""
         for a in self.chat_modes:
             if a.id == mode_id:
                 return a
@@ -119,7 +119,7 @@ class AppConfig:
 
 @dataclass(frozen=True)
 class ChatMode:
-    """채팅 모드 설정 (채팅 UI 의 모드 선택 드롭다운)."""
+    """채팅 모드 설정 (채팅 UI 의 모드 선택 드롭다운)"""
 
     id: str
     name: str
@@ -131,8 +131,7 @@ _config: AppConfig | None = None
 
 
 def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
-    """config/prompts.yaml과 config/prompts/ 디렉토리에서 프롬프트를 로드한다."""
-    # prompts.yaml 읽기
+    """config/prompts.yaml 과 config/prompts/ 디렉토리에서 프롬프트 로드"""
     prompt_entries: list[dict[str, str] | str] = []
     default_prompt = "default"
     if PROMPTS_YAML.exists():
@@ -141,7 +140,6 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
         default_prompt = raw.get("default", "default")
         prompt_entries = raw.get("prompts", [])
 
-    # 순서 설정에서 설명 매핑 구성
     desc_map: dict[str, str] = {}
     order_names: list[str] = []
     for item in prompt_entries:
@@ -152,7 +150,6 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
         else:
             order_names.append(item)
 
-    # .md 파일 수집
     by_name: dict[str, PromptTemplate] = {}
     if PROMPTS_DIR.exists():
         for f in PROMPTS_DIR.glob("*.md"):
@@ -163,7 +160,6 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
                 description=desc_map.get(f.stem, ""),
             )
 
-    # 순서 적용
     if order_names:
         ordered = []
         for name in order_names:
@@ -174,7 +170,6 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
     else:
         prompts = tuple(sorted(by_name.values(), key=lambda p: p.name))
 
-    # 기본 시스템 프롬프트 결정
     system_prompt = default_prompt
     for p in prompts:
         if p.name == default_prompt:
@@ -185,7 +180,7 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
 
 
 def _load_chat_modes() -> tuple[ChatMode, ...]:
-    """config/chat_modes.yaml 에서 채팅 모드를 로드한다."""
+    """config/chat_modes.yaml 에서 채팅 모드 로드"""
     if not CHAT_MODES_YAML.exists():
         return (ChatMode(id="chat", name="기본 대화", icon="message-circle"),)
     try:
@@ -200,7 +195,7 @@ def _load_chat_modes() -> tuple[ChatMode, ...]:
 
 
 def load_config(path: Path | None = None) -> AppConfig:
-    """YAML 파일에서 설정을 로드한다."""
+    """YAML 파일에서 설정 로드"""
     if path is None:
         path = MODELS_YAML
 
@@ -224,7 +219,7 @@ def load_config(path: Path | None = None) -> AppConfig:
 
 
 def _build_title_config(raw: dict) -> TitleConfig:
-    """models.yaml 의 title 섹션을 TitleConfig 로 변환."""
+    """models.yaml 의 title 섹션을 TitleConfig 로 변환"""
     return TitleConfig(
         model_id=raw.get("model_id", ""),
         max_tokens=int(raw.get("max_tokens", 30)),
@@ -234,7 +229,7 @@ def _build_title_config(raw: dict) -> TitleConfig:
 
 
 def _build_embedding_config(raw: dict) -> EmbeddingConfig:
-    """models.yaml 의 embedding 섹션을 EmbeddingConfig 로 변환."""
+    """models.yaml 의 embedding 섹션을 EmbeddingConfig 로 변환"""
     return EmbeddingConfig(
         model_id=raw.get("model_id", ""),
         dimension=int(raw.get("dimension", 1024)),
@@ -242,7 +237,7 @@ def _build_embedding_config(raw: dict) -> EmbeddingConfig:
 
 
 def get_config() -> AppConfig:
-    """캐싱된 앱 설정을 반환한다."""
+    """캐싱된 앱 설정 반환"""
     global _config
     if _config is None:
         _config = load_config()
@@ -256,7 +251,7 @@ _greetings: tuple[str, ...] | None = None
 
 
 def get_greetings() -> tuple[str, ...]:
-    """캐싱된 환영 메시지 목록을 반환한다."""
+    """캐싱된 환영 메시지 목록 반환"""
     global _greetings
     if _greetings is None:
         try:

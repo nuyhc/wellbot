@@ -1,8 +1,8 @@
-"""Database engine and session management.
+"""DB 엔진·세션 관리.
 
-엔진/세션팩토리는 `get_session()` 첫 호출 시점에 생성한다.
-모듈 import 시점에 `DB_URL` 을 강제 검증하면, 단위 테스트나 CLI 스크립트에서
-DB 가 필요 없는 코드 경로조차 import 만으로 실패하기 때문에 lazy 초기화로 전환한다.
+엔진과 세션팩토리는 get_session() 첫 호출 시점에 생성.
+import 시점에 DB_URL 을 강제 검증하면 단위 테스트·CLI 스크립트에서
+DB 가 불필요한 코드 경로조차 import 만으로 실패하므로 lazy 초기화.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ _session_factory: sessionmaker[Session] | None = None
 
 
 def _ensure_engine() -> sessionmaker[Session]:
-    """엔진과 세션팩토리를 최초 1회 생성한다."""
+    """엔진과 세션팩토리 최초 1회 생성"""
     global _engine, _session_factory
     if _session_factory is not None:
         return _session_factory
@@ -38,7 +38,7 @@ def _ensure_engine() -> sessionmaker[Session]:
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """Provide a transactional database session."""
+    """트랜잭션 DB 세션 컨텍스트 제공"""
     factory = _ensure_engine()
     session = factory()
     try:

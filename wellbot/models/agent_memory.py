@@ -1,4 +1,4 @@
-"""에이전트메모리사용내역 (agnt_mmry_use_n) model."""
+"""에이전트메모리사용내역 ORM 모델 (DB 테이블: agnt_mmry_use_n)"""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from .base import Base
 
 
 class AgentMemory(Base):
-    """에이전트메모리사용내역."""
+    """에이전트메모리사용내역 (DB 테이블: agnt_mmry_use_n)"""
 
     __tablename__ = "agnt_mmry_use_n"
 

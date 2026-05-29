@@ -1,4 +1,4 @@
-"""첨부파일마스터 (atch_file_m) model."""
+"""첨부파일마스터 ORM 모델 (DB 테이블: atch_file_m)"""
 
 from datetime import datetime
 
@@ -9,7 +9,7 @@ from .base import Base
 
 
 class Attachment(Base):
-    """첨부파일마스터."""
+    """첨부파일마스터 (DB 테이블: atch_file_m)"""
 
     __tablename__ = "atch_file_m"
 

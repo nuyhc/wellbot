@@ -1,12 +1,11 @@
 """프로젝트 경로 상수.
 
-`Path(__file__).resolve().parent.parent.parent / "config" / ...` 패턴이
-여러 모듈에서 반복 등장하여, 깊이에 따라 `.parent` 개수가 달라지는
-실수가 발생하기 쉬웠다. 본 모듈은 단일 진실 공급원으로 동작한다.
+경로 계산 패턴이 여러 모듈에서 반복되면 .parent 개수가 달라지는 실수가 잦으므로
+단일 진실 공급원으로 집중.
 
-이 파일이 `wellbot/paths.py` 에 있으므로:
-- `Path(__file__).resolve().parent`        → `<root>/wellbot/`
-- `Path(__file__).resolve().parent.parent` → `<root>/` (PROJECT_ROOT)
+wellbot/paths.py 기준 경로:
+- Path(__file__).resolve().parent        → <root>/wellbot/
+- Path(__file__).resolve().parent.parent → <root>/ (PROJECT_ROOT)
 """
 
 from __future__ import annotations
@@ -21,10 +20,9 @@ PROMPTS_DIR: Path = CONFIG_DIR / "prompts"
 
 ENV_FILE: Path = PROJECT_ROOT / ".env"
 
-# 로그 파일 출력 디렉토리 (LOG_TO_FILE=true 시 사용)
+# LOG_TO_FILE=true 시 사용
 LOG_DIR: Path = PROJECT_ROOT / "logs"
 
-# 자주 사용하는 YAML/MD 파일
 MODELS_YAML: Path = CONFIG_DIR / "models.yaml"
 PROMPTS_YAML: Path = CONFIG_DIR / "prompts.yaml"
 CHAT_MODES_YAML: Path = CONFIG_DIR / "chat_modes.yaml"

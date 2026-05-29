@@ -1,4 +1,4 @@
-"""챗봇요약상세 (chtb_smry_d) model."""
+"""챗봇요약상세 ORM 모델 (DB 테이블: chtb_smry_d)"""
 
 from datetime import datetime
 
@@ -9,7 +9,7 @@ from .base import Base
 
 
 class ChatSummary(Base):
-    """챗봇요약상세."""
+    """챗봇요약상세 (DB 테이블: chtb_smry_d)"""
 
     __tablename__ = "chtb_smry_d"
 

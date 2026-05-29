@@ -1,4 +1,4 @@
-"""사원마스터 (emp_m) model."""
+"""사원마스터 ORM 모델 (DB 테이블: emp_m)"""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from .base import Base
 
 
 class Employee(Base):
-    """사원마스터."""
+    """사원마스터 (DB 테이블: emp_m)"""
 
     __tablename__ = "emp_m"
 

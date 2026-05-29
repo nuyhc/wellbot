@@ -1,8 +1,8 @@
-"""Wellbot database models.
+"""Wellbot DB 모델 패키지.
 
-각 모델은 도메인 이름(`Employee`, `ChatMessage` 등) 으로 정의되어 있으며,
-기존 SI 약어(`EmpM`, `ChtbMsgD` 등) 는 같은 클래스에 대한 alias 로 유지된다.
-새 코드는 도메인 이름 사용을 권장한다.
+각 모델은 도메인 이름(Employee, ChatMessage 등) 으로 정의.
+기존 SI 약어(EmpM, ChtbMsgD 등) 는 같은 클래스에 대한 alias 로 유지.
+새 코드는 도메인 이름 사용 권장.
 """
 
 from .agent import Agent, AgntM

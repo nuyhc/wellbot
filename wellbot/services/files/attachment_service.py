@@ -4,7 +4,7 @@
     1. register_attachment(): 파일 업로드 직후 S3 원본 저장 + DB 레코드 생성
     2. process_attachment(): 파싱 → 청킹 → 임베딩 → S3 파생물 저장
 
-`atch_file_no` 는 BigInteger PK 이며 DB AUTO_INCREMENT 로 자동 발급.
+atch_file_no 는 BigInteger PK 이며 DB AUTO_INCREMENT 로 자동 발급.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AttachmentRecord:
-    """첨부파일 레코드 (조회 결과)."""
+    """첨부파일 레코드 (조회 결과)"""
 
     file_no: int
     file_name: str
@@ -58,18 +58,18 @@ def register_attachment(
     file_path: Path,
     msg_id: str = "",
 ) -> int:
-    """업로드된 원본 파일을 S3 에 저장하고 DB 에 등록한다.
+    """업로드된 원본 파일을 S3 에 저장하고 DB 에 등록.
 
     Args:
-        emp_no: 업로드한 사원 번호.
-        smry_id: 대화 세션 ID (S3 prefix 생성용).
-        filename: 원본 파일명 (확장자 포함).
-        content_type: MIME 타입.
-        file_path: 서버에 임시 저장된 파일 경로.
-        msg_id: 메시지 고유 ID (chtb_tlk_id). 첨부파일-메시지 매핑에 사용.
+        emp_no: 업로드한 사원 번호
+        smry_id: 대화 세션 ID (S3 prefix 생성용)
+        filename: 원본 파일명 (확장자 포함)
+        content_type: MIME 타입
+        file_path: 서버에 임시 저장된 파일 경로
+        msg_id: 메시지 고유 ID (chtb_tlk_id). 첨부파일-메시지 매핑에 사용
 
     Returns:
-        생성된 atch_file_no.
+        생성된 atch_file_no
     """
     now = datetime.now(KST)
 
@@ -85,20 +85,17 @@ def register_attachment(
             uppr_id=emp_no[:20],
         )
         session.add(record)
-        session.flush()  # DB 에서 auto-increment PK 발급
+        session.flush()  # auto-increment PK 발급을 위해 flush
         file_no = record.atch_file_no
 
-        # S3 prefix 생성 + 원본 업로드
         s3_prefix = storage_service.build_prefix(emp_no, smry_id, file_no)
         ext = Path(filename).suffix.lower()
         original_key = f"{s3_prefix}original{ext}"
         with open(file_path, "rb") as f:
             storage_service.upload_streaming(f, original_key, content_type)
 
-        # S3 prefix 를 DB 에 반영
         record.atch_file_url_addr = s3_prefix[:500]
 
-        # chtb_msg_atch_file_d INSERT (메시지-첨부파일 매핑)
         mapping = ChatMessageAttachment(
             chtb_tlk_id=msg_id,
             atch_file_no=file_no,
@@ -116,7 +113,7 @@ def register_attachment(
 
 
 def _safe_delete(key: str) -> None:
-    """S3 오브젝트를 best-effort 삭제. 실패해도 예외를 전파하지 않는다."""
+    """S3 오브젝트를 best-effort 삭제. 실패해도 예외를 전파하지 않음"""
     try:
         storage_service.delete_object(key)
     except Exception as exc:
@@ -130,13 +127,13 @@ def _upload_derivatives_atomic(
     index_bytes: bytes,
     max_retries: int = S3_DERIVATIVE_UPLOAD_RETRIES,
 ) -> None:
-    """chunks.jsonl 와 index.faiss 를 원자적으로 업로드한다.
+    """chunks.jsonl 와 index.faiss 를 원자적으로 업로드.
 
-    한쪽이라도 실패하면 방금 올린 다른 쪽을 정리하고 재시도한다.
-    모든 시도가 실패하면 마지막 예외를 전파한다.
+    한쪽이라도 실패하면 방금 올린 다른 쪽을 정리하고 재시도.
+    모든 시도가 실패하면 마지막 예외를 전파.
 
     Raises:
-        Exception: 재시도 한도 초과 시 마지막 업로드 예외.
+        Exception: 재시도 한도 초과 시 마지막 업로드 예외
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries):
@@ -154,7 +151,7 @@ def _upload_derivatives_atomic(
                 )
                 return  # 양쪽 모두 성공 → commit point 진입 가능
             except Exception:
-                # index 실패 → 방금 올린 chunks 정리
+                # index 업로드 실패 시 이미 올라간 chunks 를 롤백
                 _safe_delete(chunks_key)
                 raise
         except Exception as exc:
@@ -171,19 +168,18 @@ def _upload_derivatives_atomic(
 
 
 def process_attachment(file_no: int, emp_no: str) -> bool:
-    """첨부파일을 파싱하고 파생물(청크/인덱스)을 S3 에 저장한다.
+    """첨부파일 파싱 후 파생물(청크/인덱스)을 S3 에 저장.
 
-    이미지 파일은 파싱·임베딩을 건너뛰고 토큰 수만 0 으로 기록한다
-    (이미지는 Bedrock Converse vision block 으로 직접 전달됨).
+    이미지 파일은 파싱·임베딩을 건너뛰고 토큰 수만 0 으로 기록.
+    이미지는 Bedrock Converse vision block 으로 직접 전달되므로 별도 임베딩 불필요.
 
     Args:
-        file_no: atch_file_m PK.
-        emp_no: 업데이트 주체.
+        file_no: atch_file_m PK
+        emp_no: 업데이트 주체
 
     Returns:
-        성공 여부.
+        성공 여부
     """
-    # 1. DB 에서 prefix 와 파일명 조회
     with get_session() as session:
         record = session.query(Attachment).get(file_no)
         if not record:
@@ -199,13 +195,11 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
     ext = Path(filename).suffix.lower()
     original_key = f"{s3_prefix}original{ext}"
 
-    # 2. 이미지 파일은 파싱 건너뛰기
     if file_parser.is_image(filename):
         _update_token_count(file_no, emp_no, 0)
         log.info("process_attachment: 이미지 파일 스킵 (file_no=%s)", file_no)
         return True
 
-    # 3. S3 에서 원본 다운로드 (임시 파일)
     tmp_dir = Path(tempfile.gettempdir()) / "wellbot_attachment_process"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = tmp_dir / f"{file_no}_{Path(filename).name}"
@@ -214,7 +208,6 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
         with log_timing("attachment.download", logger=log, file_no=file_no):
             storage_service.download_to_file(original_key, tmp_path)
 
-        # 4. 파싱
         with log_timing("attachment.parse", logger=log, file_no=file_no):
             parser = file_parser.get_parser()
             parsed = parser.parse(tmp_path)
@@ -224,22 +217,19 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
             _update_token_count(file_no, emp_no, 0)
             return True  # 파싱은 "성공" 했으나 내용 없음
 
-        # 5. 청킹
         with log_timing("attachment.chunk", logger=log, file_no=file_no) as ctx:
             chunks = chunker.chunk_text(parsed.text)
             total_tokens = sum(c.token_count for c in chunks)
             ctx["chunks"] = len(chunks)
             ctx["tokens"] = total_tokens
 
-        # 6. 임베딩
         with log_timing("attachment.embed", logger=log, file_no=file_no, chunks=len(chunks)):
             embeddings = embedding_service.embed_texts([c.text for c in chunks])
 
-        # 7. FAISS 인덱스 빌드 + 직렬화
         index = embedding_service.build_index(embeddings)
         index_bytes = embedding_service.serialize_index(index)
 
-        # 8. 파생물 S3 업로드 (원자적: 한쪽 실패 시 정리 + 재시도)
+        # 원자적 업로드: 한쪽 실패 시 다른 쪽 정리 후 재시도
         chunks_key = f"{s3_prefix}chunks.jsonl"
         index_key = f"{s3_prefix}index.faiss"
         with log_timing("attachment.upload_derivatives", logger=log, file_no=file_no):
@@ -250,10 +240,9 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
                 index_bytes=index_bytes,
             )
 
-        # 9. (Commit point) 토큰 수 업데이트 — 이 라인 이전에는 검색에서 스킵됨
+        # commit point: 이 라인 이전에는 검색에서 스킵됨
         _update_token_count(file_no, emp_no, total_tokens)
 
-        # 10. 캐시 무효화 (다음 조회 시 재로드)
         smry_id = _smry_id_from_record(file_no)
         if smry_id:
             embedding_service.get_cache().invalidate(smry_id)
@@ -291,8 +280,8 @@ def _update_token_count(
     """atch_file_m.atch_file_tokn_ecnt 갱신.
 
     S3 파생물 업로드 성공 직후 호출되는 commit point 이므로 일시 DB 장애에
-    대비해 지수 백오프 재시도를 수행한다. 모든 시도가 실패하면 마지막
-    예외를 전파한다 (호출부가 process_attachment 실패로 처리).
+    대비해 지수 백오프 재시도를 수행. 모든 시도가 실패하면 마지막
+    예외를 전파 (호출부가 process_attachment 실패로 처리).
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries):
@@ -319,14 +308,14 @@ def _update_token_count(
 
 
 def _smry_id_from_record(file_no: int) -> str:
-    """DB 매핑 테이블에서 smry_id 를 조회한다.
+    """DB 매핑 테이블에서 smry_id 조회.
 
     1차: chtb_msg_atch_file_d → chtb_msg_d 경유 (메시지 저장 완료 상태)
     2차: atch_file_m.atch_file_url_addr (S3 prefix) 에서 추출 (폴백)
          prefix 구조: {KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
     """
     with get_session() as session:
-        # 1차: 메시지 경유
+        # 1차: 메시지 경유 조회
         row = (
             session.query(ChatMessage.chtb_tlk_smry_id)
             .join(
@@ -339,7 +328,7 @@ def _smry_id_from_record(file_no: int) -> str:
         if row and row[0]:
             return row[0]
 
-        # 2차: S3 prefix 에서 추출
+        # 2차: S3 prefix 에서 smry_id 추출 (폴백)
         record = session.query(Attachment).get(file_no)
         if record and record.atch_file_url_addr:
             parts = record.atch_file_url_addr.strip("/").split("/")
@@ -358,7 +347,7 @@ def get_conversation_attachments(smry_id: str) -> list[AttachmentRecord]:
     """대화에 연결된 모든 첨부파일 목록 반환.
 
     chtb_msg_atch_file_d → chtb_msg_d 를 경유하여
-    해당 세션(smry_id)에 속한 첨부파일을 조회한다.
+    해당 세션(smry_id)에 속한 첨부파일을 조회.
     """
     with get_session() as session:
         rows = (
@@ -392,10 +381,10 @@ def get_conversation_attachments(smry_id: str) -> list[AttachmentRecord]:
 
 
 def get_attachments_by_msg_id(msg_id: str) -> list[AttachmentRecord]:
-    """메시지 ID(chtb_tlk_id)로 첨부파일 목록을 직접 조회한다.
+    """메시지 ID(chtb_tlk_id) 로 첨부파일 목록 직접 조회.
 
     메시지가 아직 chtb_msg_d 에 저장되기 전(업로드 직후 polling)에도
-    chtb_msg_atch_file_d 에서 바로 조회할 수 있다.
+    chtb_msg_atch_file_d 에서 바로 조회 가능.
     """
     if not msg_id:
         return []
@@ -427,7 +416,7 @@ def get_attachments_by_msg_id(msg_id: str) -> list[AttachmentRecord]:
 
 
 def get_attachment(file_no: int) -> AttachmentRecord | None:
-    """단일 첨부파일 조회."""
+    """단일 첨부파일 조회"""
     with get_session() as session:
         record = session.query(Attachment).get(file_no)
         if not record:
@@ -446,7 +435,7 @@ def get_attachment(file_no: int) -> AttachmentRecord | None:
 
 
 def get_download_info(file_no: int) -> tuple[str, str] | None:
-    """첨부파일 다운로드용 presigned URL + 파일명 반환."""
+    """첨부파일 다운로드용 presigned URL + 파일명 반환"""
     att = get_attachment(file_no)
     if not att or not att.s3_prefix:
         return None
@@ -457,9 +446,9 @@ def get_download_info(file_no: int) -> tuple[str, str] | None:
 
 
 def download_original_bytes(file_no: int) -> bytes | None:
-    """원본 파일 바이너리를 S3 에서 다운로드한다.
+    """원본 파일 바이너리를 S3 에서 다운로드.
 
-    이미지 첨부를 Bedrock Converse `image` block 으로 전달하기 위해 사용.
+    이미지 첨부를 Bedrock Converse image block 으로 전달할 때 사용.
     """
     att = get_attachment(file_no)
     if not att or not att.s3_prefix:
@@ -474,7 +463,7 @@ def download_original_bytes(file_no: int) -> bytes | None:
 
 
 def verify_ownership(file_no: int, emp_no: str) -> bool:
-    """사원이 해당 파일의 대화 소유자인지 확인.
+    """사원이 해당 파일의 대화 소유자인지 여부.
 
     1차: chtb_msg_atch_file_d → chtb_msg_d → chtb_smry_d 경유 (메시지 저장 완료 상태)
     2차: atch_file_m.rgsr_id 확인 (메시지 미저장 pending 상태 폴백)
@@ -482,7 +471,7 @@ def verify_ownership(file_no: int, emp_no: str) -> bool:
     from wellbot.models.chat_summary import ChatSummary
 
     with get_session() as session:
-        # 1차: 메시지 경유 소유권 검증
+        # 1차: 메시지 경유 소유권 확인
         row = (
             session.query(ChatSummary)
             .join(
@@ -502,7 +491,7 @@ def verify_ownership(file_no: int, emp_no: str) -> bool:
         if row is not None:
             return True
 
-        # 2차: 메시지 미저장 상태 (pending) - 등록자 확인
+        # 2차: 메시지 미저장 상태 (pending) — 등록자로 폴백
         record = session.query(Attachment).get(file_no)
         if record and record.rgsr_id == emp_no[:20]:
             return True
@@ -511,7 +500,7 @@ def verify_ownership(file_no: int, emp_no: str) -> bool:
 
 
 def delete_attachment(file_no: int, emp_no: str) -> bool:
-    """첨부파일 삭제 (DB + S3). 소유권 확인 포함."""
+    """첨부파일 삭제 (DB + S3). 소유권 확인 포함"""
     if not verify_ownership(file_no, emp_no):
         return False
 
@@ -519,17 +508,15 @@ def delete_attachment(file_no: int, emp_no: str) -> bool:
     if not att:
         return False
 
-    # S3 파일들 삭제
     if att.s3_prefix:
         try:
             storage_service.delete_prefix(att.s3_prefix)
         except Exception as exc:
             log.warning("S3 삭제 실패 (file_no=%s): %s", file_no, exc)
 
-    # 캐시 무효화 (DB 삭제 전에 smry_id 조회)
+    # DB 삭제 전에 smry_id 조회 (삭제 후에는 조회 불가)
     smry_id = _smry_id_from_record(file_no)
 
-    # DB 레코드 삭제
     with get_session() as session:
         session.query(ChatMessageAttachment).filter(
             ChatMessageAttachment.atch_file_no == file_no
@@ -548,17 +535,16 @@ def count_conversation_attachments(
     """대화 내 첨부파일 개수 및 총 토큰 수.
 
     chtb_msg_d 에 저장된 메시지 경유 조회 + 아직 메시지 미저장 상태인
-    pending_msg_id 의 첨부파일을 합산한다.
+    pending_msg_id 의 첨부파일을 합산.
 
     Args:
-        smry_id: 대화 세션 ID.
-        pending_msg_id: 아직 chtb_msg_d 에 없는 메시지 ID (업로드 중).
+        smry_id: 대화 세션 ID
+        pending_msg_id: 아직 chtb_msg_d 에 없는 메시지 ID (업로드 중)
 
     Returns:
         (file_count, total_tokens)
     """
     with get_session() as session:
-        # 1. 이미 메시지에 연결된 첨부파일
         base_query = (
             session.query(Attachment.atch_file_no, Attachment.atch_file_tokn_ecnt)
             .join(
@@ -572,7 +558,6 @@ def count_conversation_attachments(
             .filter(ChatMessage.chtb_tlk_smry_id == smry_id)
         )
 
-        # 2. 아직 메시지 미저장 상태인 첨부파일 (pending)
         if pending_msg_id:
             pending_query = (
                 session.query(Attachment.atch_file_no, Attachment.atch_file_tokn_ecnt)

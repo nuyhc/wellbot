@@ -1,7 +1,4 @@
-"""Wellbot 설정 상수.
-
-설정값을 중앙 관리
-"""
+"""Wellbot 설정 상수 - 중앙 집중 관리"""
 
 from zoneinfo import ZoneInfo
 
@@ -10,7 +7,7 @@ KST = ZoneInfo("Asia/Seoul")
 
 # ── 인증/세션 ──
 TOKEN_EXPIRE_HOURS: int = 6
-TOKEN_EXPIRE_SECONDS: int = TOKEN_EXPIRE_HOURS * 3600  # 쿠키 max_age용
+TOKEN_EXPIRE_SECONDS: int = TOKEN_EXPIRE_HOURS * 3600  # 쿠키 max_age 환산값
 REMEMBER_ME_EXPIRE_DAYS: int = 30  # 아이디 기억하기 쿠키 유효기간(일)
 REMEMBER_ME_EXPIRE_SECONDS: int = REMEMBER_ME_EXPIRE_DAYS * 86400
 LOCK_THRESHOLD: int = 5            # 로그인 실패 잠금 횟수
@@ -53,7 +50,7 @@ SPLIT_SAFETY_PAGES: int = 90
 SPLIT_SAFETY_SIZE_MB: int = 45
 
 # ── 청킹 & 임베딩 ──
-AVG_TOKENS_PER_WORD = 1.4                 # 한국어는 단어당 ~1.5토큰, 영어는 ~1.3토큰 수준이므로 평균 1.4 사용.
+AVG_TOKENS_PER_WORD = 1.4                 # 한국어 ~1.5·영어 ~1.3 기준 평균값
 CHUNK_SIZE_TOKENS: int = 1000
 CHUNK_OVERLAP_TOKENS: int = 200
 # 임베딩 모델 ID/차원은 config/models.yaml 의 embedding 섹션으로 이관됨.

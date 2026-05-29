@@ -1,6 +1,6 @@
 """파일 업로드 트리거용 JS 스크립트 빌더.
 
-ChatState.trigger_upload 가 `rx.call_script` 로 실행할 JS 본문을 생성한다.
+ChatState.trigger_upload 가 rx.call_script 로 실행할 JS 본문 생성.
 브라우저 측에서:
     1. <input type=file multiple> 으로 파일 선택
     2. fetch POST /api/upload 로 전송 (백엔드 직접/프록시 자동 판별)
@@ -19,7 +19,7 @@ def build_upload_script(
     max_per_msg: int,
     current_count: int,
 ) -> str:
-    """업로드 다이얼로그 + fetch POST 를 실행하는 JS 본문을 반환."""
+    """업로드 다이얼로그 + fetch POST 를 실행하는 JS 본문 반환"""
     return f"""
 (async function() {{
   try {{

@@ -1,17 +1,16 @@
 """Wellbot 앱 엔트리포인트.
 
-Reflex 앱을 초기화하고 페이지 라우트를 등록한다.
+Reflex 앱 초기화 및 페이지 라우트 등록.
 파일 업로드 등 멀티파트 HTTP 엔드포인트는 별도 FastAPI 앱을
-`api_transformer` 로 마운트한다.
+api_transformer 로 마운트.
 """
 
-# .env 로딩은 다른 wellbot 모듈을 import 하기 전에 수행해야 한다.
-# (서비스 모듈이 환경변수를 lazy 검증하므로 가장 먼저 호출.)
+# 서비스 모듈이 환경변수를 lazy 검증하므로, .env 로딩은 다른 wellbot 모듈 import 전에 수행
 from wellbot.env import init_env
 
 init_env()
 
-# 로깅은 .env 로딩 직후, 다른 wellbot 모듈이 로그를 남기기 전에 구성한다.
+# 다른 wellbot 모듈이 로그를 남기기 전에 로깅 구성 필요
 from wellbot.logging_config import setup_logging
 
 setup_logging()

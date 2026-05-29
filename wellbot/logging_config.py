@@ -1,30 +1,30 @@
 """중앙 로깅 설정.
 
-`setup_logging()` 을 엔트리포인트에서 1회 호출하여 전체 로깅을 구성한다.
-환경변수로 동작을 제어하므로 코드 수정 없이 운영/개발 전환이 가능하다.
+setup_logging() 을 엔트리포인트에서 1회 호출하여 전체 로깅 구성.
+환경변수로 동작을 제어하므로 코드 수정 없이 운영/개발 전환 가능.
 
 환경변수
 --------
-LOG_LEVEL     : 루트 wellbot 로거 레벨. 기본 INFO.
-LOG_FORMAT    : "console" | "json". 미설정 시 LOG_ENV 로 자동 결정.
-LOG_ENV       : "dev" | "prod". 기본 dev (LOG_FORMAT 미설정 시 console).
-LOG_TO_FILE   : "true"|"false". 기본 prod=true, dev=false.
-LOG_DIR       : 로그 파일 디렉토리. 기본 <project>/logs (paths.LOG_DIR).
+LOG_LEVEL          : 루트 wellbot 로거 레벨. 기본 INFO.
+LOG_FORMAT         : "console" | "json". 미설정 시 LOG_ENV 로 자동 결정.
+LOG_ENV            : "dev" | "prod". 기본 dev (LOG_FORMAT 미설정 시 console).
+LOG_TO_FILE        : "true"|"false". 기본 prod=true, dev=false.
+LOG_DIR            : 로그 파일 디렉토리. 기본 <project>/logs (paths.LOG_DIR).
 LOG_FILE_MAX_MB    : 회전 파일 1개 최대 크기(MB). 기본 50.
 LOG_FILE_BACKUPS   : 보관할 회전 파일 수. 기본 5.
-LOG_COLOR     : "true"|"false". console 포맷 컬러 출력. 기본 dev=true.
+LOG_COLOR          : "true"|"false". console 포맷 컬러 출력. 기본 dev=true.
 
 설계 원칙
 --------
-- root 가 아닌 "wellbot" 네임스페이스 로거에 핸들러를 부착한다.
-  → uvicorn/sqlalchemy/boto3 의 자체 로깅과 충돌하지 않는다.
+- root 가 아닌 "wellbot" 네임스페이스 로거에 핸들러 부착.
+  → uvicorn/sqlalchemy/boto3 의 자체 로깅과 충돌 방지.
 - 모든 LogRecord 에 log_context (emp_no/conversation_id/request_id) 를
-  ContextFilter 로 주입한다.
+  ContextFilter 로 주입.
 - 외부 라이브러리 소음(boto3/botocore/pdfminer/sqlalchemy.engine)은
-  WARNING 으로 일괄 하향한다.
+  WARNING 으로 일괄 하향.
 - 잡히지 않은(uncaught) 예외는 sys.excepthook / asyncio 핸들러로 포착해
-  wellbot.uncaught 로거에 기록한다 (전역 안전망).
-- 재호출은 무시(idempotent)한다.
+  wellbot.uncaught 로거에 기록 (전역 안전망).
+- 재호출은 무시(idempotent).
 """
 
 from __future__ import annotations
@@ -40,10 +40,10 @@ from pathlib import Path
 from wellbot import log_context
 from wellbot.paths import LOG_DIR as DEFAULT_LOG_DIR
 
-# 우리 앱 최상위 로거 네임스페이스. 모든 wellbot.* 로거가 이 아래로 모인다.
+# 모든 wellbot.* 로거가 이 아래로 모임
 ROOT_LOGGER = "wellbot"
 
-# 소음이 큰 외부 라이브러리 (기본 WARNING 으로 하향)
+# 기본 WARNING 으로 하향할 외부 라이브러리 목록
 _NOISY_LIBRARIES = (
     "boto3",
     "botocore",
@@ -53,7 +53,7 @@ _NOISY_LIBRARIES = (
     "asyncio",
 )
 
-# context 필드 (LogRecord 에 항상 존재하도록 보장)
+# LogRecord 에 항상 존재하도록 보장할 상관관계 필드
 _CONTEXT_FIELDS = ("emp_no", "conversation_id", "message_id", "request_id")
 
 _configured = False
@@ -63,7 +63,7 @@ _configured = False
 
 
 class ContextFilter(logging.Filter):
-    """모든 레코드에 log_context 의 상관관계 필드를 주입한다."""
+    """모든 레코드에 log_context 상관관계 필드 주입"""
 
     def filter(self, record: logging.LogRecord) -> bool:
         ctx = log_context.current()
@@ -76,7 +76,7 @@ class ContextFilter(logging.Filter):
 
 
 class ConsoleFormatter(logging.Formatter):
-    """개발용 사람이 읽기 좋은 포맷. 선택적으로 레벨에 컬러를 입힌다."""
+    """개발용 사람이 읽기 좋은 포맷. 선택적으로 레벨에 컬러 적용"""
 
     _COLORS = {
         "DEBUG": "\033[36m",     # cyan
@@ -111,7 +111,7 @@ class ConsoleFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
-    """운영용 1줄 JSON 포맷. 로그 수집기(CloudWatch/Loki/ELK) 적재에 적합."""
+    """운영용 1줄 JSON 포맷. CloudWatch/Loki/ELK 수집기 적재에 적합"""
 
     # LogRecord 표준 속성 (extra 추출 시 제외)
     _RESERVED = frozenset(
@@ -132,7 +132,7 @@ class JsonFormatter(logging.Formatter):
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
 
-        # log.info("msg", extra={...}) 로 넘긴 임의 필드 포함
+        # log.info("msg", extra={...}) 로 전달된 임의 필드 병합
         for key, value in record.__dict__.items():
             if key not in self._RESERVED and key not in payload:
                 payload[key] = value
@@ -151,7 +151,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _resolve_options() -> dict[str, object]:
-    """환경변수에서 설정 옵션을 해석한다."""
+    """환경변수에서 설정 옵션 해석"""
     env = os.environ.get("LOG_ENV", "dev").strip().lower()
     is_prod = env == "prod"
 
@@ -173,9 +173,9 @@ def _resolve_options() -> dict[str, object]:
 
 
 def setup_logging(*, force: bool = False) -> None:
-    """전체 로깅을 구성한다. 엔트리포인트에서 1회 호출.
+    """전체 로깅 구성. 엔트리포인트에서 1회 호출.
 
-    재호출은 무시한다 (force=True 시 강제 재구성).
+    재호출은 무시. force=True 시 강제 재구성.
     """
     global _configured
     if _configured and not force:
@@ -203,7 +203,7 @@ def setup_logging(*, force: bool = False) -> None:
             "backupCount": int(opts["backups"]),
             "encoding": "utf-8",
             "filters": ["context"],
-            # 파일은 분석 용이성을 위해 항상 JSON 으로 적재
+            # 파일은 분석 용이성을 위해 항상 JSON
             "formatter": "json",
         }
         handler_names.append("file")
@@ -235,11 +235,10 @@ def setup_logging(*, force: bool = False) -> None:
 
     logging.config.dictConfig(config)
 
-    # 외부 라이브러리 소음 하향
     for name in _NOISY_LIBRARIES:
         logging.getLogger(name).setLevel(logging.WARNING)
 
-    # 어떤 경로로도 잡히지 않은 예외를 우리 로거로 포착하는 전역 안전망
+    # 전역 안전망 설치 (uncaught 예외 포착)
     _install_global_handlers()
 
     _configured = True
@@ -255,13 +254,13 @@ def setup_logging(*, force: bool = False) -> None:
 
 # ── 전역 uncaught 예외 안전망 ────────────────────────────────────────
 
-# 이미 설치했는지 추적 (재호출·중복 설치 방지)
+# 재호출·중복 설치 방지용 플래그
 _hooks_installed = False
 
 
 def _log_uncaught(exc_type, exc_value, exc_tb) -> None:
-    """sys.excepthook: 동기 코드의 잡히지 않은 예외를 기록한다."""
-    # Ctrl+C 는 정상 종료로 취급하여 노이즈를 남기지 않는다.
+    """sys.excepthook: 동기 uncaught 예외 기록"""
+    # Ctrl+C 는 정상 종료로 취급 — 노이즈 방지
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
@@ -271,7 +270,7 @@ def _log_uncaught(exc_type, exc_value, exc_tb) -> None:
 
 
 def _log_asyncio_exception(loop, context: dict) -> None:
-    """asyncio 이벤트 루프의 처리되지 않은 예외를 기록한다."""
+    """asyncio 이벤트 루프의 uncaught 예외 기록"""
     exc = context.get("exception")
     msg = context.get("message", "asyncio error")
     log = logging.getLogger(f"{ROOT_LOGGER}.uncaught")
@@ -282,11 +281,11 @@ def _log_asyncio_exception(loop, context: dict) -> None:
 
 
 def _install_global_handlers() -> None:
-    """동기 전역 예외 후크(sys.excepthook)를 설치한다 (1회).
+    """동기 전역 예외 후크(sys.excepthook) 설치 (1회).
 
-    asyncio 핸들러는 실행 중인 루프가 있어야 설치되므로 여기서 한 번 시도하고,
+    asyncio 핸들러는 실행 중인 루프가 있어야 설치되므로 여기서 한 번 시도.
     setup_logging() 이 루프 밖(앱 import 시점)에서 호출되는 일반적 경우를 위해
-    install_asyncio_handler() 를 별도 노출한다 — 루프 안(서버 startup)에서 호출.
+    install_asyncio_handler() 를 별도 노출 — 루프 안(서버 startup)에서 호출.
     """
     global _hooks_installed
     if _hooks_installed:
@@ -299,10 +298,10 @@ def _install_global_handlers() -> None:
 
 
 def install_asyncio_handler() -> bool:
-    """실행 중인 이벤트 루프에 asyncio 예외 핸들러를 설치한다.
+    """실행 중인 이벤트 루프에 asyncio 예외 핸들러 설치.
 
-    루프가 없으면 아무것도 하지 않고 False 를 반환한다.
-    서버 startup 훅(루프 안)에서 호출하면 비동기 uncaught 예외도 포착된다.
+    루프가 없으면 아무것도 하지 않고 False 반환.
+    서버 startup 훅(루프 안)에서 호출하면 비동기 uncaught 예외도 포착.
     """
     try:
         loop = asyncio.get_running_loop()

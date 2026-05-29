@@ -1,4 +1,4 @@
-"""챗봇메시지첨부파일상세 (chtb_msg_atch_file_d) model."""
+"""챗봇메시지첨부파일상세 ORM 모델 (DB 테이블: chtb_msg_atch_file_d)"""
 
 from datetime import datetime
 
@@ -9,7 +9,7 @@ from .base import Base
 
 
 class ChatMessageAttachment(Base):
-    """챗봇메시지첨부파일상세 - 챗봇 메시지와 첨부파일의 매핑."""
+    """챗봇메시지첨부파일상세 (DB 테이블: chtb_msg_atch_file_d)"""
 
     __tablename__ = "chtb_msg_atch_file_d"
 

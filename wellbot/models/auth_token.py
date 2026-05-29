@@ -1,4 +1,4 @@
-"""인증토큰내역 (crtf_tokn_n) model."""
+"""인증토큰내역 ORM 모델 (DB 테이블: crtf_tokn_n)"""
 
 from datetime import datetime
 from typing import Optional
@@ -10,7 +10,7 @@ from .base import Base
 
 
 class AuthToken(Base):
-    """인증토큰내역."""
+    """인증토큰내역 (DB 테이블: crtf_tokn_n)"""
 
     __tablename__ = "crtf_tokn_n"
 
