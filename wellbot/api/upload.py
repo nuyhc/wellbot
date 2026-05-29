@@ -177,11 +177,11 @@ async def upload_attachment(
             detail="conversation_id 가 필요합니다.",
         )
 
-    # 로그 상관관계 보강 (이후 모든 로그에 emp/conv 표기)
-    log_context.bind(emp_no=emp_no, conversation_id=smry_id)
-
     # 2-1. message_id 정규화
     msg_id = (message_id or "").strip()
+
+    # 로그 상관관계 보강 (이후 모든 로그에 emp/conv/msg 표기)
+    log_context.bind(emp_no=emp_no, conversation_id=smry_id, message_id=msg_id or None)
 
     # 3. 파일 확장자 검증
     filename, ext = _validate_file(file)

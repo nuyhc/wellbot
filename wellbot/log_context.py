@@ -1,7 +1,12 @@
 """로그 상관관계(correlation) 컨텍스트.
 
-멀티유저 챗봇 운영에서 "어떤 사용자의 어떤 대화·요청에서 발생한 로그인가"를
-추적할 수 있도록, `contextvars` 로 요청 단위 컨텍스트를 보관한다.
+멀티유저 챗봇 운영에서 "어떤 사용자의 어떤 대화·메시지·요청에서 발생한
+로그인가"를 추적할 수 있도록, `contextvars` 로 요청 단위 컨텍스트를 보관한다.
+
+- conversation_id : 대화 세션 (DB: CHTB_TLK_SMRY_ID)
+- message_id      : 개별 메시지/턴 (DB: CHTB_TLK_ID) — conv 만으로는 세션 전체를
+                    뒤져야 하므로, 턴 단위로 로그를 좁히려면 함께 기록한다.
+- request_id      : 매 이벤트(턴) 단위 단명 ID
 
 `ContextFilter` 가 모든 LogRecord 에 이 값을 자동 주입하므로,
 각 로깅 호출부에서 emp_no/conversation_id 를 인자로 넘길 필요가 없다.
@@ -28,12 +33,14 @@ _EMPTY = "-"
 
 _emp_no: ContextVar[str] = ContextVar("emp_no", default=_EMPTY)
 _conversation_id: ContextVar[str] = ContextVar("conversation_id", default=_EMPTY)
+_message_id: ContextVar[str] = ContextVar("message_id", default=_EMPTY)
 _request_id: ContextVar[str] = ContextVar("request_id", default=_EMPTY)
 
-_FIELDS = ("emp_no", "conversation_id", "request_id")
+_FIELDS = ("emp_no", "conversation_id", "message_id", "request_id")
 _VARS = {
     "emp_no": _emp_no,
     "conversation_id": _conversation_id,
+    "message_id": _message_id,
     "request_id": _request_id,
 }
 

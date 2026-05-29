@@ -54,7 +54,7 @@ _NOISY_LIBRARIES = (
 )
 
 # context 필드 (LogRecord 에 항상 존재하도록 보장)
-_CONTEXT_FIELDS = ("emp_no", "conversation_id", "request_id")
+_CONTEXT_FIELDS = ("emp_no", "conversation_id", "message_id", "request_id")
 
 _configured = False
 
@@ -91,7 +91,7 @@ class ConsoleFormatter(logging.Formatter):
         super().__init__(
             fmt=(
                 "%(asctime)s %(levelname)-7s %(name)s "
-                "[emp=%(emp_no)s conv=%(conversation_id)s req=%(request_id)s] "
+                "[emp=%(emp_no)s conv=%(conversation_id)s msg=%(message_id)s req=%(request_id)s] "
                 "%(message)s"
             ),
             datefmt="%H:%M:%S",
@@ -126,6 +126,7 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "emp_no": getattr(record, "emp_no", "-"),
             "conversation_id": getattr(record, "conversation_id", "-"),
+            "message_id": getattr(record, "message_id", "-"),
             "request_id": getattr(record, "request_id", "-"),
         }
         if record.exc_info:

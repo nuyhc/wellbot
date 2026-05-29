@@ -783,13 +783,16 @@ class ChatState(rx.State):
                     log.warning("첫 turn system 메시지 저장 실패", exc_info=True)
             elif is_first_msg:
                 chat_service.update_conversation_title(conv_id, title, emp_no)
-            chat_service.append_message(
+            user_msg_id = chat_service.append_message(
                 smry_id=conv_id,
                 role="user", content=text,
                 emp_no=emp_no, model_name=model_name,
                 provider=prompt_name,
                 msg_id=pending_msg_id or None,
             )
+            # 이 turn 의 메시지 ID(CHTB_TLK_ID)를 로그 컨텍스트에 바인딩
+            # → 이후 스트리밍·tool·응답 로그가 conv 뿐 아니라 정확한 메시지로 좁혀짐
+            log_context.bind(message_id=user_msg_id)
 
         # is_persisted 업데이트
         async with self:
