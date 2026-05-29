@@ -29,9 +29,10 @@ from sqlalchemy import func
 from wellbot.models.attachment import AtchFileM
 from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_message_attachment import ChtbMsgAtchFileD
-from wellbot.services import embedding_service, storage_service
-from wellbot.services.attachment_service import get_conversation_attachments
-from wellbot.services.database import get_session
+from wellbot.services.ai import embedding_service
+from wellbot.services.core.database import get_session
+from wellbot.services.files import storage_service
+from wellbot.services.files.attachment_service import get_conversation_attachments
 
 logging.basicConfig(
     level=logging.INFO,

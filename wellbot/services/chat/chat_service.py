@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from wellbot.constants import CONVERSATION_LIMIT, KST, MESSAGE_SEQ_MAX_RETRIES
 from wellbot.models.chat_message import ChtbMsgD
 from wellbot.models.chat_summary import ChtbSmryD
-from wellbot.services.database import get_session
+from wellbot.services.core.database import get_session
 
 
 def _verify_ownership(session, smry_id: str, emp_no: str) -> ChtbSmryD | None:

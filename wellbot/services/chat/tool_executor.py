@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from wellbot.constants import SEARCH_TOP_K
-from wellbot.services import embedding_service
+from wellbot.services.ai import embedding_service
 
 log = logging.getLogger(__name__)
 

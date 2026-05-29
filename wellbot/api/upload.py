@@ -42,7 +42,8 @@ from wellbot.constants import (
     LOCAL_SUPPORTED_EXTS,
     UPSTAGE_SUPPORTED_EXTS,
 )
-from wellbot.services import attachment_service, auth_service, file_parser
+from wellbot.services.auth import auth_service
+from wellbot.services.files import attachment_service, file_parser
 
 log = logging.getLogger(__name__)
 

@@ -25,8 +25,9 @@ from wellbot.constants import (
     KST,
     S3_DERIVATIVE_UPLOAD_RETRIES,
 )
-from wellbot.services import chunker, embedding_service, file_parser, storage_service
-from wellbot.services.database import get_session
+from wellbot.services.ai import embedding_service
+from wellbot.services.core.database import get_session
+from wellbot.services.files import chunker, file_parser, storage_service
 
 log = logging.getLogger(__name__)
 

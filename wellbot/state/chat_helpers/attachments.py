@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from wellbot.services import attachment_service
-from wellbot.services.bedrock_client import image_format
+from wellbot.services.ai.bedrock import image_format
+from wellbot.services.files import attachment_service
 from wellbot.state.chat_models import AttachmentInfo
 
 

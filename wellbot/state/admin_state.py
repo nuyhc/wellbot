@@ -9,7 +9,7 @@ import os
 import reflex as rx
 from dotenv import load_dotenv
 
-from wellbot.services import admin_service
+from wellbot.services.admin import admin_service
 
 load_dotenv()
 
@@ -97,7 +97,7 @@ class AdminState(rx.State):
 
             auth = await self.get_state(AuthState)
             if auth.auth_token:
-                from wellbot.services import auth_service
+                from wellbot.services.auth import auth_service
 
                 auth_service.invalidate_session_token(auth.auth_token)
             auth.auth_token = ""

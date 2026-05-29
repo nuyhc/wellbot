@@ -272,9 +272,9 @@ def load_conversation_index(smry_id: str) -> ConversationIndex:
     파일이 처리 중이거나 실패한 경우(S3 에 파생물 부재)는 스킵.
     """
     # 순환 import 방지 위해 lazy
-    from wellbot.services import attachment_service
-    from wellbot.services import chunker as chunker_mod
-    from wellbot.services import storage_service
+    from wellbot.services.files import attachment_service
+    from wellbot.services.files import chunker as chunker_mod
+    from wellbot.services.files import storage_service
 
     import faiss
 

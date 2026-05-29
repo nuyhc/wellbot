@@ -192,8 +192,29 @@ ENV_FILE = PROJECT_ROOT / ".env"
 - 파일 확장자 frozenset
 - UI 임계값 (`SCROLL_THRESHOLD`, `BTN_THRESHOLD`)
 
-**3-C. `load_dotenv` 사이드이펙트 제거**
-- [services/config.py:15](../../wellbot/services/config.py#L15) 의 모듈 레벨 `load_dotenv` 를 `init_env()` 로 감싸 [wellbot/wellbot.py](../../wellbot/wellbot.py) 엔트리포인트에서 1회 호출
+**3-C. 모듈 import 시 사이드이펙트 일괄 제거**
+
+엔트리포인트(`wellbot/wellbot.py`) 가 실행되기 전에 환경변수가 로드되지 않은 상태로 service 모듈을 import 하면 `RuntimeError` 가 즉시 발생하는 구조. 1단계·2단계 리팩토링 중 import 검증 시에도 이 문제가 반복 노출되었다. 다음 3개 사이드이펙트를 한 단위로 묶어 처리한다.
+
+1. **`load_dotenv()` 모듈 레벨 실행**
+   - 위치: [services/core/config.py:15](../../wellbot/services/core/config.py#L15)
+   - 변경: `init_env()` 같은 명시적 함수로 감싸고, [wellbot/wellbot.py](../../wellbot/wellbot.py) 에서 다른 import 전에 1회 호출
+
+2. **`DB_URL` 환경변수 강제 검증**
+   - 위치: [services/core/database.py:15](../../wellbot/services/core/database.py#L15)
+   - 현 동작: 모듈 import 시점에 `DB_URL` 없으면 `RuntimeError`
+   - 변경 방향: 모듈 로드 시점이 아니라 **첫 세션 생성 시점**(`get_session` 등)으로 검증을 지연. 또는 lazy engine 패턴 (`_engine = None` + getter) 도입
+   - 이점: 단위 테스트·CLI 스크립트가 DB 없이도 모듈을 import 가능
+
+3. **`JWT_SECRET` 환경변수 강제 검증**
+   - 위치: [services/auth/auth_service.py](../../wellbot/services/auth/auth_service.py) (모듈 레벨)
+   - 동일 패턴 — 토큰 발급/검증 함수 진입 시점에 검증으로 지연
+
+**원칙**: 모듈 import 는 부수효과 없이 항상 성공해야 한다. 외부 자원(DB, 비밀키, 파일시스템) 검증은 자원이 실제로 필요한 함수 호출 시점에서.
+
+### 3-C 검증
+- `DB_URL` / `JWT_SECRET` 둘 다 미설정 상태에서 `python -c "import wellbot.wellbot"` 가 RuntimeError 없이 성공해야 함
+- `pytest` 도입 시 fixture 가 환경변수 주입 전에 모듈을 import 해도 깨지지 않아야 함
 
 ### 작업 순서
 1. `paths.py` 신설 + 하드코딩 경로 치환 (단독 PR, 저위험)
@@ -328,8 +349,8 @@ known-first-party = ["wellbot"]
 
 - [x] 1-A 데이터 모델 추출 (`state/chat_models.py`) ✅ 2026-05-29
 - [x] 1-B ChatState 헬퍼 모듈 추출 (`state/chat_helpers/`) ✅ 2026-05-29 — 1,261줄 → 925줄 (-336)
-- [ ] 2-A `services/` 도메인 패키지 그룹화
-- [ ] 2-B `bedrock_client.py` 분리
+- [x] 2-A `services/` 도메인 패키지 그룹화 ✅ 2026-05-29 — auth/chat/ai/files/admin/core 6개 그룹, 호출부 import 일괄 갱신 후 shim 전량 제거 (평탄도 완전 해소)
+- [x] 2-B `bedrock_client.py` 분리 ✅ 2026-05-29 — ai/bedrock/{client,converse,tool_loop,title,image}.py 5모듈, 원본은 삭제
 - [ ] 3-A `wellbot/paths.py` 신설
 - [ ] 3-B `constants.py` → YAML/env 이관
 - [ ] 3-C `load_dotenv` 명시 호출

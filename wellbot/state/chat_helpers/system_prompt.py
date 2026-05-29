@@ -6,7 +6,7 @@ ChatState 의 send_message 가 LLM 호출 직전 system prompt 에
 
 from __future__ import annotations
 
-from wellbot.services import attachment_service
+from wellbot.services.files import attachment_service
 from wellbot.state.chat_models import mime_to_label
 
 
@@ -28,7 +28,7 @@ def augment_system_with_attachments(base_prompt: str, conv_id: str) -> str:
     # 인덱스 누락 파일 조회 (캐시 hit 가정, 실패 시 무시)
     missing_set: set[str] = set()
     try:
-        from wellbot.services import embedding_service
+        from wellbot.services.ai import embedding_service
         conv_index = embedding_service.get_cache().get(conv_id)
         if conv_index is not None:
             missing_set = set(conv_index.missing_files)

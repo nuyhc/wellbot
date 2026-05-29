@@ -12,7 +12,7 @@ import bcrypt
 from wellbot.models.agent import AgntM
 from wellbot.models.dept import DeptM
 from wellbot.models.employee import EmpM
-from wellbot.services.database import get_session
+from wellbot.services.core.database import get_session
 
 
 def _to_dict(row: Any) -> dict:

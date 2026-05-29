@@ -12,7 +12,7 @@ from wellbot.constants import KST, LOCK_DURATION_MINUTES, LOCK_THRESHOLD, TOKEN_
 from wellbot.models.auth_token import CrtfToknN
 from wellbot.models.dept import DeptM
 from wellbot.models.employee import EmpM
-from wellbot.services.database import get_session
+from wellbot.services.core.database import get_session
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:

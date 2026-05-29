@@ -15,7 +15,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Cookie, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from wellbot.services import attachment_service, auth_service, storage_service
+from wellbot.services.auth import auth_service
+from wellbot.services.files import attachment_service, storage_service
 
 log = logging.getLogger(__name__)
 

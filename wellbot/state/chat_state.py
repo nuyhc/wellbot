@@ -21,13 +21,14 @@ from wellbot.constants import (
     TOOL_USE_MAX_ITERATIONS,
     UPSTAGE_SUPPORTED_EXTS,
 )
-from wellbot.services.bedrock_client import (
+from wellbot.services.ai.bedrock import (
     astream_chat,
     astream_chat_with_tools,
     generate_title,
 )
-from wellbot.services import attachment_service, chat_service, file_parser, response_filter, tool_executor
-from wellbot.services.config import get_config, get_greetings
+from wellbot.services.chat import chat_service, response_filter, tool_executor
+from wellbot.services.core.config import get_config, get_greetings
+from wellbot.services.files import attachment_service, file_parser
 from wellbot.state.chat_helpers.attachments import (
     collect_image_blocks,
     fetch_pending_attachments,

@@ -12,7 +12,7 @@ from wellbot.constants import (
     REMEMBER_ME_EXPIRE_SECONDS,
     TOKEN_EXPIRE_SECONDS,
 )
-from wellbot.services import auth_service
+from wellbot.services.auth import auth_service
 
 _NOTICE_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "notice.md"
 
