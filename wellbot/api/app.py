@@ -11,8 +11,19 @@ from fastapi import FastAPI, Request
 from wellbot import log_context
 from wellbot.api.upload import router as upload_router
 from wellbot.api.download import router as download_router
+from wellbot.logging_config import install_asyncio_handler
 
 api_app = FastAPI(title="WellBot API", docs_url=None, redoc_url=None)
+
+
+@api_app.on_event("startup")
+async def _install_loop_exception_handler() -> None:
+    """서버 이벤트 루프에 asyncio uncaught 예외 핸들러를 설치한다.
+
+    setup_logging() 은 앱 import 시점(루프 밖)에 실행되므로
+    asyncio 핸들러는 루프가 살아있는 startup 에서 설치해야 한다.
+    """
+    install_asyncio_handler()
 
 
 @api_app.middleware("http")

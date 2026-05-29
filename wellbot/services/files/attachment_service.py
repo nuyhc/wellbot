@@ -25,6 +25,7 @@ from wellbot.constants import (
     KST,
     S3_DERIVATIVE_UPLOAD_RETRIES,
 )
+from wellbot.log_timing import log_timing
 from wellbot.services.ai import embedding_service
 from wellbot.services.core.database import get_session
 from wellbot.services.files import chunker, file_parser, storage_service
@@ -208,12 +209,15 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
     tmp_dir = Path(tempfile.gettempdir()) / "wellbot_attachment_process"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = tmp_dir / f"{file_no}_{Path(filename).name}"
+    overall_start = time.time()
     try:
-        storage_service.download_to_file(original_key, tmp_path)
+        with log_timing("attachment.download", logger=log, file_no=file_no):
+            storage_service.download_to_file(original_key, tmp_path)
 
         # 4. 파싱
-        parser = file_parser.get_parser()
-        parsed = parser.parse(tmp_path)
+        with log_timing("attachment.parse", logger=log, file_no=file_no):
+            parser = file_parser.get_parser()
+            parsed = parser.parse(tmp_path)
 
         if not parsed.text.strip():
             log.warning("process_attachment: file_no=%s 파싱 결과 비어있음", file_no)
@@ -221,11 +225,15 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
             return True  # 파싱은 "성공" 했으나 내용 없음
 
         # 5. 청킹
-        chunks = chunker.chunk_text(parsed.text)
-        total_tokens = sum(c.token_count for c in chunks)
+        with log_timing("attachment.chunk", logger=log, file_no=file_no) as ctx:
+            chunks = chunker.chunk_text(parsed.text)
+            total_tokens = sum(c.token_count for c in chunks)
+            ctx["chunks"] = len(chunks)
+            ctx["tokens"] = total_tokens
 
         # 6. 임베딩
-        embeddings = embedding_service.embed_texts([c.text for c in chunks])
+        with log_timing("attachment.embed", logger=log, file_no=file_no, chunks=len(chunks)):
+            embeddings = embedding_service.embed_texts([c.text for c in chunks])
 
         # 7. FAISS 인덱스 빌드 + 직렬화
         index = embedding_service.build_index(embeddings)
@@ -234,12 +242,13 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
         # 8. 파생물 S3 업로드 (원자적: 한쪽 실패 시 정리 + 재시도)
         chunks_key = f"{s3_prefix}chunks.jsonl"
         index_key = f"{s3_prefix}index.faiss"
-        _upload_derivatives_atomic(
-            chunks_key=chunks_key,
-            chunks_bytes=chunker.chunks_to_jsonl(chunks),
-            index_key=index_key,
-            index_bytes=index_bytes,
-        )
+        with log_timing("attachment.upload_derivatives", logger=log, file_no=file_no):
+            _upload_derivatives_atomic(
+                chunks_key=chunks_key,
+                chunks_bytes=chunker.chunks_to_jsonl(chunks),
+                index_key=index_key,
+                index_bytes=index_bytes,
+            )
 
         # 9. (Commit point) 토큰 수 업데이트 — 이 라인 이전에는 검색에서 스킵됨
         _update_token_count(file_no, emp_no, total_tokens)
@@ -254,6 +263,12 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
             file_no,
             len(chunks),
             total_tokens,
+            extra={
+                "file_no": file_no,
+                "chunks": len(chunks),
+                "tokens": total_tokens,
+                "elapsed_ms": int((time.time() - overall_start) * 1000),
+            },
         )
         return True
 
@@ -264,7 +279,7 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            log.debug("임시파일 정리 실패 path=%s", tmp_path, exc_info=True)
 
 
 def _update_token_count(

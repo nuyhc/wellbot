@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from wellbot.services.ai.bedrock.client import get_client
 from wellbot.services.core.settings import get_config
+
+log = logging.getLogger(__name__)
 
 
 def generate_title(user_msg: str, assistant_msg: str) -> str:
@@ -28,5 +32,5 @@ def generate_title(user_msg: str, assistant_msg: str) -> str:
         if content and "text" in content[0]:
             return content[0]["text"].strip().strip('"').strip("'")
     except Exception:
-        pass
+        log.warning("대화 제목 생성 실패", exc_info=True)
     return ""

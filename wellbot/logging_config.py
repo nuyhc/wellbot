@@ -22,15 +22,19 @@ LOG_COLOR     : "true"|"false". console 포맷 컬러 출력. 기본 dev=true.
   ContextFilter 로 주입한다.
 - 외부 라이브러리 소음(boto3/botocore/pdfminer/sqlalchemy.engine)은
   WARNING 으로 일괄 하향한다.
+- 잡히지 않은(uncaught) 예외는 sys.excepthook / asyncio 핸들러로 포착해
+  wellbot.uncaught 로거에 기록한다 (전역 안전망).
 - 재호출은 무시(idempotent)한다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import logging.config
 import os
+import sys
 from pathlib import Path
 
 from wellbot import log_context
@@ -234,6 +238,9 @@ def setup_logging(*, force: bool = False) -> None:
     for name in _NOISY_LIBRARIES:
         logging.getLogger(name).setLevel(logging.WARNING)
 
+    # 어떤 경로로도 잡히지 않은 예외를 우리 로거로 포착하는 전역 안전망
+    _install_global_handlers()
+
     _configured = True
 
     log = logging.getLogger(f"{ROOT_LOGGER}.logging_config")
@@ -243,3 +250,62 @@ def setup_logging(*, force: bool = False) -> None:
         opts["level"],
         opts["to_file"],
     )
+
+
+# ── 전역 uncaught 예외 안전망 ────────────────────────────────────────
+
+# 이미 설치했는지 추적 (재호출·중복 설치 방지)
+_hooks_installed = False
+
+
+def _log_uncaught(exc_type, exc_value, exc_tb) -> None:
+    """sys.excepthook: 동기 코드의 잡히지 않은 예외를 기록한다."""
+    # Ctrl+C 는 정상 종료로 취급하여 노이즈를 남기지 않는다.
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    logging.getLogger(f"{ROOT_LOGGER}.uncaught").critical(
+        "uncaught exception", exc_info=(exc_type, exc_value, exc_tb)
+    )
+
+
+def _log_asyncio_exception(loop, context: dict) -> None:
+    """asyncio 이벤트 루프의 처리되지 않은 예외를 기록한다."""
+    exc = context.get("exception")
+    msg = context.get("message", "asyncio error")
+    log = logging.getLogger(f"{ROOT_LOGGER}.uncaught")
+    if exc is not None:
+        log.error("unhandled asyncio exception: %s", msg, exc_info=exc)
+    else:
+        log.error("unhandled asyncio error: %s", msg)
+
+
+def _install_global_handlers() -> None:
+    """동기 전역 예외 후크(sys.excepthook)를 설치한다 (1회).
+
+    asyncio 핸들러는 실행 중인 루프가 있어야 설치되므로 여기서 한 번 시도하고,
+    setup_logging() 이 루프 밖(앱 import 시점)에서 호출되는 일반적 경우를 위해
+    install_asyncio_handler() 를 별도 노출한다 — 루프 안(서버 startup)에서 호출.
+    """
+    global _hooks_installed
+    if _hooks_installed:
+        return
+
+    sys.excepthook = _log_uncaught
+    install_asyncio_handler()  # 루프가 있으면 설치, 없으면 no-op
+
+    _hooks_installed = True
+
+
+def install_asyncio_handler() -> bool:
+    """실행 중인 이벤트 루프에 asyncio 예외 핸들러를 설치한다.
+
+    루프가 없으면 아무것도 하지 않고 False 를 반환한다.
+    서버 startup 훅(루프 안)에서 호출하면 비동기 uncaught 예외도 포착된다.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    loop.set_exception_handler(lambda lp, ctx: _log_asyncio_exception(lp, ctx))
+    return True

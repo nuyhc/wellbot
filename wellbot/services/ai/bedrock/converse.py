@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from collections.abc import Generator
 from typing import Any
 
 from wellbot.services.ai.bedrock.client import get_client
 from wellbot.services.core.settings import ModelConfig
+
+log = logging.getLogger(__name__)
 
 
 def build_messages(messages: list[dict[str, Any]]) -> list[dict]:
@@ -94,15 +98,27 @@ def stream_one_turn(
     if model.top_p is not None:
         kwargs["inferenceConfig"]["topP"] = model.top_p
 
-    response = client.converse_stream(**kwargs)
+    call_start = time.perf_counter()
+    has_tools = bool(tool_config)
+    try:
+        response = client.converse_stream(**kwargs)
+    except Exception:
+        log.exception(
+            "bedrock converse_stream 호출 실패 model=%s", model.model_id,
+            extra={"model_id": model.model_id, "tools": has_tools},
+        )
+        raise
 
     # 스트림 파싱 상태
     # contentBlockIndex -> 해당 블록의 누적 정보
     blocks: dict[int, dict] = {}
     text_accum: list[str] = []
     stop_reason: str | None = None
+    first_byte_ms: int | None = None
 
     for event in response["stream"]:
+        if first_byte_ms is None:
+            first_byte_ms = int((time.perf_counter() - call_start) * 1000)
         if "contentBlockStart" in event:
             idx = event["contentBlockStart"].get("contentBlockIndex", 0)
             start = event["contentBlockStart"].get("start", {}) or {}
@@ -192,6 +208,16 @@ def stream_one_turn(
     if assistant_blocks:
         yield ("assistant_content", assistant_blocks)
 
+    log.info(
+        "bedrock converse done",
+        extra={
+            "model_id": model.model_id,
+            "tools": has_tools,
+            "stop_reason": stop_reason or "end_turn",
+            "ttfb_ms": first_byte_ms,
+            "elapsed_ms": int((time.perf_counter() - call_start) * 1000),
+        },
+    )
     yield ("stop_reason", stop_reason or "end_turn")
 
 

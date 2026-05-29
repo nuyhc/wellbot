@@ -265,4 +265,4 @@ def _run_process(file_no: int, emp_no: str, tmp_path: Path) -> None:
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            log.debug("임시파일 정리 실패 path=%s", tmp_path, exc_info=True)
