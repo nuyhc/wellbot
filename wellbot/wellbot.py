@@ -11,6 +11,11 @@ from wellbot.env import init_env
 
 init_env()
 
+# 로깅은 .env 로딩 직후, 다른 wellbot 모듈이 로그를 남기기 전에 구성한다.
+from wellbot.logging_config import setup_logging
+
+setup_logging()
+
 import reflex as rx
 
 from wellbot.api import api_app

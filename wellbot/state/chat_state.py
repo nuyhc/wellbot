@@ -5,11 +5,14 @@ DB 연동으로 대화 이력을 영속화(persistence) 보장.
 """
 
 import asyncio
+import logging
 import random
 import time
 import uuid
 
 import reflex as rx
+
+from wellbot import log_context
 
 from wellbot.constants import (
     DEFAULT_CONVERSATION_TITLE,
@@ -46,6 +49,8 @@ from wellbot.state.chat_models import (
     PromptInfo,
     new_conversation,
 )
+
+log = logging.getLogger(__name__)
 
 
 class ChatState(rx.State):
@@ -186,6 +191,7 @@ class ChatState(rx.State):
                 for a in cfg.chat_modes
             ]
         except Exception:
+            log.warning("채팅 모드 목록 로드 실패", exc_info=True)
             return []
 
     @rx.var
@@ -270,6 +276,7 @@ class ChatState(rx.State):
         try:
             return get_config().model_names
         except Exception:
+            log.warning("모델 이름 목록 로드 실패", exc_info=True)
             return []
 
     @rx.var
@@ -286,6 +293,7 @@ class ChatState(rx.State):
                 for m in cfg.models
             ]
         except Exception:
+            log.warning("모델 목록 로드 실패", exc_info=True)
             return []
 
     @rx.var
@@ -320,8 +328,8 @@ class ChatState(rx.State):
                 PromptInfo(name=p.name, content=p.content, description=p.description)
                 for p in cfg.prompts
             ]
-        except Exception as e:
-            print(f"[prompt_list] 프롬프트 로드 실패: {e}")
+        except Exception as exc:
+            log.exception("프롬프트 로드 실패: %s", exc)
             return []
 
     @rx.var
@@ -365,7 +373,7 @@ class ChatState(rx.State):
                         self.selected_prompt = p.name
                         break
         except Exception:
-            pass
+            log.debug("기본 모델/프롬프트 선택값 초기화 실패", exc_info=True)
 
         # 환영 메시지 초기화
         self._refresh_greeting()
@@ -439,7 +447,7 @@ class ChatState(rx.State):
                             emp_no=self._emp_no, model_name=name,
                         )
                 except Exception:
-                    pass
+                    log.warning("프롬프트 변경 system 메시지 저장 실패", exc_info=True)
 
     def create_new_conversation(self) -> None:
         """새 대화를 생성한다. 현재 대화가 비어있으면 무시."""
@@ -473,7 +481,7 @@ class ChatState(rx.State):
             try:
                 chat_service.delete_conversation(conv_id, self._emp_no)
             except Exception:
-                pass
+                log.warning("대화 삭제 실패 conv_id=%s", conv_id, exc_info=True)
         self.conversations = [c for c in self.conversations if c.id != conv_id]
         if conv_id == self.current_conversation_id:
             # 빈 새 대화가 이미 있으면 그쪽으로, 없으면 새로 생성
@@ -551,7 +559,7 @@ class ChatState(rx.State):
                 )
                 self._update_conversation(idx, is_persisted=True)
             except Exception:
-                pass
+                log.warning("대화 영속화 실패 conv_id=%s", conv.id, exc_info=True)
         return conv.id
 
     def set_attachment_error(self, message: str) -> None:
@@ -564,7 +572,7 @@ class ChatState(rx.State):
             try:
                 attachment_service.delete_attachment(file_no, self._emp_no)
             except Exception:
-                pass
+                log.warning("첨부 삭제 실패 file_no=%s", file_no, exc_info=True)
         self.pending_attachments = [
             a for a in self.pending_attachments if a.file_no != file_no
         ]
@@ -662,6 +670,12 @@ class ChatState(rx.State):
     @rx.event(background=True)
     async def send_message(self, form_data: dict | None = None) -> None:
         """메시지를 전송하고 Bedrock 스트리밍 응답을 처리한다."""
+        # 이번 turn 의 로그 상관관계 바인딩 (이후 모든 로그에 emp/conv/req 표기)
+        log_context.bind(
+            emp_no=self._emp_no or None,
+            conversation_id=self.current_conversation_id or None,
+            request_id=log_context.new_request_id(),
+        )
         # 1. 사용자 메시지 추가 및 상태 초기화
         blocked_processing = False
         async with self:
@@ -696,7 +710,10 @@ class ChatState(rx.State):
                     if refreshed:
                         self.pending_attachments = refreshed
                 except Exception:
-                    pass
+                    log.warning(
+                        "전송 직전 첨부 상태 갱신 실패 msg_id=%s",
+                        self._pending_msg_id, exc_info=True,
+                    )
             turn_attachments = list(self.pending_attachments)
 
             user_msg = Message(
@@ -763,7 +780,7 @@ class ChatState(rx.State):
                         emp_no=emp_no, model_name=prompt_name,
                     )
                 except Exception:
-                    pass
+                    log.warning("첫 turn system 메시지 저장 실패", exc_info=True)
             elif is_first_msg:
                 chat_service.update_conversation_title(conv_id, title, emp_no)
             chat_service.append_message(
@@ -786,6 +803,17 @@ class ChatState(rx.State):
         input_tokens = 0
         output_tokens = 0
         provider = ""
+        log.info(
+            "chat request",
+            extra={
+                "model": model_name,
+                "prompt": prompt_name,
+                "thinking": use_thinking,
+                "attachments": len(turn_attachments),
+                "history_len": len(api_messages),
+            },
+        )
+        stream_interrupted = False
         try:
             cfg = get_config()
             model = cfg.get_model(model_name) or cfg.default_model
@@ -808,6 +836,7 @@ class ChatState(rx.State):
                     attachment_service.get_conversation_attachments(conv_id)
                 )
             except Exception:
+                log.warning("첨부 보유 여부 조회 실패 conv_id=%s", conv_id, exc_info=True)
                 has_attachments = False
 
             if has_attachments:
@@ -833,7 +862,6 @@ class ChatState(rx.State):
                     thinking_enabled=use_thinking,
                 )
 
-            stream_interrupted = False
             async for event_type, chunk in stream:
                 # 취소 확인
                 async with self:
@@ -859,7 +887,8 @@ class ChatState(rx.State):
                     input_tokens += int(chunk.get("inputTokens", 0) or 0)
                     output_tokens += int(chunk.get("outputTokens", 0) or 0)
 
-        except Exception as e:
+        except Exception:
+            log.exception("chat streaming 실패 model=%s conv_id=%s", model_name, conv_id)
             content = "오류가 발생했습니다."
 
         finally:
@@ -899,9 +928,23 @@ class ChatState(rx.State):
                 self.is_thinking = False
                 self.streaming_content = ""
 
+        # 응답 완료 관측 (비용·지연 추적). 중단/실패 케이스도 포함.
+        elapsed = round(time.time() - start_time, 2)
+        log.info(
+            "chat response",
+            extra={
+                "model": model_name,
+                "provider": provider,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "elapsed_ms": int(elapsed * 1000),
+                "interrupted": stream_interrupted,
+                "chars": len(content),
+            },
+        )
+
         # DB 저장: AI 응답 메시지 (State 락 밖) — 텍스트 없이 중단된 경우 저장 안 함
         if emp_no and content:
-            elapsed = round(time.time() - start_time, 2)
             chat_service.append_message(
                 smry_id=conv_id,
                 role="assistant", content=content,
@@ -923,4 +966,4 @@ class ChatState(rx.State):
                         if idx is not None:
                             self._update_conversation(idx, title=generated)
             except Exception:
-                pass
+                log.warning("대화 제목 자동 생성 실패", exc_info=True)

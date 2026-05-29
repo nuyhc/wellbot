@@ -1,5 +1,6 @@
 """인증 서비스 - 로그인, 세션 토큰 관리."""
 
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -12,6 +13,8 @@ from wellbot.models.auth_token import AuthToken
 from wellbot.models.dept import Dept
 from wellbot.models.employee import Employee
 from wellbot.services.core.database import get_session
+
+log = logging.getLogger(__name__)
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
@@ -48,10 +51,12 @@ def authenticate_user(emp_no: str, password: str) -> dict:
     with get_session() as session:
         emp = session.query(Employee).get(emp_no)
         if not emp:
+            log.info("login failed: unknown emp_no=%s", emp_no)
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
 
         # 계정 상태 확인
         if emp.acnt_sts_nm != "ACTIVE":
+            log.info("login denied: inactive emp_no=%s status=%s", emp_no, emp.acnt_sts_nm)
             return {"success": False, "error": "비활성 계정입니다. 관리자에게 문의하세요."}
 
         # 잠금 확인
@@ -60,6 +65,7 @@ def authenticate_user(emp_no: str, password: str) -> dict:
             lock_dtm = _ensure_aware(emp.lock_dsbn_dtm)
             if lock_dtm and lock_dtm > datetime.now(KST):
                 remaining = (lock_dtm - datetime.now(KST)).seconds // 60
+                log.warning("login denied: locked emp_no=%s remaining_min=%s", emp_no, remaining + 1)
                 return {
                     "success": False,
                     "error": f"계정이 잠겨있습니다. {remaining + 1}분 후 다시 시도해주세요.",
@@ -77,6 +83,15 @@ def authenticate_user(emp_no: str, password: str) -> dict:
                 emp.lock_dsbn_dtm = datetime.now(KST) + timedelta(
                     minutes=LOCK_DURATION_MINUTES
                 )
+                log.warning(
+                    "account locked: emp_no=%s fail_count=%s lock_min=%s",
+                    emp_no, emp.lgn_flr_tscnt, LOCK_DURATION_MINUTES,
+                )
+            else:
+                log.info(
+                    "login failed: bad password emp_no=%s fail_count=%s",
+                    emp_no, emp.lgn_flr_tscnt,
+                )
             emp.upd_dtm = datetime.now(KST)
             emp.uppr_id = emp_no
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
@@ -88,6 +103,7 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         emp.upd_dtm = datetime.now(KST)
         emp.uppr_id = emp_no
 
+        log.info("login success: emp_no=%s role=%s", emp_no, emp.user_role_nm)
         return {
             "success": True,
             "user": {
@@ -192,6 +208,7 @@ def invalidate_session_token(token: str) -> bool:
         record.upd_dtm = now
         record.uppr_id = emp_no[:20]
 
+    log.info("logout: emp_no=%s", emp_no)
     return True
 
 
@@ -232,6 +249,7 @@ def register_user(
         )
         session.add(emp)
 
+    log.info("user registered (PENDING): emp_no=%s dept=%s", emp_no, pstn_dept_cd)
     return {"success": True}
 
 

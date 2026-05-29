@@ -9,13 +9,17 @@ S3 버킷에 저장/조회/삭제.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
 import boto3
 from botocore.exceptions import ClientError
+
+log = logging.getLogger(__name__)
 
 # ── 설정 ──
 MULTIPART_CHUNK_SIZE: int = 5 * 1024 * 1024  # 5MB (S3 multipart 최소 단위)
@@ -85,12 +89,17 @@ def upload_streaming(
         use_threads=True,
     )
 
+    start = time.perf_counter()
     client.upload_fileobj(
         file_stream,
         bucket,
         s3_key,
         ExtraArgs=extra_args,
         Config=config,
+    )
+    log.info(
+        "s3 upload (stream) key=%s", s3_key,
+        extra={"key": s3_key, "elapsed_ms": int((time.perf_counter() - start) * 1000)},
     )
 
 
@@ -113,6 +122,8 @@ def upload_bytes(
         kwargs["ContentType"] = content_type
 
     client.put_object(**kwargs)
+    log.info("s3 upload (bytes) key=%s size=%d", s3_key, len(data),
+             extra={"key": s3_key, "bytes": len(data)})
 
 
 def download_bytes(s3_key: str) -> bytes:
@@ -213,6 +224,8 @@ def delete_prefix(prefix: str) -> int:
             Delete={"Objects": [{"Key": k} for k in batch]},
         )
         deleted += len(batch)
+    log.info("s3 delete prefix=%s deleted=%d", prefix, deleted,
+             extra={"prefix": prefix, "deleted": deleted})
     return deleted
 
 

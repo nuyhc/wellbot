@@ -42,6 +42,7 @@ from wellbot.constants import (
     LOCAL_SUPPORTED_EXTS,
     UPSTAGE_SUPPORTED_EXTS,
 )
+from wellbot import log_context
 from wellbot.services.auth import auth_service
 from wellbot.services.files import attachment_service, file_parser
 
@@ -176,6 +177,9 @@ async def upload_attachment(
             detail="conversation_id 가 필요합니다.",
         )
 
+    # 로그 상관관계 보강 (이후 모든 로그에 emp/conv 표기)
+    log_context.bind(emp_no=emp_no, conversation_id=smry_id)
+
     # 2-1. message_id 정규화
     msg_id = (message_id or "").strip()
 
@@ -248,7 +252,11 @@ async def upload_attachment(
 
 
 def _run_process(file_no: int, emp_no: str, tmp_path: Path) -> None:
-    """백그라운드 파싱·임베딩 작업. 실패해도 로깅만 하고 종료."""
+    """백그라운드 파싱·임베딩 작업. 실패해도 로깅만 하고 종료.
+
+    요청 스코프가 이미 해제된 뒤 실행되므로 로그 상관관계를 재바인딩한다.
+    """
+    log_context.bind(emp_no=emp_no, request_id=log_context.new_request_id())
     try:
         attachment_service.process_attachment(file_no, emp_no)
     except Exception as exc:
@@ -257,4 +265,4 @@ def _run_process(file_no: int, emp_no: str, tmp_path: Path) -> None:
         try:
             tmp_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            log.debug("임시파일 정리 실패 path=%s", tmp_path, exc_info=True)

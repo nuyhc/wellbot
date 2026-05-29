@@ -21,6 +21,9 @@ PROMPTS_DIR: Path = CONFIG_DIR / "prompts"
 
 ENV_FILE: Path = PROJECT_ROOT / ".env"
 
+# 로그 파일 출력 디렉토리 (LOG_TO_FILE=true 시 사용)
+LOG_DIR: Path = PROJECT_ROOT / "logs"
+
 # 자주 사용하는 YAML/MD 파일
 MODELS_YAML: Path = CONFIG_DIR / "models.yaml"
 PROMPTS_YAML: Path = CONFIG_DIR / "prompts.yaml"

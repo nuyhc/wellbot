@@ -15,8 +15,10 @@ PDF 는 Upstage 제약(100p/50MB) 초과 시 자동 분할 후 merge.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -31,6 +33,9 @@ from wellbot.constants import (
     UPSTAGE_MAX_SIZE_MB,
     UPSTAGE_SUPPORTED_EXTS,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 # ── 예외 ──
@@ -280,7 +285,7 @@ class UpstageParser:
                     if p != pdf_path:
                         p.unlink(missing_ok=True)
                 except Exception:
-                    pass
+                    log.debug("분할 임시파일 정리 실패 path=%s", p, exc_info=True)
 
         return ParsedDocument(
             text="\n\n".join(texts),
@@ -302,6 +307,11 @@ class UpstageParser:
         headers = {"Authorization": f"Bearer {self._api_key}"}
         file_bytes = file_path.read_bytes()
 
+        call_start = time.perf_counter()
+        log.info(
+            "upstage parse 호출 file=%s bytes=%d", file_path.name, len(file_bytes),
+            extra={"file": file_path.name, "bytes": len(file_bytes)},
+        )
         try:
             response = httpx.post(
                 self._api_url,
@@ -311,6 +321,10 @@ class UpstageParser:
                 timeout=300.0,
             )
             if response.status_code != 200:
+                log.warning(
+                    "upstage parse HTTP %s file=%s", response.status_code, file_path.name,
+                    extra={"file": file_path.name, "status": response.status_code},
+                )
                 raise ParsingFailedError(
                     f"Upstage API 오류 (HTTP {response.status_code}): "
                     f"{response.text[:200]}"
@@ -319,7 +333,19 @@ class UpstageParser:
         except ParsingFailedError:
             raise
         except httpx.HTTPError as e:
+            log.warning(
+                "upstage parse 호출 실패 file=%s err=%s", file_path.name, e,
+                extra={"file": file_path.name},
+            )
             raise ParsingFailedError(f"Upstage API 호출 실패: {e}") from e
+
+        log.info(
+            "upstage parse done file=%s", file_path.name,
+            extra={
+                "file": file_path.name,
+                "elapsed_ms": int((time.perf_counter() - call_start) * 1000),
+            },
+        )
 
         # 응답에서 텍스트 추출 (markdown 우선 → text fallback)
         content = payload.get("content", {})
@@ -493,7 +519,7 @@ def _ensure_size_limit(pdf_path: Path) -> list[Path]:
     try:
         pdf_path.unlink()
     except Exception:
-        pass
+        log.debug("원본 임시파일 정리 실패 path=%s", pdf_path, exc_info=True)
 
     # 재귀 검증
     result: list[Path] = []
