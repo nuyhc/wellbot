@@ -5,7 +5,7 @@
 소요시간은 elapsed_ms extra 필드로 기록되어 JSON 로그에서 쿼리·집계 가능.
 
 사용:
-    from wellbot.log_timing import log_timing
+    from wellbot.logger import log_timing
 
     with log_timing("chat", model=model_name):
         ...   # 완료 시 "chat done" + elapsed_ms 기록, 예외 시 "chat failed" 기록

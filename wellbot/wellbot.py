@@ -11,7 +11,7 @@ from wellbot.env import init_env
 init_env()
 
 # 다른 wellbot 모듈이 로그를 남기기 전에 로깅 구성 필요
-from wellbot.logging_config import setup_logging
+from wellbot.logger import setup_logging
 
 setup_logging()
 

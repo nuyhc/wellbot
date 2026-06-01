@@ -12,7 +12,7 @@ import uuid
 
 import reflex as rx
 
-from wellbot import log_context
+from wellbot.logger import log_context
 
 from wellbot.constants import (
     DEFAULT_CONVERSATION_TITLE,

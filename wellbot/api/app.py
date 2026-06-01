@@ -8,10 +8,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request
 
-from wellbot import log_context
 from wellbot.api.upload import router as upload_router
 from wellbot.api.download import router as download_router
-from wellbot.logging_config import install_asyncio_handler
+from wellbot.logger import install_asyncio_handler, log_context
 
 api_app = FastAPI(title="WellBot API", docs_url=None, redoc_url=None)
 

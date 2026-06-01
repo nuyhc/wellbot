@@ -37,7 +37,7 @@ import os
 import sys
 from pathlib import Path
 
-from wellbot import log_context
+from wellbot.logger import context as log_context
 from wellbot.paths import LOG_DIR as DEFAULT_LOG_DIR
 
 # 모든 wellbot.* 로거가 이 아래로 모임
@@ -212,15 +212,15 @@ def setup_logging(*, force: bool = False) -> None:
         "version": 1,
         "disable_existing_loggers": False,
         "filters": {
-            "context": {"()": "wellbot.logging_config.ContextFilter"},
+            "context": {"()": "wellbot.logger.config.ContextFilter"},
         },
         "formatters": {
             "console": {
-                "()": "wellbot.logging_config.ConsoleFormatter",
+                "()": "wellbot.logger.config.ConsoleFormatter",
                 "use_color": opts["use_color"],
             },
             "json": {
-                "()": "wellbot.logging_config.JsonFormatter",
+                "()": "wellbot.logger.config.JsonFormatter",
             },
         },
         "handlers": handlers,
@@ -243,7 +243,7 @@ def setup_logging(*, force: bool = False) -> None:
 
     _configured = True
 
-    log = logging.getLogger(f"{ROOT_LOGGER}.logging_config")
+    log = logging.getLogger(f"{ROOT_LOGGER}.logger.config")
     log.info(
         "logging initialized: format=%s level=%s to_file=%s",
         opts["format"],

@@ -42,7 +42,7 @@ from wellbot.constants import (
     LOCAL_SUPPORTED_EXTS,
     UPSTAGE_SUPPORTED_EXTS,
 )
-from wellbot import log_context
+from wellbot.logger import log_context
 from wellbot.services.auth import auth_service
 from wellbot.services.files import attachment_service, file_parser
 

@@ -13,7 +13,7 @@ ContextFilter 가 모든 LogRecord 에 이 값을 자동 주입하므로
 
 사용:
     # API 미들웨어 / State 이벤트 핸들러 진입부
-    from wellbot import log_context
+    from wellbot.logger import log_context
     log_context.bind(emp_no="12345", conversation_id="abc")
 
     # 요청 종료 시 (또는 with 블록으로 자동 정리)
