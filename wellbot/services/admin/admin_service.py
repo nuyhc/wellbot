@@ -15,19 +15,6 @@ from wellbot.models.employee import Employee
 from wellbot.services.core.database import get_session
 
 
-def _to_dict(row: Any) -> dict:
-    """SQLAlchemy 모델 인스턴스를 Reflex 직렬화 호환 dict 로 변환"""
-    result = {}
-    for col in row.__table__.columns:
-        val = getattr(row, col.key if hasattr(col, "key") else col.name)
-        if isinstance(val, datetime):
-            val = val.isoformat()
-        elif isinstance(val, Decimal):
-            val = int(val)
-        result[col.key if hasattr(col, "key") else col.name] = val
-    return result
-
-
 def _to_dict_model(row: Any) -> dict:
     """mapped_column 의 Python 속성명 기반으로 dict 변환"""
     mapper = row.__class__.__mapper__
@@ -81,7 +68,7 @@ def create_dept(
 def update_dept(dept_cd: str, **kwargs: Any) -> dict:
     """부서 수정"""
     with get_session() as session:
-        dept = session.query(Dept).get(dept_cd)
+        dept = session.get(Dept, dept_cd)
         if not dept:
             raise ValueError(f"부서 '{dept_cd}'를 찾을 수 없습니다.")
         for key, val in kwargs.items():
@@ -96,7 +83,7 @@ def update_dept(dept_cd: str, **kwargs: Any) -> dict:
 def delete_dept(dept_cd: str) -> bool:
     """부서 삭제"""
     with get_session() as session:
-        dept = session.query(Dept).get(dept_cd)
+        dept = session.get(Dept, dept_cd)
         if not dept:
             return False
         session.delete(dept)
@@ -154,7 +141,7 @@ def create_employee(
 def update_employee(emp_no: str, **kwargs: Any) -> dict:
     """사원 수정 (password 포함 시 bcrypt 재해싱)"""
     with get_session() as session:
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp:
             raise ValueError(f"사원 '{emp_no}'를 찾을 수 없습니다.")
         if "password" in kwargs:
@@ -175,7 +162,7 @@ def update_employee(emp_no: str, **kwargs: Any) -> dict:
 def delete_employee(emp_no: str) -> bool:
     """사원 삭제"""
     with get_session() as session:
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp:
             return False
         session.delete(emp)
@@ -185,7 +172,7 @@ def delete_employee(emp_no: str) -> bool:
 def authenticate_admin(emp_no: str, password: str) -> bool:
     """DB 기반 관리자 인증 (ADMIN 역할 + bcrypt 검증)"""
     with get_session() as session:
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp or emp.user_role_nm != "ADMIN":
             return False
         if not emp.ecr_pwd:
@@ -236,7 +223,7 @@ def create_agent(
 def update_agent(agnt_id: str, agnt_seq: int, **kwargs: Any) -> dict:
     """에이전트 수정"""
     with get_session() as session:
-        agent = session.query(Agent).get((agnt_id, agnt_seq))
+        agent = session.get(Agent, (agnt_id, agnt_seq))
         if not agent:
             raise ValueError(f"에이전트 '{agnt_id}-{agnt_seq}'를 찾을 수 없습니다.")
         for key, val in kwargs.items():
@@ -251,7 +238,7 @@ def update_agent(agnt_id: str, agnt_seq: int, **kwargs: Any) -> dict:
 def delete_agent(agnt_id: str, agnt_seq: int) -> bool:
     """에이전트 삭제"""
     with get_session() as session:
-        agent = session.query(Agent).get((agnt_id, agnt_seq))
+        agent = session.get(Agent, (agnt_id, agnt_seq))
         if not agent:
             return False
         session.delete(agent)

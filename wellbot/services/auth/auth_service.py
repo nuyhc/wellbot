@@ -49,7 +49,7 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         {"success": False, "error": "에러 메시지"}
     """
     with get_session() as session:
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp:
             log.info("login failed: unknown emp_no=%s", emp_no)
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
@@ -159,13 +159,13 @@ def validate_session_token(token: str) -> dict | None:
         return None
 
     with get_session() as session:
-        record = session.query(AuthToken).get((token_id, emp_no))
+        record = session.get(AuthToken, (token_id, emp_no))
         if not record or record.diss_yn != "N":
             return None
         if _ensure_aware(record.trtn_dtm) and _ensure_aware(record.trtn_dtm) < datetime.now(KST):
             return None
 
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp or emp.acnt_sts_nm != "ACTIVE":
             return None
 
@@ -196,7 +196,7 @@ def invalidate_session_token(token: str) -> bool:
 
     now = datetime.now(KST)
     with get_session() as session:
-        record = session.query(AuthToken).get((token_id, emp_no))
+        record = session.get(AuthToken, (token_id, emp_no))
         if not record:
             return False
         record.diss_yn = "Y"
@@ -223,7 +223,7 @@ def register_user(
         return {"success": False, "error": "모든 필드를 입력해주세요."}
 
     with get_session() as session:
-        existing = session.query(Employee).get(emp_no)
+        existing = session.get(Employee, emp_no)
         if existing:
             return {"success": False, "error": "이미 등록된 사원번호입니다."}
 
@@ -275,7 +275,7 @@ def change_password(emp_no: str, current_password: str, new_password: str) -> di
         return {"success": False, "error": "모든 필드를 입력해주세요."}
 
     with get_session() as session:
-        emp = session.query(Employee).get(emp_no)
+        emp = session.get(Employee, emp_no)
         if not emp:
             return {"success": False, "error": "사용자를 찾을 수 없습니다."}
 

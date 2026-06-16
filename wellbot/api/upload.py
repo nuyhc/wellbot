@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -35,7 +34,6 @@ from fastapi import File as FastAPIFile
 
 from wellbot.constants import (
     FILE_MAX_PER_CONVERSATION,
-    FILE_MAX_PER_MESSAGE,
     FILE_MAX_SIZE_MB,
     FILE_MAX_TOTAL_SIZE_MB,
     FILE_PARSER_MODE,

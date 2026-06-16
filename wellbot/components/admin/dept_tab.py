@@ -4,7 +4,7 @@ import reflex as rx
 
 from wellbot.components.admin import cell, col_header
 from wellbot.state.admin_state import AdminState
-from wellbot.styles import COLORS, SPACING
+from wellbot.styles import COLORS
 
 
 def _dept_row(dept: dict) -> rx.Component:

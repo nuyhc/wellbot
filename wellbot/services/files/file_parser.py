@@ -435,7 +435,7 @@ def split_pdf_for_upstage(pdf_path: Path) -> list[Path]:
         분할된 임시 PDF 파일 경로 목록. 페이지 순으로 정렬됨.
         입력 파일이 제약 내면 [pdf_path] 를 그대로 반환
     """
-    from pypdf import PdfReader, PdfWriter
+    from pypdf import PdfReader
 
     total_pages = _count_pdf_pages(pdf_path)
     file_size_mb = _file_size_mb(pdf_path)
@@ -544,7 +544,3 @@ def guess_mime(file_path: Path | str) -> str:
     """외부 공개용 MIME 추정"""
     return _guess_mime(Path(file_path))
 
-
-def count_pdf_pages(pdf_path: Path | str) -> int:
-    """외부 공개용 PDF 페이지 수 조회"""
-    return _count_pdf_pages(Path(pdf_path))
