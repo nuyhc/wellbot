@@ -29,14 +29,16 @@ confirm_upload 시 ingestion만 트리거.
     }
 """
 
+from __future__ import annotations
+
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 import boto3
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, status
 
+from wellbot.services.auth import auth_service
 from wellbot.services.knowledgebase.config import get_kb_config
 from wellbot.services.knowledgebase.kb_utils import (
     CONVERTIBLE_EXTS,
@@ -47,6 +49,7 @@ from wellbot.services.knowledgebase.kb_utils import (
     split_and_upload_tabular,
     validate_file_size,
 )
+from wellbot.services.knowledgebase.team_kb_manager import get_dept_cd
 
 log = logging.getLogger(__name__)
 
@@ -62,9 +65,8 @@ def _get_s3():
 @router.post("/api/upload_kb_files")
 async def upload_kb_files(
     files: list[UploadFile] = File(...),
-    emp_no: str = Form(...),
     upload_target: str = Form("personal"),
-    dept_cd: Optional[str] = Form(None),
+    wellbot_auth: str | None = Cookie(default=None),
 ):
     """
     파일을 S3에 바로 업로드.
@@ -72,13 +74,38 @@ async def upload_kb_files(
     - xlsx/csv: 분할 업로드
     - personal: s3://{bucket}/users/{emp_no}/raw/{filename}
     - team:     s3://{bucket}/teams/{dept_cd}/raw/{filename}
+
+    emp_no / dept_cd 는 클라이언트 입력을 신뢰하지 않고 wellbot_auth 세션
+    쿠키에서 서버가 도출한다 (타인 KB 에 임의 파일 주입 방지).
     """
+    # 1. 인증 — 세션 쿠키에서 emp_no 도출
+    if not wellbot_auth:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="로그인이 필요합니다.",
+        )
+    user = auth_service.validate_session_token(wellbot_auth)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="세션이 만료되었습니다. 다시 로그인해주세요.",
+        )
+    emp_no = user["emp_no"]
 
     if len(files) > 5:
         return {"uploaded": [], "error": "한 번에 최대 5개 파일만 업로드 가능합니다."}
 
-    if upload_target == "team" and not dept_cd:
-        return {"uploaded": [], "error": "팀 업로드 시 dept_cd가 필요합니다."}
+    # 2. 업로드 경로 결정 — team 은 본인 소속 부서로만 (서버에서 도출)
+    if upload_target == "team":
+        dept_cd = get_dept_cd(emp_no)
+        if not dept_cd:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="소속 팀 정보가 없어 팀 업로드를 할 수 없습니다.",
+            )
+        prefix = f"teams/{dept_cd}/raw/"
+    else:
+        prefix = f"users/{emp_no}/raw/"
 
     kb_cfg = get_kb_config().get("personal_kb", {})
     bucket = kb_cfg.get("s3_bucket", "")
@@ -87,7 +114,6 @@ async def upload_kb_files(
 
     s3 = _get_s3()
     uploaded = []
-    prefix = f"teams/{dept_cd}/raw/" if upload_target == "team" else f"users/{emp_no}/raw/"
 
     try:
         for file in files:

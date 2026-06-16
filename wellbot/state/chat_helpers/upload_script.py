@@ -158,9 +158,13 @@ window.uploadKbFilesToApi = async function(empNo, uploadTarget, deptCd) {
         var resp = await fetch('/api/upload_kb_files', {
             method: 'POST',
             body: formData,
+            credentials: 'include',
         });
-        var result = await resp.json();
+        var result = await resp.json().catch(function() { return {}; });
         window._kbSelectedFiles = [];
+        if (!resp.ok) {
+            return {uploaded: [], error: (result && result.detail) ? result.detail : ('업로드 실패 (' + resp.status + ')')};
+        }
         return result;
     } catch (e) {
         return {uploaded: [], error: e.message};
