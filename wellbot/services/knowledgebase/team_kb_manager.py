@@ -9,6 +9,7 @@ team_kb_manager.py
 S3 경로: teams/{dept_cd}/raw/
 """
 
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -39,6 +40,27 @@ from wellbot.services.knowledgebase.kb_utils import (
 # ──────────────────────────────────────────────
 TYPE_TEAM = "TEAM"
 SEQ_TEAM  = 2                       # AGNT_SEQ: 1=personal, 2=team
+
+
+# ──────────────────────────────────────────────
+# 부서 단위 직렬화 락
+#   같은 팀의 두 팀원이 동시에 업로드하면 둘 다 "팀 KB 없음"으로 판단해
+#   중복 Bedrock KB 를 만들 수 있다. 부서코드별 락으로 조회→생성→등록을
+#   원자화해 이를 막는다. (단일 백엔드 프로세스 기준이며, 다중 프로세스
+#   환경에서는 create_team_kb 의 find_existing_kb 가 백스톱 역할을 한다.)
+# ──────────────────────────────────────────────
+_dept_locks: dict[str, threading.Lock] = {}
+_dept_locks_guard = threading.Lock()
+
+
+def _dept_lock(dept_cd: str) -> threading.Lock:
+    """부서코드별 락 인스턴스를 반환(없으면 생성)."""
+    with _dept_locks_guard:
+        lock = _dept_locks.get(dept_cd)
+        if lock is None:
+            lock = threading.Lock()
+            _dept_locks[dept_cd] = lock
+        return lock
 
 
 # ──────────────────────────────────────────────
@@ -139,18 +161,19 @@ def ensure_team_kb_membership(emp_no: str, dept_cd: str) -> Optional[dict]:
     get_or_create_team_kb 와 달리 **새로운 KB 를 만들지 않는다** — 조회/등록만 수행.
     팀 KB 존재 여부 체크 (검색 범위 활성화 등) 용도.
     """
-    record = get_user_team_kb(emp_no)
-    if record:
-        return record
-    teammate_record = _find_team_kb_from_teammates(dept_cd)
-    if teammate_record:
-        _insert_user_team_kb(
-            emp_no,
-            teammate_record["kb_id"],
-            teammate_record["data_source_id"],
-        )
-        return teammate_record
-    return None
+    with _dept_lock(dept_cd):
+        record = get_user_team_kb(emp_no)
+        if record:
+            return record
+        teammate_record = _find_team_kb_from_teammates(dept_cd)
+        if teammate_record:
+            _insert_user_team_kb(
+                emp_no,
+                teammate_record["kb_id"],
+                teammate_record["data_source_id"],
+            )
+            return teammate_record
+        return None
 
 
 def get_or_create_team_kb(emp_no: str, dept_cd: str) -> dict:
@@ -161,18 +184,19 @@ def get_or_create_team_kb(emp_no: str, dept_cd: str) -> dict:
     3. Bedrock API에서 기존 팀 KB 검색 → 있으면 본인 행 INSERT 후 반환
     4. 없으면 팀 KB 신규 생성 → 본인 행 INSERT 후 반환
     """
-    record = get_user_team_kb(emp_no)
-    if record:
-        return record
+    with _dept_lock(dept_cd):
+        record = get_user_team_kb(emp_no)
+        if record:
+            return record
 
-    teammate_record = _find_team_kb_from_teammates(dept_cd)
-    if teammate_record:
-        _insert_user_team_kb(emp_no, teammate_record["kb_id"], teammate_record["data_source_id"])
-        return teammate_record
+        teammate_record = _find_team_kb_from_teammates(dept_cd)
+        if teammate_record:
+            _insert_user_team_kb(emp_no, teammate_record["kb_id"], teammate_record["data_source_id"])
+            return teammate_record
 
-    kb_info = create_team_kb(dept_cd)
-    _insert_user_team_kb(emp_no, kb_info["kb_id"], kb_info["data_source_id"])
-    return kb_info
+        kb_info = create_team_kb(dept_cd)
+        _insert_user_team_kb(emp_no, kb_info["kb_id"], kb_info["data_source_id"])
+        return kb_info
 
 
 # ──────────────────────────────────────────────
