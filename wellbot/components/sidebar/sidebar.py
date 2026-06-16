@@ -160,10 +160,6 @@ def _expanded_header() -> rx.Component:
     )
 
 
-def _search_input() -> rx.Component:
-    """대화 검색 입력 박스 - 검색 기능은 모달로 이전, 빈 fragment 반환"""
-    return rx.fragment()
-
 
 def _collapsed_nav() -> rx.Component:
     """접힌 상태 상단 네비게이션 (아이콘 세로 정렬)."""
@@ -527,4 +523,5 @@ def sidebar() -> rx.Component:
         flex_direction="column",
         overflow="hidden",
         transition="width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease",
+        on_click=ChatState.close_panel,
     )

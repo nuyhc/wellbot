@@ -101,3 +101,69 @@ def build_upload_script(
   }}
 }})();
 """
+
+
+# ── KB 파일 업로드 JS (페이지 레벨 window-global 정의) ──────────────
+# openKbFilePicker: 브라우저 파일 선택 다이얼로그 → _kbPendingMeta 저장
+# uploadKbFilesToApi: _kbSelectedFiles 를 /api/upload_kb_files 로 fetch 전송
+#
+# build_upload_script 와 달리 파라미터 없는 정적 스크립트로, 컴포넌트 mount/unmount
+# 타이밍에 따른 ReferenceError 를 피하려고 pages/index.py 에서 rx.script 로
+# 페이지 레벨에 1회만 등록한다 (window 전역 함수로 항상 사용 가능).
+KB_UPLOAD_SCRIPT = """
+window._kbFileInput = null;
+window._kbSelectedFiles = [];
+window._kbPendingMeta = [];
+window._kbPickerCanceled = false;
+
+window.openKbFilePicker = function() {
+    if (!window._kbFileInput) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.pdf,.docx,.pptx,.xlsx,.csv,.md,.txt,.json,.html,.htm';
+        input.style.display = 'none';
+        input.addEventListener('change', function() {
+            window._kbPickerCanceled = false;
+            if (input.files.length > 0) {
+                window._kbSelectedFiles = Array.from(input.files);
+                window._kbPendingMeta = window._kbSelectedFiles.map(function(f) {
+                    return { name: f.name, size: f.size };
+                });
+            }
+            input.value = '';
+        });
+        // 'cancel' 이벤트로 다이얼로그 취소 감지 (Chrome 113+, Firefox 91+, Safari 16.4+)
+        input.addEventListener('cancel', function() {
+            window._kbPickerCanceled = true;
+        });
+        document.body.appendChild(input);
+        window._kbFileInput = input;
+    }
+    window._kbPickerCanceled = false;  // 호출 시점에 플래그 리셋
+    window._kbFileInput.click();
+};
+
+window.uploadKbFilesToApi = async function(empNo, uploadTarget, deptCd) {
+    var files = window._kbSelectedFiles || [];
+    if (files.length === 0) return {uploaded: [], error: 'No files selected'};
+
+    var formData = new FormData();
+    for (var i = 0; i < files.length; i++) formData.append('files', files[i]);
+    formData.append('emp_no', empNo);
+    formData.append('upload_target', uploadTarget);
+    if (deptCd) formData.append('dept_cd', deptCd);
+
+    try {
+        var resp = await fetch('/api/upload_kb_files', {
+            method: 'POST',
+            body: formData,
+        });
+        var result = await resp.json();
+        window._kbSelectedFiles = [];
+        return result;
+    } catch (e) {
+        return {uploaded: [], error: e.message};
+    }
+};
+"""

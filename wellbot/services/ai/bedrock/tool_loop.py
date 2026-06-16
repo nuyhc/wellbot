@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -21,6 +22,8 @@ def _call_signature(name: str, tool_input: dict) -> tuple:
 
     query 는 소문자 strip, file_ids·file_names 는 정렬 후 tuple 로 변환해
     순서가 달라도 동일 호출로 인식.
+    그 외 입력 키(kb_scope, top_k 등)도 정규화해 포함 —
+    다른 파라미터의 호출이 중복으로 오인 차단되는 것을 방지.
     """
     inp = tool_input or {}
     query = (inp.get("query") or "").strip().lower()
@@ -31,7 +34,15 @@ def _call_signature(name: str, tool_input: dict) -> tuple:
         for n in (inp.get("file_names") or [])
         if isinstance(n, str) and n.strip()
     ))
-    return (name, query, file_ids, file_names)
+    known = {"query", "file_ids", "file_names"}
+    try:
+        extra = json.dumps(
+            {k: v for k, v in inp.items() if k not in known},
+            sort_keys=True, ensure_ascii=False, default=str,
+        )
+    except (TypeError, ValueError):
+        extra = ""
+    return (name, query, file_ids, file_names, extra)
 
 
 def _strip_tool_result_meta(result_content: dict) -> dict:
@@ -208,7 +219,13 @@ async def astream_chat_with_tools(
                     "content": [sanitized],
                 }
             })
-            yield ("tool_result", {"name": name, "text": sanitized.get("text", "")})
+            # kb_search 결과의 출처 문서(_meta.source_docs)를 이벤트로 전파 →
+            # ChatState 가 스트리밍 중 누적해 인용 출처로 표시
+            source_docs = (meta or {}).get("source_docs", []) if name == "kb_search" else []
+            yield (
+                "tool_result",
+                {"name": name, "text": sanitized.get("text", ""), "source_docs": source_docs},
+            )
 
             log.info(
                 "tool_loop call: iter=%d name=%s sig=%s result_count=%d "

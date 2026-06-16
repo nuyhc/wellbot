@@ -19,6 +19,7 @@ from wellbot.constants import (
     FILE_MAX_PER_MESSAGE,
     FILE_MAX_SIZE_MB,
     FILE_PARSER_MODE,
+    KB_NOT_FOUND_PATTERNS,
     LOCAL_SUPPORTED_EXTS,
     TITLE_MAX_LENGTH,
     TOOL_USE_MAX_ITERATIONS,
@@ -37,15 +38,24 @@ from wellbot.state.chat_helpers.attachments import (
     fetch_pending_attachments,
     rows_to_attachment_infos,
 )
-from wellbot.state.chat_helpers.download_script import build_download_script
-from wellbot.state.chat_helpers.system_prompt import augment_system_with_attachments
+from wellbot.state.chat_helpers.download_script import (
+    build_download_script,
+    build_kb_download_script,
+)
+from wellbot.state.chat_helpers.system_prompt import (
+    augment_system_with_attachments,
+    augment_system_with_kb,
+)
 from wellbot.state.chat_helpers.upload_script import build_upload_script
 from wellbot.state.chat_models import (
     ChatModeInfo,
     AttachmentInfo,
     Conversation,
+    KbSharedFile,
+    KbSharedFolder,
     Message,
     ModelInfo,
+    PendingFile,
     PromptInfo,
     new_conversation,
 )
@@ -87,6 +97,31 @@ class ChatState(rx.State):
 
     # 첨부파일-메시지 매핑용 msg_id. trigger_upload 에서 생성 후 send_message 에서 재사용
     _pending_msg_id: str = ""
+
+    # ── KB (Knowledge Base) ──
+    kb_modes: list[str] = []                    # 활성 KB 검색 범위: shared/team/personal
+    upload_target: str = "personal"             # 업로드 대상: personal | team
+    dept_cd: str = ""                           # 사용자 소속 부서코드 (팀 KB)
+    personal_kb_exists: bool = False
+    team_kb_exists: bool = False
+    kb_scope_inline_expanded: bool = False      # flyout 의 'KB 검색 범위' inline expand 상태
+    kb_flyout_open: bool = False                # 지식베이스 hover_card flyout 열림 (controlled)
+    ingestion_status: str = "idle"
+    ingestion_error: str = ""
+    pending_files: list[PendingFile] = []
+    _pending_file_data: dict = {}
+    show_plus_menu: bool = False
+    active_panel: str = ""                       # 입력창 위 패널: "" | "kb_docs" | "kb_upload"
+    kb_doc_list: list[dict] = []
+    kb_doc_list_tab: str = "personal"            # personal | team | shared
+    kb_doc_list_loading: bool = False
+    selected_kb_docs: list[str] = []             # 다중 선택된 파일명 (개인/팀 KB 삭제용)
+    kb_delete_status: str = "idle"               # idle | processing | ready | error
+    kb_delete_error: str = ""
+    kb_folder_list: list[KbSharedFolder] = []    # 회사(공용) KB 탭용 그룹 뷰
+    expanded_kb_folders: list[str] = []          # 회사 KB 탭에서 펼쳐진 folder_type 목록
+    # KB 검색 결과 출처 (스트리밍 중 누적 → 메시지에 첨부)
+    _streaming_kb_sources: list[dict] = []
 
     def _refresh_greeting(self) -> None:
         """환영 메시지를 랜덤으로 갱신"""
@@ -342,6 +377,38 @@ class ChatState(rx.State):
         except Exception:
             return ""
 
+    # ── KB computed vars ──
+
+    @rx.var
+    def use_kb(self) -> bool:
+        """KB 검색 사용 여부."""
+        return len(self.kb_modes) > 0
+
+    @rx.var
+    def kb_mode_display(self) -> str:
+        """현재 KB 모드 표시 문자열.
+
+        선택 순서와 무관하게 항상 '회사 - 팀 - 개인' 순서로 정렬해 표시.
+        """
+        if not self.kb_modes:
+            return "KB OFF"
+        labels = {"shared": "회사", "team": "팀", "personal": "개인"}
+        order = ["shared", "team", "personal"]
+        parts = [labels[m] for m in order if m in self.kb_modes]
+        return "지식베이스 : " + " + ".join(parts)
+
+    @rx.var
+    def kb_docs_empty(self) -> bool:
+        """현재 탭에서 문서가 비어 있는지 (UI 의 '업로드된 문서가 없습니다' 분기용)."""
+        if self.kb_doc_list_tab == "shared":
+            return len(self.kb_folder_list) == 0
+        return len(self.kb_doc_list) == 0
+
+    @rx.var
+    def kb_delete_button_label(self) -> str:
+        """'선택 삭제 (N)' 버튼 레이블."""
+        return f"선택 삭제 ({len(self.selected_kb_docs)})"
+
     # ── Event handlers ──
 
     def set_chat_mode(self, mode_id: str) -> None:
@@ -365,6 +432,29 @@ class ChatState(rx.State):
         auth = await self.get_state(AuthState)
         self._emp_no = auth.current_emp_no
 
+        # KB 초기화: 개인/팀 KB 존재 여부 확인 (검색 범위 활성화 제어용)
+        self.kb_modes = []
+        if self._emp_no:
+            try:
+                from wellbot.services.knowledgebase.personal_kb_manager import (
+                    get_user_kb as _get_user_kb,
+                )
+                self.personal_kb_exists = _get_user_kb(self._emp_no) is not None
+            except Exception:
+                self.personal_kb_exists = False
+            try:
+                self.dept_cd = auth.current_dept_cd or ""
+                if self.dept_cd:
+                    from wellbot.services.knowledgebase.team_kb_manager import (
+                        ensure_team_kb_membership as _ensure_team_kb_membership,
+                    )
+                    # 같은 팀의 다른 팀원이 이미 만든 팀 KB 가 있으면 본인 행 자동 등록
+                    self.team_kb_exists = (
+                        _ensure_team_kb_membership(self._emp_no, self.dept_cd) is not None
+                    )
+            except Exception:
+                self.dept_cd = ""
+                self.team_kb_exists = False
 
         # 모델/프롬프트 초기화
         try:
@@ -456,6 +546,23 @@ class ChatState(rx.State):
                 except Exception:
                     log.warning("프롬프트 변경 system 메시지 저장 실패", exc_info=True)
 
+    def _reset_kb_panels(self) -> None:
+        """대화 전환/생성 시 KB UI 임시 상태 정리.
+
+        검색 범위(kb_modes)는 세션 설정이라 유지하고, 열려있던 패널·폴더 펼침과
+        종료 상태(ready/error)의 ingest/삭제 메시지만 초기화한다.
+        진행 중인 'processing' 상태는 알림 끊김 방지를 위해 유지.
+        """
+        self.active_panel = ""
+        self.show_style_panel = False
+        self.expanded_kb_folders = []
+        if self.ingestion_status in ("ready", "error"):
+            self.ingestion_status = "idle"
+            self.ingestion_error = ""
+        if self.kb_delete_status in ("ready", "error"):
+            self.kb_delete_status = "idle"
+            self.kb_delete_error = ""
+
     def create_new_conversation(self) -> None:
         """새 대화 생성. 현재 대화가 비어있으면 무시"""
         idx = self._get_current_index()
@@ -467,6 +574,7 @@ class ChatState(rx.State):
         self.current_conversation_id = conv.id
         self.current_input = ""
         self.conversation_attachments = []
+        self._reset_kb_panels()
         self._refresh_greeting()
 
     def switch_conversation(self, conv_id: str) -> None:
@@ -474,6 +582,7 @@ class ChatState(rx.State):
         self.current_conversation_id = conv_id
         self.current_input = ""
         self.search_query = ""
+        self._reset_kb_panels()
         idx = self._get_current_index()
         if idx is not None:
             self._load_messages_for(idx)
@@ -514,6 +623,553 @@ class ChatState(rx.State):
     def clear_search_query(self) -> None:
         """검색어 초기화"""
         self.search_query = ""
+
+    # ── KB event handlers ──
+
+    def set_upload_target(self, value: str) -> None:
+        """KB 업로드 대상(personal/team)을 설정한다."""
+        self.upload_target = value
+
+    def set_kb_doc_list_tab(self, tab: str) -> None:
+        """KB 문서 목록 탭(personal/team)을 전환하고 목록을 다시 로드한다.
+
+        탭 전환 시 선택 상태와 삭제 상태를 초기화한다.
+        """
+        self.kb_doc_list_tab = tab
+        self.selected_kb_docs = []
+        self.kb_delete_status = "idle"
+        self.kb_delete_error = ""
+        return ChatState.load_kb_docs  # type: ignore
+
+    def toggle_kb_doc_selection(self, filename: str) -> None:
+        """KB 문서 다중 선택 토글."""
+        if filename in self.selected_kb_docs:
+            self.selected_kb_docs = [f for f in self.selected_kb_docs if f != filename]
+        else:
+            self.selected_kb_docs = self.selected_kb_docs + [filename]
+
+    def toggle_kb_folder(self, folder_type: str) -> None:
+        """회사 KB 탭의 문서종류 폴더 펼침/접힘 토글."""
+        if folder_type in self.expanded_kb_folders:
+            self.expanded_kb_folders = [
+                f for f in self.expanded_kb_folders if f != folder_type
+            ]
+        else:
+            self.expanded_kb_folders = self.expanded_kb_folders + [folder_type]
+
+    async def confirm_kb_delete(self) -> None:
+        """선택된 파일들을 S3 에서 삭제한 뒤 ingestion job 으로 벡터 인덱스 정리.
+
+        현재 활성 탭(personal/team)에 따라 적절한 KB manager 로 분기.
+        team KB 는 같은 팀원 누구나 삭제 가능 (현재 정책).
+        """
+        if not self.selected_kb_docs:
+            return
+
+        filenames = list(self.selected_kb_docs)
+        emp_no = self._emp_no
+        if not emp_no:
+            self.kb_delete_status = "error"
+            self.kb_delete_error = "로그인 정보를 확인할 수 없습니다."
+            return
+
+        tab = self.kb_doc_list_tab
+        dept_cd = self.dept_cd
+        if tab == "team" and not dept_cd:
+            self.kb_delete_status = "error"
+            self.kb_delete_error = "소속 팀 정보가 없습니다."
+            return
+
+        self.kb_delete_status = "processing"
+        self.kb_delete_error = ""
+        yield
+
+        try:
+            import asyncio as _asyncio
+            from wellbot.services.knowledgebase.kb_utils import poll_ingestion_status as _poll
+
+            loop = _asyncio.get_running_loop()
+
+            if tab == "team":
+                from wellbot.services.knowledgebase.kb_utils import (
+                    is_ingestion_in_progress as _team_in_progress,
+                )
+                from wellbot.services.knowledgebase.team_kb_manager import (
+                    delete_files_from_team_kb,
+                    get_user_team_kb as _get_team_kb,
+                    start_ingestion as _team_start_ingestion,
+                )
+
+                # 1. KB 정보 조회
+                kb_info = await loop.run_in_executor(None, lambda: _get_team_kb(emp_no))
+                if not kb_info:
+                    raise RuntimeError("팀 KB 정보를 찾을 수 없습니다.")
+
+                # 2. 진행 중인 ingestion 체크 (다른 팀원이 작업 중인지)
+                in_progress = await loop.run_in_executor(
+                    None,
+                    lambda: _team_in_progress(kb_info["kb_id"], kb_info["data_source_id"]),
+                )
+                if in_progress:
+                    raise RuntimeError(
+                        "현재 다른 팀원이 문서를 처리 중입니다. 잠시 후 다시 시도해주세요."
+                    )
+
+                # 3. S3 파일 삭제
+                await loop.run_in_executor(
+                    None, lambda: delete_files_from_team_kb(dept_cd, filenames)
+                )
+
+                # 4. Ingestion job 실행 → 벡터 인덱스에서 삭제분 정리
+                job_id = await loop.run_in_executor(
+                    None,
+                    lambda: _team_start_ingestion(
+                        kb_info["kb_id"], kb_info["data_source_id"]
+                    ),
+                )
+            else:
+                from wellbot.services.knowledgebase.personal_kb_manager import (
+                    delete_files_from_personal_kb,
+                    get_user_kb as _get_user_kb,
+                    start_ingestion as _personal_start_ingestion,
+                )
+
+                # 1. S3 파일 삭제
+                await loop.run_in_executor(
+                    None, lambda: delete_files_from_personal_kb(emp_no, filenames)
+                )
+
+                # 2. KB 정보 조회
+                kb_info = await loop.run_in_executor(None, lambda: _get_user_kb(emp_no))
+                if not kb_info:
+                    raise RuntimeError("개인 KB 정보를 찾을 수 없습니다.")
+
+                # 3. Ingestion job 실행 → 벡터 인덱스에서 삭제분 정리
+                job_id = await loop.run_in_executor(
+                    None,
+                    lambda: _personal_start_ingestion(
+                        kb_info["kb_id"], kb_info["data_source_id"]
+                    ),
+                )
+
+            status = await loop.run_in_executor(
+                None,
+                lambda: _poll(kb_info["kb_id"], kb_info["data_source_id"], job_id),
+            )
+
+            if status == "COMPLETE" or status.startswith("COMPLETE_WITH_ERRORS"):
+                self.kb_delete_status = "ready"
+                self.selected_kb_docs = []
+                # 목록 새로고침
+                yield ChatState.load_kb_docs  # type: ignore
+            else:
+                self.kb_delete_status = "error"
+                self.kb_delete_error = f"인덱스 정리 실패: {status}"
+        except Exception as e:
+            self.kb_delete_status = "error"
+            self.kb_delete_error = str(e)
+
+    async def load_kb_docs(self) -> None:
+        """현재 탭(personal/team)에 해당하는 S3 파일 목록을 로드한다.
+
+        raw/ 와 originals/ 두 prefix 를 합쳐서 보여준다.
+        (pptx 등 변환 대상 원본은 originals/ 에 별도 저장됨)
+        """
+        import asyncio as _asyncio
+        from datetime import timezone as _tz, timedelta as _td
+        from wellbot.services.files import storage_service
+
+        self.kb_doc_list_loading = True
+        self.kb_doc_list = []
+        self.kb_folder_list = []
+        yield
+
+        emp_no = self._emp_no
+        dept_cd = self.dept_cd
+        tab = self.kb_doc_list_tab
+
+        loop = _asyncio.get_running_loop()
+        try:
+            if tab == "shared":
+                # 회사 KB: shared/{문서종류}/raw/{파일} 구조 → 문서종류 단위 그룹 뷰
+                from wellbot.services.knowledgebase.config import get_kb_config
+                shared_cfg = get_kb_config().get("shared_kb", {})
+                shared_bucket = shared_cfg.get("s3_bucket", "")
+                if not shared_bucket:
+                    self.kb_folder_list = []
+                    return
+
+                items = await loop.run_in_executor(
+                    None,
+                    lambda: storage_service.list_objects_with_meta("shared/", shared_bucket),
+                )
+                # folder_type 별로 파일들을 그룹핑
+                folder_map: dict[str, list[dict]] = {}
+                for obj in items:
+                    key = obj["key"]
+                    parts = key.split("/")
+                    # shared/{folder_type}/raw/{file...} 형태만 채택
+                    if len(parts) < 4 or parts[0] != "shared" or parts[2] != "raw":
+                        continue
+                    folder_type = parts[1]
+                    filename = "/".join(parts[3:])
+                    lm = obj["last_modified"]
+                    if lm.tzinfo is None:
+                        lm = lm.replace(tzinfo=_tz.utc)
+                    folder_map.setdefault(folder_type, []).append({
+                        "file_name": filename,
+                        "uploaded_at": lm.strftime("%Y-%m-%d"),
+                        "expires_at": "-",
+                    })
+                # 폴더 내 파일 정렬: 업로드일 내림차순 + 파일명 오름차순 (한글 가나다 순)
+                # Python sort 는 stable 이므로 secondary key 를 먼저 정렬한 뒤 primary key 로 재정렬
+                for files in folder_map.values():
+                    files.sort(key=lambda d: d["file_name"])
+                    files.sort(key=lambda d: d["uploaded_at"], reverse=True)
+
+                # 폴더 정렬: 폴더명 알파벳/가나다 순 (업로드일 무관)
+                self.kb_folder_list = [
+                    KbSharedFolder(
+                        folder_type=ft,
+                        files=[KbSharedFile(**f) for f in fs],
+                    )
+                    for ft, fs in sorted(folder_map.items())
+                ]
+                return
+
+            # personal / team: 본인(또는 팀) prefix 의 raw/ + originals/ 병합
+            if tab == "personal":
+                raw_prefix = f"users/{emp_no}/raw/"
+                originals_prefix = f"users/{emp_no}/originals/"
+            else:  # team
+                raw_prefix = f"teams/{dept_cd}/raw/"
+                originals_prefix = f"teams/{dept_cd}/originals/"
+
+            raw_items = await loop.run_in_executor(
+                None, storage_service.list_objects_with_meta, raw_prefix
+            )
+            originals_items = await loop.run_in_executor(
+                None, storage_service.list_objects_with_meta, originals_prefix
+            )
+            # 동일 파일명이 양쪽에 있을 경우 originals/ 의 원본을 우선
+            seen: set[str] = set()
+            combined: list[dict] = []
+            for obj in originals_items + raw_items:
+                if obj["file_name"] in seen:
+                    continue
+                seen.add(obj["file_name"])
+                combined.append(obj)
+
+            expiry_days = 365
+            docs = []
+            for obj in combined:
+                lm = obj["last_modified"]
+                if lm.tzinfo is None:
+                    lm = lm.replace(tzinfo=_tz.utc)
+                expiry = lm + _td(days=expiry_days)
+                docs.append({
+                    "file_name": obj["file_name"],
+                    "uploaded_at": lm.strftime("%Y-%m-%d"),
+                    "expires_at": expiry.strftime("%Y-%m-%d"),
+                })
+            # 업로드일 내림차순 정렬
+            docs.sort(key=lambda d: d["uploaded_at"], reverse=True)
+            self.kb_doc_list = docs
+        except Exception:
+            log.exception("KB 문서 목록 로드 실패")
+            self.kb_doc_list = []
+        finally:
+            self.kb_doc_list_loading = False
+
+    def toggle_kb_scope_inline(self) -> None:
+        """지식베이스 flyout 의 'KB 검색 범위' inline expand 토글."""
+        self.kb_scope_inline_expanded = not self.kb_scope_inline_expanded
+
+    def toggle_kb_mode(self, mode: str) -> rx.event.EventSpec | None:
+        """체크박스 토글: 해당 KB 모드를 추가/제거. KB 미존재 시 토스트 안내."""
+        if mode == "personal" and not self.personal_kb_exists:
+            return rx.toast.warning(
+                "개인 KB가 없습니다.",
+                description="파일 업로드에서 파일을 먼저 업로드해 KB를 생성하세요.",
+                duration=4000,
+            )
+        if mode == "team" and not self.team_kb_exists:
+            return rx.toast.warning(
+                "팀 KB가 없습니다.",
+                description="파일 업로드에서 파일을 먼저 업로드해 KB를 생성하세요.",
+                duration=4000,
+            )
+        if mode in self.kb_modes:
+            self.kb_modes = [m for m in self.kb_modes if m != mode]
+        else:
+            self.kb_modes = self.kb_modes + [mode]
+
+    def on_plus_menu_open_change(self, is_open: bool) -> None:
+        """+ 메뉴 팝오버 열림/닫힘 상태 동기화.
+
+        팝오버가 닫히면 지식베이스 flyout 도 함께 닫는다 (외부 클릭으로 전체 dismiss).
+        """
+        self.show_plus_menu = is_open
+        if not is_open:
+            self.kb_flyout_open = False
+            self.kb_scope_inline_expanded = False
+
+    def on_kb_flyout_open_change(self, is_open: bool) -> None:
+        """hover_card 의 open 변화 처리.
+
+        Radix 의 자동 close (mouseleave timer) 는 무시한다.
+        True 로 변하는 경우만 반영해서, 한 번 열리면 명시적 사용자 행동으로만 닫힘.
+        """
+        if is_open:
+            self.kb_flyout_open = True
+
+    def close_kb_flyout(self) -> None:
+        """지식베이스 flyout 닫기 (다른 메뉴 항목 hover/flyout 내 클릭 시).
+
+        inline expand 상태도 함께 리셋해서 다음 열림 때 깔끔한 상태로 시작.
+        """
+        self.kb_flyout_open = False
+        self.kb_scope_inline_expanded = False
+
+    def download_kb_source(self, s3_uri: str, filename: str):
+        """KB 출처 문서를 백엔드 프록시(/api/download_kb)로 다운로드.
+
+        S3 presigned URL 직접 사용은 내부망 환경에서 차단될 수 있어
+        백엔드를 통한 스트리밍 다운로드로 변경.
+        """
+        return rx.call_script(build_kb_download_script(s3_uri, filename))
+
+    def open_panel(self, panel: str) -> None:
+        """2차 메뉴에서 기능 선택 → 메뉴 닫고 입력창 위 패널 열기."""
+        self.show_plus_menu = False
+        self.show_style_panel = False
+        self.active_panel = panel
+
+    def close_panel(self) -> None:
+        """입력창 위 모든 패널 닫기. 선택값은 유지.
+
+        KB 패널(검색 범위/문서 목록/업로드)의 X 버튼과 외부 영역 클릭 모두 사용.
+        스타일 패널도 같이 닫는다 (KB 패널과 동시에 열릴 일은 없으므로 no-op 인 경우 많음).
+        ingestion/delete 의 'ready'·'error' 종료 메시지도 함께 정리.
+        진행 중인 'processing' 상태는 유지하여 알림 끊김을 방지.
+        회사 KB 폴더 펼침 상태는 패널 닫힐 때 초기화 (다음 열림에서 깔끔한 상태로).
+        """
+        self.active_panel = ""
+        self.show_style_panel = False
+        self.expanded_kb_folders = []
+        if self.ingestion_status in ("ready", "error"):
+            self.ingestion_status = "idle"
+            self.ingestion_error = ""
+        if self.kb_delete_status in ("ready", "error"):
+            self.kb_delete_status = "idle"
+            self.kb_delete_error = ""
+
+    def open_file_picker(self) -> rx.event.EventSpec:
+        """KB 파일 선택 다이얼로그를 열고 파일 메타데이터를 수집한다.
+
+        사용자가 다이얼로그를 취소한 경우 'cancel' 이벤트(브라우저 native)로
+        즉시 빈 배열로 resolve 한다. 이렇게 하지 않으면 Promise 가 30초 timeout
+        까지 pending 상태로 남아 다른 이벤트들이 큐에 쌓이고 UI 가 먹통처럼 보임.
+        """
+        return rx.call_script(
+            "(function() {"
+            "  var existing = window._kbPendingMeta || [];"
+            "  if (existing.length > 0) {"
+            "    window._kbPendingMeta = [];"
+            "    return Promise.resolve(existing);"
+            "  }"
+            "  openKbFilePicker();"
+            "  return new Promise(function(resolve) {"
+            "    var check = setInterval(function() {"
+            "      var meta = window._kbPendingMeta || [];"
+            "      if (meta.length > 0) {"
+            "        clearInterval(check);"
+            "        window._kbPendingMeta = [];"
+            "        resolve(meta);"
+            "      } else if (window._kbPickerCanceled) {"
+            "        clearInterval(check);"
+            "        window._kbPickerCanceled = false;"
+            "        resolve([]);"
+            "      }"
+            "    }, 200);"
+            "    setTimeout(function() { clearInterval(check); resolve([]); }, 30000);"
+            "  });"
+            "})()",
+            callback=ChatState.add_pending_files_from_js,
+        )
+
+    def add_pending_files_from_js(self, files_meta: list[dict]) -> None:
+        """JS openKbFilePicker() 완료 후 콜백. 파일 메타데이터만 수신."""
+        for meta in files_meta:
+            name = meta.get("name", "")
+            size = meta.get("size", 0)
+            if any(f.name == name for f in self.pending_files):
+                continue
+            self.pending_files = self.pending_files + [
+                PendingFile(
+                    name=name,
+                    size=size,
+                    size_display=self._format_size(size),
+                )
+            ]
+
+    def remove_pending_file(self, filename: str) -> None:
+        """선택 목록에서 파일 제거."""
+        self.pending_files = [f for f in self.pending_files if f.name != filename]
+        self._pending_file_data.pop(filename, None)
+
+    def clear_pending_files(self) -> None:
+        """선택 목록 전체 초기화."""
+        self.pending_files = []
+        self._pending_file_data = {}
+
+    def _format_size(self, size: int) -> str:
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        else:
+            return f"{size / (1024 * 1024):.1f} MB"
+
+    def _user_friendly_error(self, error: str) -> str:
+        """기술적 에러 메시지를 사용자 친화적 메시지로 변환."""
+        e = error.lower()
+        if "지원하지 않는 파일 형식" in error:
+            return error
+        if "파일 크기 초과" in error:
+            return error
+        if "최대 5개" in error:
+            return error
+        if "소속 팀 정보" in error:
+            return error
+        if "timeout" in e or "타임아웃" in error:
+            return "처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+        if "다른 팀원이 문서를 처리 중" in error:
+            return error
+        log.warning("KB 처리 오류 (사용자에게는 일반 메시지 표시): %s", error)
+        return "문서 처리 중 오류가 발생했습니다. 관리자에게 문의해주세요."
+
+    async def confirm_upload_via_api(self):
+        """확정 버튼 클릭 → JS로 S3 업로드 실행 → on_upload_complete 콜백."""
+        if not self.pending_files:
+            return
+        self.ingestion_status = "uploading"
+        self.ingestion_error = ""
+        yield
+        yield rx.call_script(
+            f"uploadKbFilesToApi('{self._emp_no}', '{self.upload_target}', '{self.dept_cd}')",
+            callback=ChatState.on_upload_complete,
+        )
+
+    async def on_upload_complete(self, result):
+        """JS uploadKbFilesToApi() 완료 후 콜백."""
+        if isinstance(result, str):
+            import json as _json
+            try:
+                result = _json.loads(result)
+            except Exception:
+                self.ingestion_status = "error"
+                self.ingestion_error = f"응답 파싱 실패: {result}"
+                return
+
+        if result is None or (isinstance(result, dict) and result.get("error")):
+            error_msg = result.get("error", "업로드 실패") if result else "업로드 응답 없음"
+            self.ingestion_status = "error"
+            self.ingestion_error = self._user_friendly_error(error_msg)
+            return
+
+        self.ingestion_status = "processing"
+        yield
+
+        emp_no = self._emp_no
+        upload_target = self.upload_target
+        dept_cd = self.dept_cd
+
+        try:
+            import asyncio as _asyncio
+            from wellbot.services.knowledgebase.personal_kb_manager import (
+                get_user_kb as _get_user_kb,
+                get_or_create_personal_kb as _get_or_create_personal_kb,
+                _insert_user_kb,
+                start_ingestion as personal_start_ingestion,
+            )
+            from wellbot.services.knowledgebase.team_kb_manager import (
+                get_or_create_team_kb as _get_or_create_team_kb,
+                start_ingestion as team_start_ingestion,
+            )
+            from wellbot.services.knowledgebase.kb_utils import poll_ingestion_status as _poll
+
+            loop = _asyncio.get_running_loop()
+
+            if upload_target == "team":
+                if not dept_cd:
+                    raise ValueError("소속 팀 정보가 없습니다.")
+                kb_info = await loop.run_in_executor(
+                    None, lambda: _get_or_create_team_kb(emp_no, dept_cd)
+                )
+                job_id = await loop.run_in_executor(
+                    None, lambda: team_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
+                )
+                status = await loop.run_in_executor(
+                    None, lambda: _poll(kb_info["kb_id"], kb_info["data_source_id"], job_id)
+                )
+            else:
+                is_first = await loop.run_in_executor(
+                    None, lambda: _get_user_kb(emp_no) is None
+                )
+                kb_info = await loop.run_in_executor(
+                    None, lambda: _get_or_create_personal_kb(emp_no)
+                )
+                job_id = await loop.run_in_executor(
+                    None, lambda: personal_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
+                )
+                status = await loop.run_in_executor(
+                    None, lambda: _poll(kb_info["kb_id"], kb_info["data_source_id"], job_id)
+                )
+                if is_first and status == "COMPLETE":
+                    await loop.run_in_executor(
+                        None, lambda: _insert_user_kb(emp_no, kb_info["kb_id"], kb_info["data_source_id"])
+                    )
+
+            if status == "COMPLETE":
+                self.ingestion_status = "ready"
+                self.ingestion_error = ""
+                if upload_target == "team":
+                    self.team_kb_exists = True
+                    if "team" not in self.kb_modes:
+                        self.kb_modes = self.kb_modes + ["team"]
+                else:
+                    self.personal_kb_exists = True
+                    if "personal" not in self.kb_modes:
+                        self.kb_modes = self.kb_modes + ["personal"]
+            elif status.startswith("COMPLETE_WITH_ERRORS"):
+                self.ingestion_status = "ready"
+                self.ingestion_error = "일부 문서 처리에 실패했습니다. 관리자에게 문의해주세요."
+                log.warning("KB ingestion 부분 실패: %s", status)
+                if upload_target == "team":
+                    self.team_kb_exists = True
+                    if "team" not in self.kb_modes:
+                        self.kb_modes = self.kb_modes + ["team"]
+                else:
+                    self.personal_kb_exists = True
+                    if "personal" not in self.kb_modes:
+                        self.kb_modes = self.kb_modes + ["personal"]
+            else:
+                self.ingestion_status = "error"
+                self.ingestion_error = "문서 처리에 실패했습니다. 관리자에게 문의해주세요."
+                log.error("KB ingestion 실패: %s", status)
+
+        except TimeoutError:
+            self.ingestion_status = "error"
+            self.ingestion_error = "처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
+            log.warning("KB ingestion 타임아웃")
+        except Exception as e:
+            self.ingestion_status = "error"
+            self.ingestion_error = self._user_friendly_error(str(e))
+            log.exception("KB ingestion 예외")
+        finally:
+            self.pending_files = []
+            self._pending_file_data = {}
 
     # ── 첨부파일 ──
 
@@ -774,6 +1430,8 @@ class ChatState(rx.State):
             model_name = self.selected_model
             use_thinking = self.thinking_enabled
             prompt_name = self.selected_prompt
+            use_kb = self.use_kb
+            kb_modes = list(self.kb_modes)
 
             # 첨부파일이 있으면 미리 생성한 msg_id 재사용, 없으면 빈 문자열
             pending_msg_id = self._pending_msg_id or ""
@@ -846,6 +1504,9 @@ class ChatState(rx.State):
 
             # 대화 전체 첨부파일 메타를 system prompt 에 추가
             system_prompt = augment_system_with_attachments(base_system, conv_id)
+            # KB 활성화 시 검색 지침 + 인용 표기 규칙 추가
+            if use_kb and kb_modes:
+                system_prompt = augment_system_with_kb(system_prompt, kb_modes)
 
             # 이번 turn 의 이미지 첨부를 content block 으로 변환 (마지막 user 메시지에만 적용)
             image_blocks = collect_image_blocks(turn_attachments, model)
@@ -862,11 +1523,14 @@ class ChatState(rx.State):
                 log.warning("첨부 보유 여부 조회 실패 conv_id=%s", conv_id, exc_info=True)
                 has_attachments = False
 
-            if has_attachments:
+            if has_attachments or use_kb:
                 tool_config = tool_executor.build_tool_config()
 
                 def _tool_exec(name: str, tool_input: dict) -> dict:
-                    return tool_executor.execute_tool(name, tool_input, conv_id)
+                    # 사용자의 UI 선택(kb_modes)을 LLM 의 kb_scope 추측보다 우선
+                    if name == "kb_search":
+                        tool_input = {**tool_input, "kb_scope": kb_modes}
+                    return tool_executor.execute_tool(name, tool_input, conv_id, emp_no)
 
                 stream = astream_chat_with_tools(
                     api_messages,
@@ -904,8 +1568,30 @@ class ChatState(rx.State):
                     async with self:
                         self.is_thinking = True  # tool 실행 중 스피너 표시
                 elif event_type == "tool_result":
-                    # 검색 결과는 LLM 이 다음 turn 에서 활용 → UI 에 직접 표시하지 않음
-                    pass
+                    # kb_search 결과 출처 누적 (같은 source_uri 는 ranks 만 병합 — 인용 마커 매칭 보존).
+                    # search_attachment 결과는 LLM 이 다음 turn 에서 활용 → UI 에 직접 표시하지 않음
+                    if chunk.get("name") == "kb_search":
+                        new_docs = chunk.get("source_docs") or []
+                        if new_docs:
+                            async with self:
+                                by_uri = {
+                                    d.get("source_uri"): d
+                                    for d in self._streaming_kb_sources
+                                }
+                                merged = list(self._streaming_kb_sources)
+                                for doc in new_docs:
+                                    uri = doc.get("source_uri")
+                                    new_ranks = doc.get("ranks") or []
+                                    if uri in by_uri:
+                                        existing_ranks = by_uri[uri].get("ranks") or []
+                                        for r in new_ranks:
+                                            if r not in existing_ranks:
+                                                existing_ranks.append(r)
+                                        by_uri[uri]["ranks"] = existing_ranks
+                                    else:
+                                        merged.append(doc)
+                                        by_uri[uri] = doc
+                                self._streaming_kb_sources = merged
                 elif event_type == "usage":
                     input_tokens += int(chunk.get("inputTokens", 0) or 0)
                     output_tokens += int(chunk.get("outputTokens", 0) or 0)
@@ -922,6 +1608,44 @@ class ChatState(rx.State):
             if stream_interrupted and content:
                 content += "\n\n*[생성이 중단되었습니다]*"
 
+            # 출처 필터링: LLM 이 본문에 [N] 인용 마커를 표기한 청크만 남김
+            # 1) 본문에서 [1], [1, 3], [1][3] 등 인용 마커의 번호 추출
+            # 2) 마커가 있으면 → 인용된 ranks 만 유지
+            #    마커가 없으면 → '정보 없음' 패턴 검사 (LLM 이 못 찾았다고 답한 경우 제거)
+            #    그것도 아니면 → LLM 이 마커를 잊은 경우로 보고 전체 유지 (fallback)
+            # 3) 본문에서 [N] 마커 자체는 제거하여 사용자에게는 깔끔하게 표시
+            import re as _re
+
+            all_sources = list(self._streaming_kb_sources)
+            cited_ranks: set[int] = set()
+            for m in _re.finditer(r"\[(\d+(?:\s*,\s*\d+)*)\]", content):
+                for num in m.group(1).split(","):
+                    try:
+                        cited_ranks.add(int(num.strip()))
+                    except ValueError:
+                        pass
+
+            if cited_ranks:
+                final_sources = [
+                    s for s in all_sources
+                    if any(r in cited_ranks for r in (s.get("ranks") or []))
+                ]
+            elif all_sources and any(p in content for p in KB_NOT_FOUND_PATTERNS):
+                final_sources = []
+            else:
+                final_sources = all_sources
+
+            # KB 근거(grounding) 관측: 검색·누적된 출처 대비 답변에 실제 인용된 출처 수.
+            # cited=0 인데 retrieved>0 이면 미근거(환각 가능) 신호.
+            if use_kb:
+                log.info(
+                    "kb grounding: retrieved=%d cited=%d",
+                    len(all_sources), len(final_sources),
+                )
+
+            # 본문에서 인용 마커 제거 ([1], [1, 3] 등)
+            content = _re.sub(r"\s*\[\d+(?:\s*,\s*\d+)*\]", "", content)
+
             # 3. 최종 AI 메시지를 대화에 저장 + 상태 복구
             async with self:
                 self._cancel_requested = False
@@ -933,6 +1657,7 @@ class ChatState(rx.State):
                         content=content,
                         timestamp=time.time(),
                         model_name=model_name,
+                        source_docs=final_sources,
                     )
                     updated = [*self.conversations[idx].messages, ai_msg]
                     self._update_conversation(idx, messages=updated)
@@ -950,6 +1675,7 @@ class ChatState(rx.State):
                 self.is_loading = False
                 self.is_thinking = False
                 self.streaming_content = ""
+                self._streaming_kb_sources = []
 
         # 응답 완료 관측 — 중단·실패 케이스 포함 (비용·지연 추적)
         elapsed = round(time.time() - start_time, 2)

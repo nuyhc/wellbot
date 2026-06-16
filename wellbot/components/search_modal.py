@@ -8,7 +8,7 @@ import reflex as rx
 from wellbot.state.chat_models import Conversation
 from wellbot.state.chat_state import ChatState
 from wellbot.state.ui_state import UIState
-from wellbot.styles import COLORS, SPACING
+from wellbot.styles import COLORS
 
 _ICON_SIZE = 18
 _ICON_BOX = "36px"
