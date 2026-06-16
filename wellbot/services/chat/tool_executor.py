@@ -94,17 +94,9 @@ KB_SEARCH_TOOL: dict = {
                         "type": "string",
                         "description": "검색할 내용을 설명하는 자연어 쿼리.",
                     },
-                    "kb_scope": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["personal", "team"],
-                        },
-                        "description": (
-                            "검색 범위. 'personal' 은 개인 KB, 'team' 은 팀 KB. "
-                            "생략하거나 비우면 활성화된 모든 KB 를 대상으로 검색."
-                        ),
-                    },
+                    # kb_scope 는 LLM 입력으로 노출하지 않는다. 검색 범위는 사용자의
+                    # UI 선택(kb_modes)으로 결정되며 _tool_exec 에서 주입하므로,
+                    # LLM 이 추측해 넘겨도 항상 덮어써져 무의미하다.
                     "top_k": {
                         "type": "integer",
                         "description": "반환할 상위 결과 개수. 기본 5.",

@@ -1531,7 +1531,8 @@ class ChatState(rx.State):
                 tool_config = tool_executor.build_tool_config()
 
                 def _tool_exec(name: str, tool_input: dict) -> dict:
-                    # 사용자의 UI 선택(kb_modes)을 LLM 의 kb_scope 추측보다 우선
+                    # 검색 범위는 사용자의 UI 선택(kb_modes)으로 결정한다. kb_scope 는
+                    # LLM 에 노출하지 않고 여기서 주입한다(툴 스키마에도 없음).
                     if name == "kb_search":
                         tool_input = {**tool_input, "kb_scope": kb_modes}
                     return tool_executor.execute_tool(name, tool_input, conv_id, emp_no)
