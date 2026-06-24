@@ -300,11 +300,15 @@ def _run_kb_search(tool_input: dict[str, Any], emp_no: str) -> dict:
                 "ext": r["title"].rsplit(".", 1)[-1].lower() if "." in r["title"] else "",
                 "ranks": [],
                 "pages": [],  # PDF 청크의 페이지 번호 (중복 제거·정렬). 그 외 형식은 빈 리스트
+                "rank_pages": {},  # rank → page. 인용 마커([N])가 있을 때 인용된 청크의 페이지만 추리기 위함
             }
-        by_uri[uri]["ranks"].append(r.get("rank", 0))
+        rank = r.get("rank", 0)
+        by_uri[uri]["ranks"].append(rank)
         page = r.get("page")
-        if page is not None and page not in by_uri[uri]["pages"]:
-            by_uri[uri]["pages"].append(page)
+        if page is not None:
+            if page not in by_uri[uri]["pages"]:
+                by_uri[uri]["pages"].append(page)
+            by_uri[uri]["rank_pages"][rank] = page
     source_docs = list(by_uri.values())
     for d in source_docs:
         d["pages"].sort()

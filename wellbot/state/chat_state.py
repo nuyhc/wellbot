@@ -1648,6 +1648,10 @@ class ChatState(rx.State):
                                                 existing_pages.append(p)
                                         existing_pages.sort()
                                         by_uri[uri]["pages"] = existing_pages
+                                        # rank → page 매핑도 병합 (인용된 페이지만 추려 표시하기 위함)
+                                        existing_rank_pages = by_uri[uri].get("rank_pages") or {}
+                                        existing_rank_pages.update(doc.get("rank_pages") or {})
+                                        by_uri[uri]["rank_pages"] = existing_rank_pages
                                     else:
                                         merged.append(doc)
                                         by_uri[uri] = doc
@@ -1701,7 +1705,16 @@ class ChatState(rx.State):
             # background task 의 컨텍스트 밖에서 직접 변형하면 ImmutableStateError 가 난다.
             # 읽기는 허용되므로, 변형 대신 새 plain dict 로 복사하며 키를 추가한다.
             def _with_pages_display(s: dict) -> dict:
-                pages = s.get("pages") or []
+                # 인용 마커가 있으면 그 문서에서 '실제 인용된 청크'의 페이지만,
+                # 없으면(fallback) 검색된 전체 페이지를 표시.
+                rank_pages = s.get("rank_pages") or {}
+                if cited_ranks and rank_pages:
+                    pages = sorted({
+                        rank_pages[r] for r in cited_ranks
+                        if r in rank_pages and rank_pages[r] is not None
+                    })
+                else:
+                    pages = s.get("pages") or []
                 display = "p." + ", ".join(str(p) for p in pages) if (s.get("ext") == "pdf" and pages) else ""
                 return {**s, "pages_display": display}
 
