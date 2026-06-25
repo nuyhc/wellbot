@@ -1138,19 +1138,53 @@ class ChatState(rx.State):
                 return
 
         if result is None or (isinstance(result, dict) and result.get("error")):
+            # 업로드 자체 실패는 엔드포인트(upload_files_to_kb, with_rollback=True)가
+            # 이미 S3 롤백을 수행하므로 여기선 별도 정리 불필요.
             error_msg = result.get("error", "업로드 실패") if result else "업로드 응답 없음"
             self.ingestion_status = "error"
             self.ingestion_error = self._user_friendly_error(error_msg)
             return
+
+        import asyncio as _asyncio
+
+        # 이번 turn 에 S3 에 올라간 파일명(원본). ingestion 실패 시 색인 안 된 고아 파일 정리용.
+        uploaded_names = [f.name for f in self.pending_files]
 
         self.ingestion_status = "processing"
         yield
 
         emp_no = self._emp_no
         upload_target = self.upload_target
+        dept_cd = None
+
+        async def _rollback_orphans() -> None:
+            """ingestion 실패로 색인되지 못한 이번 turn 의 S3 파일을 삭제.
+
+            S3 에는 올라가 있어 문서 목록엔 보이지만 색인 실패로 검색은 안 되는
+            '고아 파일'을 정리한다. best-effort (삭제 실패해도 본 흐름은 진행).
+            """
+            if not uploaded_names:
+                return
+            try:
+                from wellbot.services.knowledgebase.personal_kb_manager import (
+                    delete_files_from_personal_kb as _del_personal,
+                )
+                from wellbot.services.knowledgebase.team_kb_manager import (
+                    delete_files_from_team_kb as _del_team,
+                    get_dept_cd as _get_dept_cd2,
+                )
+                loop2 = _asyncio.get_running_loop()
+                if upload_target == "team":
+                    d = dept_cd or await loop2.run_in_executor(None, lambda: _get_dept_cd2(emp_no))
+                    if d:
+                        await loop2.run_in_executor(None, lambda: _del_team(d, uploaded_names))
+                else:
+                    await loop2.run_in_executor(None, lambda: _del_personal(emp_no, uploaded_names))
+                log.warning("KB ingestion 실패 → 업로드 파일 롤백 삭제: %s", uploaded_names)
+            except Exception:
+                log.exception("KB ingestion 실패 후 S3 롤백 삭제 실패")
 
         try:
-            import asyncio as _asyncio
             from wellbot.services.knowledgebase.personal_kb_manager import (
                 get_user_kb as _get_user_kb,
                 get_or_create_personal_kb as _get_or_create_personal_kb,
@@ -1246,15 +1280,19 @@ class ChatState(rx.State):
                 self.ingestion_status = "error"
                 self.ingestion_error = "문서 처리에 실패했습니다. 관리자에게 문의해주세요."
                 log.error("KB ingestion 실패: %s", status)
+                await _rollback_orphans()
 
         except TimeoutError:
             self.ingestion_status = "error"
             self.ingestion_error = "처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
             log.warning("KB ingestion 타임아웃")
+            # 타임아웃은 ingestion job 이 아직 진행 중일 수 있어 자동 롤백 삭제하지 않음
+            # (진행 중인 job 의 소스를 지우면 인덱스/job 이 깨질 수 있음).
         except Exception as e:
             self.ingestion_status = "error"
             self.ingestion_error = self._user_friendly_error(str(e))
             log.exception("KB ingestion 예외")
+            await _rollback_orphans()
         finally:
             self.pending_files = []
             self._pending_file_data = {}
