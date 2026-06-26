@@ -1218,13 +1218,19 @@ class ChatState(rx.State):
                 )
                 # 같은 데이터소스에 동시 ingestion 은 Bedrock 이 거부(ConflictException)
                 # 하므로, 다른 팀원이 처리 중이면 명확한 안내로 분기 (삭제 경로와 동일 정책).
+                # 단, 여기서 raise 하면 안 된다: 진행 중인 job 이 teams/{dept}/raw/ 전체를
+                # 스캔하므로 방금 올린 파일도 그 job 이 색인한다(=고아 아님). raise 하면
+                # 아래 except 의 _rollback_orphans 가 색인 예정 파일을 지워 유실/역-고아를
+                # 유발하므로, 롤백을 타지 않도록 안내만 하고 종료한다.
                 if await loop.run_in_executor(
                     None,
                     lambda: _in_progress(kb_info["kb_id"], kb_info["data_source_id"]),
                 ):
-                    raise RuntimeError(
+                    self.ingestion_status = "error"
+                    self.ingestion_error = (
                         "현재 다른 팀원이 문서를 처리 중입니다. 잠시 후 다시 시도해주세요."
                     )
+                    return
                 job_id = await loop.run_in_executor(
                     None, lambda: team_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
                 )
