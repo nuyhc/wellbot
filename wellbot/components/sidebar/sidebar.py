@@ -8,7 +8,6 @@ import reflex as rx
 
 from wellbot.components.icons import north_star_icon
 from wellbot.components.sidebar.conversation_list import conversation_list
-from wellbot.constants import REPORT_GENERATOR_URL
 from wellbot.state.auth_state import AuthState
 from wellbot.state.chat_state import ChatState
 from wellbot.state.ui_state import UIState
@@ -75,19 +74,6 @@ def _nav_item(
             "color": COLORS["text_primary"],
         },
         on_click=on_click,
-    )
-
-
-def _nav_section_label(label: str) -> rx.Component:
-    """펼친 상태 네비게이션 그룹 헤더 (대화 목록의 '최근 대화'와 동일 스타일)."""
-    return rx.text(
-        label,
-        size="1",
-        color=COLORS["category_text"],
-        weight="medium",
-        padding_x="0.75em",
-        padding_top="0.5em",
-        padding_bottom="0.25em",
     )
 
 
@@ -190,11 +176,6 @@ def _collapsed_nav() -> rx.Component:
             "채팅 검색",
         ),
         rx.separator(color_scheme="gray", size="4", margin_y="0.25em"),
-        _collapsed_icon(
-            "library",
-            rx.redirect(REPORT_GENERATOR_URL, is_external=True),
-            "보고서 문구 지원",
-        ),
         _collapsed_icon(
             "layers-plus",
             rx.redirect("/ai-services"),
@@ -508,12 +489,7 @@ def sidebar() -> rx.Component:
                             "채팅 검색",
                             UIState.open_search,
                         ),
-                        _nav_section_label("AI 도구"),
-                        _nav_item(
-                            "library",
-                            "보고서 문구 지원",
-                            rx.redirect(REPORT_GENERATOR_URL, is_external=True),
-                        ),
+                        rx.separator(color_scheme="gray", size="4", margin_y="0.25em"),
                         _nav_item(
                             "layers-plus",
                             "AI 서비스",

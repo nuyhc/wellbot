@@ -18,7 +18,7 @@ def _service_card(svc: AIServiceConfig) -> rx.Component:
     """
     ready = svc.enabled and bool(svc.route)
     on_click = (
-        rx.redirect(svc.route)
+        rx.redirect(svc.route, is_external=svc.external)
         if ready
         else rx.toast.info("준비 중인 서비스입니다.")
     )
