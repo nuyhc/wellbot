@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -103,17 +104,18 @@ def _stream_to_tempfile(upload: UploadFile, max_bytes: int) -> tuple[Path, int]:
     tmp_dir = Path(tempfile.gettempdir()) / "wellbot_upload"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_path = Path(
-        tempfile.mkstemp(
-            prefix="upload_",
-            suffix=Path(upload.filename or "").suffix,
-            dir=str(tmp_dir),
-        )[1]
+    fd, name = tempfile.mkstemp(
+        prefix="upload_",
+        suffix=Path(upload.filename or "").suffix,
+        dir=str(tmp_dir),
     )
+    tmp_path = Path(name)
 
     total = 0
     try:
-        with open(tmp_path, "wb") as out:
+        # mkstemp 가 연 fd 를 그대로 사용한다. 경로로 재오픈하면 Windows 에서는
+        # 해당 파일이 잠겨 있어 PermissionError[Errno 13] 가 발생한다.
+        with os.fdopen(fd, "wb") as out:
             while True:
                 chunk = upload.file.read(_STREAM_CHUNK)
                 if not chunk:
