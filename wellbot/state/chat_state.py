@@ -883,18 +883,21 @@ class ChatState(rx.State):
                 return
 
             # personal / team: 본인(또는 팀) prefix 의 raw/ + originals/ 병합
+            from wellbot.services.knowledgebase.kb_utils import (
+                get_originals_prefix,
+                raw_prefix,
+            )
             if tab == "personal":
-                raw_prefix = f"users/{emp_no}/raw/"
-                originals_prefix = f"users/{emp_no}/originals/"
+                raw_pfx = raw_prefix("personal", emp_no)
             else:  # team
-                raw_prefix = f"teams/{dept_cd}/raw/"
-                originals_prefix = f"teams/{dept_cd}/originals/"
+                raw_pfx = raw_prefix("team", dept_cd)
+            orig_pfx = get_originals_prefix(raw_pfx)
 
             raw_items = await loop.run_in_executor(
-                None, storage_service.list_objects_with_meta, raw_prefix
+                None, storage_service.list_objects_with_meta, raw_pfx
             )
             originals_items = await loop.run_in_executor(
-                None, storage_service.list_objects_with_meta, originals_prefix
+                None, storage_service.list_objects_with_meta, orig_pfx
             )
             # 동일 파일명이 양쪽에 있을 경우 originals/ 의 원본을 우선.
             # 분할본(_partN)은 원본(originals/)으로 대표되므로 목록에서 제외 →
@@ -1135,14 +1138,17 @@ class ChatState(rx.State):
             except Exception:
                 self.ingestion_status = "error"
                 self.ingestion_error = f"응답 파싱 실패: {result}"
+                self.pending_files = []
                 return
 
         if result is None or (isinstance(result, dict) and result.get("error")):
-            # 업로드 자체 실패는 엔드포인트(upload_files_to_kb, with_rollback=True)가
-            # 이미 S3 롤백을 수행하므로 여기선 별도 정리 불필요.
+            # 업로드 자체 실패: S3 는 엔드포인트(upload_files_to_kb, with_rollback=True)가
+            # 이미 롤백. 패널 대기 목록(pending_files)도 비워 stale 상태 방지
+            # (JS _kbSelectedFiles 는 이미 비워졌으므로, 재시도하려면 파일 재선택 필요).
             error_msg = result.get("error", "업로드 실패") if result else "업로드 응답 없음"
             self.ingestion_status = "error"
             self.ingestion_error = self._user_friendly_error(error_msg)
+            self.pending_files = []
             return
 
         import asyncio as _asyncio
@@ -1218,13 +1224,19 @@ class ChatState(rx.State):
                 )
                 # 같은 데이터소스에 동시 ingestion 은 Bedrock 이 거부(ConflictException)
                 # 하므로, 다른 팀원이 처리 중이면 명확한 안내로 분기 (삭제 경로와 동일 정책).
+                # 단, 여기서 raise 하면 안 된다: 진행 중인 job 이 teams/{dept}/raw/ 전체를
+                # 스캔하므로 방금 올린 파일도 그 job 이 색인한다(=고아 아님). raise 하면
+                # 아래 except 의 _rollback_orphans 가 색인 예정 파일을 지워 유실/역-고아를
+                # 유발하므로, 롤백을 타지 않도록 안내만 하고 종료한다.
                 if await loop.run_in_executor(
                     None,
                     lambda: _in_progress(kb_info["kb_id"], kb_info["data_source_id"]),
                 ):
-                    raise RuntimeError(
+                    self.ingestion_status = "error"
+                    self.ingestion_error = (
                         "현재 다른 팀원이 문서를 처리 중입니다. 잠시 후 다시 시도해주세요."
                     )
+                    return
                 job_id = await loop.run_in_executor(
                     None, lambda: team_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
                 )
