@@ -101,3 +101,123 @@ def build_upload_script(
   }}
 }})();
 """
+
+
+# ── KB 파일 업로드 JS (페이지 레벨 window-global 정의) ──────────────
+# openKbFilePicker: 브라우저 파일 선택 다이얼로그 → _kbPendingMeta 저장
+# uploadKbFilesToApi: _kbSelectedFiles 를 /api/upload_kb_files 로 fetch 전송
+#
+# build_upload_script 와 달리 파라미터 없는 정적 스크립트로, 컴포넌트 mount/unmount
+# 타이밍에 따른 ReferenceError 를 피하려고 pages/index.py 에서 rx.script 로
+# 페이지 레벨에 1회만 등록 (window 전역 함수로 항상 사용 가능).
+KB_UPLOAD_SCRIPT = """
+window._kbFileInput = null;
+window._kbSelectedFiles = [];
+window._kbPendingMeta = [];
+window._kbPickerCanceled = false;
+
+// 백엔드 base URL 결정 (build_upload_script 와 동일 규칙).
+// 기본: 상대 경로(Nginx/ALB 프록시). 로컬 포트 분리 개발환경에서만 origin 부착.
+window._kbBackendBase = async function() {
+    try {
+        var envResp = await fetch('/env.json');
+        var env = await envResp.json();
+        var pingUrl = env.PING || '';
+        if (pingUrl) {
+            var u = new URL(pingUrl);
+            var loc = window.location;
+            var isLocalDev = (
+                (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') &&
+                (u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+                u.port !== loc.port
+            );
+            if (isLocalDev) {
+                return loc.protocol + '//' + loc.hostname + ':' + u.port;
+            }
+        }
+    } catch (e) {}
+    return '';
+};
+
+// 패널에서 파일을 제거하면 누적 선택 배열에서도 빼야 같은 파일을 다시 고를 수 있다
+// (안 빼면 change 핸들러의 이름 dedup 에 걸려 재선택분이 유실되고 picker 가 멈춘 듯 보임).
+window.removeKbSelectedFile = function(name) {
+    window._kbSelectedFiles = (window._kbSelectedFiles || []).filter(function(f) {
+        return f.name !== name;
+    });
+};
+
+window.clearKbSelectedFiles = function() {
+    window._kbSelectedFiles = [];
+    window._kbPendingMeta = [];
+};
+
+window.openKbFilePicker = function() {
+    if (!window._kbFileInput) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.pdf,.docx,.pptx,.xlsx,.csv,.md,.txt,.json,.html,.htm';
+        input.style.display = 'none';
+        input.addEventListener('change', function() {
+            window._kbPickerCanceled = false;
+            if (input.files.length > 0) {
+                // 기존 선택분에 누적 (이름 기준 중복 제거) — 두 번 이상 선택해도 유지
+                var existing = window._kbSelectedFiles || [];
+                var existingNames = existing.map(function(f) { return f.name; });
+                var added = Array.from(input.files).filter(function(f) {
+                    return existingNames.indexOf(f.name) === -1;
+                });
+                window._kbSelectedFiles = existing.concat(added);
+                // 이번에 새로 추가된 파일들의 메타만 콜백으로 (패널에 추가)
+                window._kbPendingMeta = added.map(function(f) {
+                    return { name: f.name, size: f.size };
+                });
+            }
+            input.value = '';
+        });
+        // 'cancel' 이벤트로 다이얼로그 취소 감지 (Chrome 113+, Firefox 91+, Safari 16.4+)
+        input.addEventListener('cancel', function() {
+            window._kbPickerCanceled = true;
+        });
+        document.body.appendChild(input);
+        window._kbFileInput = input;
+    }
+    window._kbPickerCanceled = false;  // 호출 시점에 플래그 리셋
+    window._kbFileInput.click();
+};
+
+window.uploadKbFilesToApi = async function(empNo, uploadTarget, deptCd, allowedNames) {
+    var files = window._kbSelectedFiles || [];
+    // 패널에 남아있는 파일명만 업로드 (패널에서 제거한 파일은 제외)
+    if (allowedNames && allowedNames.length >= 0) {
+        files = files.filter(function(f) { return allowedNames.indexOf(f.name) !== -1; });
+    }
+    if (files.length === 0) return {uploaded: [], error: 'No files selected'};
+
+    var formData = new FormData();
+    for (var i = 0; i < files.length; i++) formData.append('files', files[i]);
+    formData.append('emp_no', empNo);
+    formData.append('upload_target', uploadTarget);
+    if (deptCd) formData.append('dept_cd', deptCd);
+
+    try {
+        // 로컬 포트 분리 개발환경에서는 백엔드(:8000)로 직접 보내야 라우트가 존재
+        // (상대 경로면 프론트 :3000 으로 가서 404). 프록시 환경에선 상대 경로.
+        var backendBase = await window._kbBackendBase();
+        var resp = await fetch(backendBase + '/api/upload_kb_files', {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+        });
+        var result = await resp.json().catch(function() { return {}; });
+        window._kbSelectedFiles = [];
+        if (!resp.ok) {
+            return {uploaded: [], error: (result && result.detail) ? result.detail : ('업로드 실패 (' + resp.status + ')')};
+        }
+        return result;
+    } catch (e) {
+        return {uploaded: [], error: e.message};
+    }
+};
+"""

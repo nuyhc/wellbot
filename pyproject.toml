@@ -21,6 +21,12 @@ dependencies = [
     # 벡터 검색
     "faiss-cpu>=1.8.0",
     "numpy>=1.26.0",
+    # 표 형식 데이터 처리 (kb_utils 의 tabular 분할 업로드)
+    "pandas>=2.2.0",
+    # HTML 파싱 (transform_lambda — Lambda layer 패키징 시에도 동일 버전 사용)
+    "beautifulsoup4>=4.12.0",
+    # 직접 import 명시 (fastapi transitive 에 의존하지 않도록)
+    "pydantic>=2.0.0",
     # HTTP (Upstage API 호출)
     "httpx>=0.27.0",
     # API (Reflex api_transformer 에 마운트)

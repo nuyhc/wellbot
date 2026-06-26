@@ -60,6 +60,8 @@ class Message(BaseModel):
     model_name: str = ""
     seq: int = 0
     attachments: list[AttachmentInfo] = []
+    # KB 검색 출처 문서 (assistant 메시지에만). 항목: {title, source_uri, source, ext, ranks, score}
+    source_docs: list[dict] = []
 
 
 class Conversation(BaseModel):
@@ -72,6 +74,40 @@ class Conversation(BaseModel):
     model_name: str = ""
     is_loaded: bool = False      # 메시지가 DB 에서 로드되었는지
     is_persisted: bool = False   # DB 에 저장된 대화인지
+
+
+# ── KB (Knowledge Base) 표시용 모델 ──
+class PendingFile(BaseModel):
+    """KB 업로드 대기 파일 정보."""
+
+    name: str
+    size: int
+    size_display: str
+
+
+class KbSharedFile(BaseModel):
+    """회사 KB 문서 목록 표시용 파일 정보 (폴더 안에 들어감)."""
+
+    file_name: str
+    uploaded_at: str
+    expires_at: str
+
+
+class KbSharedSubfolder(BaseModel):
+    """회사 KB 대분류 아래 소분류 단위 그룹.
+
+    sub_name 이 빈 문자열이면 대분류 raw/ 바로 밑(소분류 없는) 파일 묶음.
+    """
+
+    sub_name: str = ""
+    files: list[KbSharedFile] = []
+
+
+class KbSharedFolder(BaseModel):
+    """회사 KB 대분류 단위 그룹. 소분류(subfolders)로 2단계 트리 구성."""
+
+    folder_type: str
+    subfolders: list[KbSharedSubfolder] = []
 
 
 _MIME_LABELS: dict[str, str] = {

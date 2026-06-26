@@ -216,4 +216,5 @@ def chat_gnb() -> rx.Component:
         position="relative",
         z_index="10",
         flex_shrink="0",
+        on_click=ChatState.close_panel,
     )

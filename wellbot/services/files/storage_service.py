@@ -14,6 +14,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO, Iterator
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -34,6 +35,11 @@ def _get_client():
     """
     region = os.environ.get("S3_REGION", os.environ.get("AWS_REGION", "ap-northeast-2"))
     return boto3.client("s3", region_name=region)
+
+
+def get_client():
+    """공용 S3 클라이언트 (region 설정 포함). KB 등 다른 모듈에서 재사용"""
+    return _get_client()
 
 
 def _get_bucket() -> str:
@@ -144,10 +150,14 @@ def download_to_file(s3_key: str, target_path: Path) -> None:
     client.download_file(bucket, s3_key, str(target_path))
 
 
-def head_object(s3_key: str) -> dict | None:
-    """오브젝트 메타 조회. 존재하지 않으면 None"""
+def head_object(s3_key: str, bucket: str | None = None) -> dict | None:
+    """오브젝트 메타 조회. 존재하지 않으면 None.
+
+    bucket 미지정 시 기본 버킷(S3_BUCKET_NAME), KB 처럼 동적 버킷일 때 명시.
+    """
     client = _get_client()
-    bucket = _get_bucket()
+    if bucket is None:
+        bucket = _get_bucket()
     try:
         return client.head_object(Bucket=bucket, Key=s3_key)
     except ClientError as e:
@@ -159,6 +169,39 @@ def head_object(s3_key: str) -> dict | None:
 def object_exists(s3_key: str) -> bool:
     """오브젝트 존재 여부"""
     return head_object(s3_key) is not None
+
+
+def list_objects_with_meta(prefix: str, bucket: str | None = None) -> list[dict]:
+    """prefix 하위의 모든 오브젝트를 메타데이터와 함께 반환 (KB 문서 목록용).
+
+    Args:
+        prefix: S3 key prefix
+        bucket: S3 버킷명. 미지정 시 기본 버킷(S3_BUCKET_NAME) 사용,
+                shared KB 처럼 다른 버킷을 조회해야 할 때 명시
+
+    반환 항목: key, file_name, last_modified (datetime), size (bytes)
+    변환본(원본은 originals/ 에 따로 보관됨)은 제외: pptx → _pptx.json,
+    xlsx(Upstage) → _xlsx.md, pdf(Upstage) → _pdf.md
+    """
+    client = _get_client()
+    if bucket is None:
+        bucket = _get_bucket()
+
+    results: list[dict] = []
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []) or []:
+            key = obj["Key"]
+            file_name = key.split("/")[-1]
+            if file_name.endswith(("_pptx.json", "_xlsx.md", "_pdf.md")):
+                continue
+            results.append({
+                "key": key,
+                "file_name": file_name,
+                "last_modified": obj["LastModified"],
+                "size": obj["Size"],
+            })
+    return results
 
 
 def get_presigned_url(
@@ -182,6 +225,16 @@ def get_presigned_url(
         Params=params,
         ExpiresIn=expires_in,
     )
+
+
+def build_content_disposition_header(filename: str) -> str:
+    """다운로드용 Content-Disposition 헤더 값 (RFC 5987).
+
+    한글 등 비ASCII 파일명을 모든 브라우저에서 안전하게 처리하도록
+    filename 과 filename* 를 함께 인코딩.
+    """
+    encoded = quote(filename)
+    return f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{encoded}"
 
 
 def list_objects(prefix: str) -> list[str]:
@@ -231,10 +284,16 @@ def delete_prefix(prefix: str) -> int:
     return deleted
 
 
-def iter_download_stream(s3_key: str, chunk_size: int = 8192) -> Iterator[bytes]:
-    """S3 오브젝트를 청크 단위로 스트리밍 다운로드"""
+def iter_download_stream(
+    s3_key: str, chunk_size: int = 8192, bucket: str | None = None
+) -> Iterator[bytes]:
+    """S3 오브젝트를 청크 단위로 스트리밍 다운로드.
+
+    bucket 미지정 시 기본 버킷(S3_BUCKET_NAME), KB 처럼 동적 버킷일 때 명시.
+    """
     client = _get_client()
-    bucket = _get_bucket()
+    if bucket is None:
+        bucket = _get_bucket()
     response = client.get_object(Bucket=bucket, Key=s3_key)
     body = response["Body"]
     try:

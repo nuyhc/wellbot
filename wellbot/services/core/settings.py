@@ -5,6 +5,7 @@ config/models.yaml 에서 모델 정의를, config/prompts.yaml 에서 프롬프
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from wellbot.paths import (
     PROMPTS_DIR,
     PROMPTS_YAML,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -131,7 +134,14 @@ _config: AppConfig | None = None
 
 
 def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
-    """config/prompts.yaml 과 config/prompts/ 디렉토리에서 프롬프트 로드"""
+    """config/prompts.yaml 과 config/prompts/ 디렉토리에서 프롬프트 로드
+
+    프롬프트 파일 매핑 우선순위:
+        1. yaml 항목의 ``file`` 키 (예: file: general.md) — 권장.
+           파일명을 ASCII 로 유지해 배포 환경 locale/인코딩 영향을 차단.
+        2. 파일 stem == name 매칭 (레거시 폴백)
+    yaml 에 없는 *.md 파일은 stem 을 이름으로 하여 목록 끝에 추가.
+    """
     prompt_entries: list[dict[str, str] | str] = []
     default_prompt = "default"
     if PROMPTS_YAML.exists():
@@ -141,22 +151,41 @@ def _load_prompt_config() -> tuple[str, tuple[PromptTemplate, ...]]:
         prompt_entries = raw.get("prompts", [])
 
     desc_map: dict[str, str] = {}
+    file_map: dict[str, str] = {}
     order_names: list[str] = []
     for item in prompt_entries:
         if isinstance(item, dict):
             name = item.get("name", "")
             desc_map[name] = item.get("description", "")
+            if item.get("file"):
+                file_map[name] = item["file"]
             order_names.append(name)
         else:
             order_names.append(item)
 
     by_name: dict[str, PromptTemplate] = {}
+    consumed_files: set[str] = set()
     if PROMPTS_DIR.exists():
+        # 1순위: yaml 의 file 키로 명시 매핑
+        for name, fname in file_map.items():
+            fpath = PROMPTS_DIR / fname
+            if not fpath.exists():
+                log.warning("프롬프트 파일 없음: name=%s file=%s", name, fname)
+                continue
+            by_name[name] = PromptTemplate(
+                name=name,
+                content=fpath.read_text(encoding="utf-8").strip(),
+                description=desc_map.get(name, ""),
+            )
+            consumed_files.add(fpath.name)
+
+        # 2순위(폴백): stem == name 매칭 + yaml 에 없는 파일 추가
         for f in PROMPTS_DIR.glob("*.md"):
-            content = f.read_text(encoding="utf-8").strip()
+            if f.name in consumed_files or f.stem in by_name:
+                continue
             by_name[f.stem] = PromptTemplate(
                 name=f.stem,
-                content=content,
+                content=f.read_text(encoding="utf-8").strip(),
                 description=desc_map.get(f.stem, ""),
             )
 

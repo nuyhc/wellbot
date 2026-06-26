@@ -201,4 +201,5 @@ def message_area() -> rx.Component:
         padding_top="1em",
         position="relative",
         transition="all 0.2s ease",
+        on_click=ChatState.close_panel,
     )

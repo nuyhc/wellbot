@@ -1,9 +1,10 @@
 """Bedrock Converse tool use 핸들러.
 
-LLM 이 호출할 수 있는 도구(tool) 의 스펙을 정의하고 실제 실행을 담당.
+LLM 이 호출할 수 있는 도구(tool) 의 스펙을 정의하고, 실제 실행을 담당.
 
-구조:
-    - search_attachment: 첨부파일 의미 검색
+[Tool List]
+- search_attachment
+- kb_search
 """
 
 from __future__ import annotations
@@ -12,8 +13,9 @@ import json
 import logging
 from typing import Any
 
-from wellbot.constants import SEARCH_TOP_K
+from wellbot.constants import KB_SEARCH_TOP_K, SEARCH_TOP_K
 from wellbot.services.ai import embedding_service
+from wellbot.services.knowledgebase import retrieve as kb_retrieve
 
 log = logging.getLogger(__name__)
 
@@ -69,11 +71,50 @@ SEARCH_ATTACHMENT_TOOL: dict = {
 }
 
 
+KB_SEARCH_TOOL: dict = {
+    "toolSpec": {
+        "name": "kb_search",
+        "description": (
+            "지식베이스(Knowledge Base)에서 관련 문서를 의미 기반으로 검색합니다. "
+            "사용자가 KB 검색을 활성화한 상태에서는 다음과 같은 질문에 적극적으로 호출하세요: "
+            "사실 확인, 정책·규정·절차·매뉴얼, 사내 정보, 업무 데이터, 특정 문서나 자료의 내용. "
+            "사용자가 '지식베이스', '문서', '업로드' 등의 단어를 명시적으로 쓰지 않더라도 "
+            "내용상 KB에 있을 법한 정보면 검색합니다. "
+            "일반 지식만으로 답변하기 전에 먼저 검색해 KB 내용을 반영하세요. "
+            "검색을 생략해도 되는 경우는 인사·잡담, 단순 번역, 일반적인 코드 작성 등 "
+            "명백히 KB와 무관한 요청에 한정합니다. "
+            "검색 결과가 비어있으면 같은 의미의 쿼리를 변형해 재시도하지 말고, "
+            "사용자에게 못 찾았다고 안내하거나 보유한 일반 지식으로 답변하세요."
+        ),
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "검색할 내용을 설명하는 자연어 쿼리.",
+                    },
+                    # kb_scope 는 LLM 입력 스키마에서 제외. 검색 범위는 사용자의 UI
+                    # 선택(kb_modes)으로 결정되며 _tool_exec 에서 주입하므로, LLM 이
+                    # 추측해 넘겨도 항상 덮어써져 무의미.
+                    "top_k": {
+                        "type": "integer",
+                        "description": f"반환할 상위 결과 개수. 보통 생략하세요(기본 {KB_SEARCH_TOP_K}).",
+                    },
+                },
+                "required": ["query"],
+            }
+        },
+    }
+}
+
+
 def build_tool_config() -> dict:
-    """Bedrock Converse 의 toolConfig 파라미터 전체 반환"""
+    """Bedrock Converse 의 toolConfig 파라미터 전체를 반환"""
     return {
-        "tools": [SEARCH_ATTACHMENT_TOOL],
-        "toolChoice": {"auto": {}},  # auto: LLM 이 자율적으로 사용 여부 결정
+        "tools": [SEARCH_ATTACHMENT_TOOL, KB_SEARCH_TOOL],
+        # auto: LLM 이 자율적으로 사용 여부 결정
+        "toolChoice": {"auto": {}},
     }
 
 
@@ -121,11 +162,12 @@ def execute_tool(
     tool_name: str,
     tool_input: dict[str, Any],
     smry_id: str,
+    emp_no: str = "",
 ) -> dict:
-    """LLM 이 호출한 도구를 실제 실행하고 결과 반환.
+    """LLM 이 호출한 도구를 실제 실행하고 결과를 반환
 
     Returns:
-        Bedrock Converse toolResult.content 블록에 넣을 dict.
+        Bedrock Converse toolResult.content 블록에 넣을 dict
         성공: {"text": "...", "_meta": {...}}
         실패: {"text": "...", "status": "error"}
 
@@ -135,11 +177,22 @@ def execute_tool(
     try:
         if tool_name == "search_attachment":
             return _run_search_attachment(tool_input, smry_id)
+        if tool_name == "kb_search":
+            return _run_kb_search(tool_input, emp_no)
         log.warning("알 수 없는 tool 호출: %s", tool_name)
         return {"text": f"알 수 없는 도구입니다: {tool_name}", "status": "error"}
     except Exception as exc:
         log.exception("tool 실행 실패: %s", exc)
         return {"text": f"도구 실행 중 오류가 발생했습니다: {exc}", "status": "error"}
+
+
+def _parse_top_k(raw: Any, default: int, max_k: int) -> int:
+    """tool_input 의 top_k 를 정수로 변환 후 1..max_k 로 클램프. 변환 실패 시 default"""
+    try:
+        value = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, max_k))
 
 
 def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
@@ -164,12 +217,7 @@ def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
         n for n in raw_file_names if isinstance(n, str) and n.strip()
     ] or None
 
-    raw_top_k = tool_input.get("top_k")
-    try:
-        top_k = int(raw_top_k) if raw_top_k is not None else SEARCH_TOP_K
-    except (TypeError, ValueError):
-        top_k = SEARCH_TOP_K
-    top_k = max(1, min(top_k, 10))
+    top_k = _parse_top_k(tool_input.get("top_k"), SEARCH_TOP_K, 10)
 
     search_result = embedding_service.search_conversation(
         smry_id=smry_id,
@@ -203,8 +251,76 @@ def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
     }
 
 
+def _run_kb_search(tool_input: dict[str, Any], emp_no: str) -> dict:
+    """kb_search 실제 실행"""
+    query = (tool_input.get("query") or "").strip()
+    if not query:
+        return {"text": "query 파라미터가 비어있습니다.", "status": "error"}
+
+    kb_scope: list[str] = tool_input.get("kb_scope") or []
+
+    top_k = _parse_top_k(tool_input.get("top_k"), KB_SEARCH_TOP_K, KB_SEARCH_TOP_K)
+
+    retrieve_result = kb_retrieve(query=query, emp_no=emp_no, kb_modes=kb_scope, top_k=top_k)
+    results: list[dict] = retrieve_result.get("results", [])
+    context: str = retrieve_result.get("context", "")
+    sources_searched: dict = retrieve_result.get("sources_searched", {})
+
+    log.info(
+        "kb_search: emp_no=%s query=%r kb_scope=%s top_k=%d -> %d hits",
+        emp_no, query, kb_scope, top_k, len(results),
+    )
+
+    if not results:
+        text = (
+            "지식베이스 검색 결과 0건. 관련 내용이 존재하지 않을 가능성이 높습니다. "
+            "동일 의도의 쿼리로 재시도하지 말고, 사용자에게 '관련 내용을 찾지 못함'을 "
+            "안내하거나 보유한 일반 지식으로 답변하세요."
+        )
+        return {
+            "text": text,
+            "_meta": {
+                "result_count": 0,
+                "sources_searched": sources_searched,
+                "source_docs": [],
+            },
+        }
+
+    # source_uri 별로 그룹핑하여 같은 파일의 여러 청크는 한 항목으로 합치되,
+    # 각 청크의 rank 는 'ranks' 리스트에 모두 보관 (인용 마커 매칭용)
+    by_uri: dict[str, dict] = {}
+    for r in results:
+        uri = r["source_uri"]
+        if uri not in by_uri:
+            by_uri[uri] = {
+                "title": r["title"],
+                "source_uri": uri,
+                "source": r["source"],
+                "score": r["score"],  # 정렬 후 첫 값이 최고점
+                "ext": r["title"].rsplit(".", 1)[-1].lower() if "." in r["title"] else "",
+                "ranks": [],
+                # rank → page (PDF 청크). 인용 마커([N]) 매칭으로 '인용된 청크의 페이지'만 추려 표시.
+                # 표시용 페이지 집합은 rank_pages.values() 에서 파생하므로 별도 pages 리스트는 두지 않음.
+                "rank_pages": {},
+            }
+        rank = r.get("rank", 0)
+        by_uri[uri]["ranks"].append(rank)
+        page = r.get("page")
+        if page is not None:
+            by_uri[uri]["rank_pages"][rank] = page
+    source_docs = list(by_uri.values())
+    return {
+        "text": context,
+        "_meta": {
+            "result_count": len(results),
+            "sources_searched": sources_searched,
+            "source_docs": source_docs,
+        },
+    }
+
+
 def parse_tool_input(raw_json: str) -> dict:
-    """스트림에서 누적된 JSON 문자열 파싱. 실패 시 빈 dict"""
+    """스트림에서 누적된 JSON 문자열을 파싱. 실패 시 빈 dict"""
     try:
         data = json.loads(raw_json)
         return data if isinstance(data, dict) else {}

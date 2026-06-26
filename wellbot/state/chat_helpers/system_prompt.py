@@ -6,6 +6,8 @@ ChatState 의 send_message 가 LLM 호출 직전 system prompt 에
 
 from __future__ import annotations
 
+import textwrap
+
 from wellbot.services.files import attachment_service
 from wellbot.state.chat_models import mime_to_label
 
@@ -61,3 +63,38 @@ def augment_system_with_attachments(base_prompt: str, conv_id: str) -> str:
             extras.append("인덱스 미준비")
         lines.append(f"[#{a.file_no}] {a.file_name} ({', '.join(extras)})")
     return f"{base_prompt}\n\n" + "\n".join(lines)
+
+
+def augment_system_with_kb(base_prompt: str, kb_modes: list[str]) -> str:
+    """system prompt 에 KB 활성화 안내 append.
+
+    LLM 이 kb_search 도구를 능동적으로 호출하도록 어떤 KB 가 활성화됐는지
+    명시하고 사용 지침 + 인용 표기 규칙 제공.
+    """
+    if not kb_modes:
+        return base_prompt
+
+    _labels = {"shared": "회사 문서", "team": "팀 문서", "personal": "내 문서"}
+    active = ", ".join(_labels.get(m, m) for m in kb_modes)
+
+    block = textwrap.dedent(
+        f"""\
+        ## 지식베이스 검색 (사용자가 활성화함)
+        활성화된 KB: {active}
+
+        사용자가 이 대화에서 지식베이스 검색을 명시적으로 켜둔 상태입니다. 사용자는 답변에 KB 내용이 반영되기를 기대합니다.
+
+        **호출 원칙: 기본은 검색, 예외만 생략**
+        - 사실 확인, 정책·규정·절차·매뉴얼, 사내 정보, 업무 데이터, 특정 문서·자료의 내용을 다루는 질문 → **반드시 먼저 `kb_search` 호출**. 사용자가 '지식베이스', '문서', '업로드' 같은 단어를 쓰지 않더라도 내용상 KB에 있을 법한 정보면 검색합니다.
+        - 일반 지식만으로 답하기 전에 KB 검색을 먼저 시도하세요. KB에 더 정확하거나 최신 정보가 있을 수 있습니다.
+        - 검색을 생략해도 되는 경우: 인사·잡담, 단순 번역, 일반적인 코드 작성, 사용자가 직접 제공한 텍스트만으로 답할 수 있는 질문.
+        - 검색 결과가 비면 같은 의도의 쿼리로 재시도하지 말고 사용자에게 못 찾았음을 안내하거나 일반 지식으로 답변하세요.
+
+        **인용 표기**
+        - 검색 결과의 각 청크는 [1], [2] 번호로 식별됩니다.
+        - 답변 형식(문장·목록·표·단계 등)은 질문에 가장 적합하게 자유롭게 고르세요. 인용 때문에 굳이 줄글로 쓸 필요는 없습니다.
+        - 어떤 형식이든 청크를 활용한 부분에 해당 [N]을 붙이세요.
+        - [N]이 본문에 없는 청크는 '사용 안 함'으로 간주되어 출처에서 제외됩니다. 실제 활용한 청크는 빠짐없이 표기하세요.
+        - 여러 청크 참조는 [1, 3] 또는 [1][3] 모두 가능."""
+    )
+    return f"{base_prompt}\n\n{block}"

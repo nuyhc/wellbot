@@ -4,11 +4,18 @@ ChatGPT/Claude 스타일 입력 바.
 파일 첨부 버튼 + 텍스트 입력 + 모델 선택 팝오버 + 전송 버튼.
 
 모델 선택 팝오버: 모델 목록 + 확장 사고 토글을 하나의 드롭다운으로 통합.
+지식베이스 서브 메뉴: KB 검색 범위 / 파일 업로드 패널.
 """
 
 import reflex as rx
 
 from wellbot.components.chat.attachment_chip import attachment_chip_list
+from wellbot.components.chat.kb_panels import (
+    ingestion_banner,
+    kb_docs_panel,
+    kb_flyout,
+    kb_upload_panel,
+)
 from wellbot.state.chat_models import ModelInfo, PromptInfo
 from wellbot.state.chat_state import ChatState
 from wellbot.styles import COLORS, SPACING
@@ -59,7 +66,7 @@ def _model_item(model: ModelInfo) -> rx.Component:
 
 
 def _thinking_toggle_row() -> rx.Component:
-    """확장 사고 토글 행. 미지원 모델에서는 비활성화 상태로 표시"""
+    """확장 사고 토글 행. 미지원 모델에서는 비활성화 상태로 표시."""
     return rx.hstack(
         rx.vstack(
             rx.text(
@@ -154,8 +161,13 @@ def _plus_menu_popover() -> rx.Component:
                     "파일 추가",
                     on_click=ChatState.trigger_upload,
                 ),
-                _plus_menu_item("database-search", "지식베이스"),
-                _plus_menu_item("paintbrush", "스타일", on_click=ChatState.toggle_style_panel),
+                # 지식베이스: 오른쪽 flyout popover
+                kb_flyout(),
+                _plus_menu_item(
+                    "paintbrush",
+                    "스타일",
+                    on_click=ChatState.toggle_style_panel,
+                ),
                 spacing="1",
                 width="100%",
             ),
@@ -169,6 +181,8 @@ def _plus_menu_popover() -> rx.Component:
                 "box_shadow": "0 4px 24px rgba(0,0,0,0.25)",
             },
         ),
+        open=ChatState.show_plus_menu,
+        on_open_change=ChatState.on_plus_menu_open_change,
     )
 
 
@@ -193,8 +207,11 @@ def _model_popover() -> rx.Component:
         ),
         rx.popover.content(
             rx.vstack(
+                # 모델 목록
                 rx.foreach(ChatState.model_list, _model_item),
+                # 구분선
                 rx.separator(size="4", color=COLORS["border"]),
+                # 확장 사고 토글
                 _thinking_toggle_row(),
                 spacing="1",
                 width="100%",
@@ -317,15 +334,56 @@ def _processing_toast() -> rx.Component:
 
 
 def input_bar() -> rx.Component:
-    """하단 고정 메시지 입력 바."""
+    """하단 고정 메시지 입력 바.
+
+    참고: KB_UPLOAD_SCRIPT 의 rx.script 등록은 pages/index.py 에서 페이지 레벨로 수행.
+    """
     return rx.box(
-        rx.vstack(
-            _style_panel(),
-            _processing_toast(),
+        rx.hstack(
+            # 좌측 빈 공간 (클릭 시 패널 닫힘)
+            rx.box(
+                flex="1",
+                align_self="stretch",
+                on_click=ChatState.close_panel,
+            ),
+            rx.vstack(
+                # 스타일 선택 패널
+                _style_panel(),
+                # KB 문서 목록 패널
+                kb_docs_panel(),
+                # KB 파일 업로드 패널
+                kb_upload_panel(),
+                # Ingestion 진행 배너 (패널 닫혔을 때)
+                ingestion_banner(),
+                # 첨부 분석 중 안내 (입력 박스 위 pill)
+                _processing_toast(),
+            # KB 검색 범위 표시 (선택된 경우에만)
+            rx.cond(
+                ChatState.use_kb,
+                rx.box(
+                    rx.hstack(
+                        rx.icon("database", size=11, color=COLORS["text_secondary"]),
+                        rx.text(
+                            ChatState.kb_mode_display,
+                            size="1",
+                            color=COLORS["text_secondary"],
+                        ),
+                        align="center",
+                        gap="0.25em",
+                    ),
+                    width="100%",
+                    max_width=SPACING["message_max_width"],
+                    margin_x="auto",
+                    padding_x="0.75em",
+                ),
+            ),
+            # 입력 컨테이너 (둥근 박스)
             rx.box(
                 rx.form(
                     rx.vstack(
+                        # 첨부 파일 칩 영역
                         attachment_chip_list(),
+                        # 텍스트 입력 영역
                         rx.text_area(
                             value=ChatState.current_input,
                             placeholder="WellBot에게 질문하세요!",
@@ -351,12 +409,17 @@ def input_bar() -> rx.Component:
                                 },
                             },
                         ),
+                        # 하단: 첨부 + 모델 팝오버 + 전송
                         rx.hstack(
+                            # + 메뉴 팝오버
                             _plus_menu_popover(),
                             rx.spacer(),
+                            # 모델 선택 팝오버
                             _model_popover(),
+                            # 전송/중지 버튼
                             rx.cond(
                                 ChatState.is_loading,
+                                # 중지 버튼
                                 rx.icon_button(
                                     rx.icon("square", size=14),
                                     size="2",
@@ -369,6 +432,7 @@ def input_bar() -> rx.Component:
                                     _hover={"bg": COLORS["accent_hover"]},
                                     on_click=ChatState.stop_generation,
                                 ),
+                                # 전송 버튼
                                 rx.icon_button(
                                     rx.icon("arrow-up", size=16),
                                     size="2",
@@ -419,15 +483,29 @@ def input_bar() -> rx.Component:
                     "border_color": COLORS["accent_hover"],
                 },
             ),
-            rx.text(
-                "WellBot은 실수할 수 있습니다. WellBot의 출력 결과를 확인하고 활용하세요.",
-                size="1",
-                color=COLORS["text_secondary"],
-                text_align="center",
+                # 하단 안내 텍스트
+                rx.text(
+                    "WellBot은 실수할 수 있습니다. WellBot의 출력 결과를 확인하고 활용하세요.",
+                    size="1",
+                    color=COLORS["text_secondary"],
+                    text_align="center",
+                    on_click=ChatState.close_panel,
+                ),
+                spacing="2",
+                width=SPACING["message_max_width"],
+                max_width="100%",
+                align="center",
+                flex_shrink="1",
             ),
-            spacing="2",
+            # 우측 빈 공간 (클릭 시 패널 닫힘)
+            rx.box(
+                flex="1",
+                align_self="stretch",
+                on_click=ChatState.close_panel,
+            ),
             width="100%",
-            align="center",
+            align="stretch",
+            spacing="0",
         ),
         width="100%",
         padding_x="1em",

@@ -181,7 +181,7 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
         성공 여부
     """
     with get_session() as session:
-        record = session.query(Attachment).get(file_no)
+        record = session.get(Attachment, file_no)
         if not record:
             log.warning("process_attachment: file_no=%s 레코드 없음", file_no)
             return False
@@ -288,7 +288,7 @@ def _update_token_count(
         try:
             now = datetime.now(KST)
             with get_session() as session:
-                record = session.query(Attachment).get(file_no)
+                record = session.get(Attachment, file_no)
                 if not record:
                     return
                 record.atch_file_tokn_ecnt = total_tokens
@@ -329,7 +329,7 @@ def _smry_id_from_record(file_no: int) -> str:
             return row[0]
 
         # 2차: S3 prefix 에서 smry_id 추출 (폴백)
-        record = session.query(Attachment).get(file_no)
+        record = session.get(Attachment, file_no)
         if record and record.atch_file_url_addr:
             parts = record.atch_file_url_addr.strip("/").split("/")
             # prefix 구조: {KEY_PREFIX}/{emp_no}/{smry_id}/{file_no}/
@@ -418,7 +418,7 @@ def get_attachments_by_msg_id(msg_id: str) -> list[AttachmentRecord]:
 def get_attachment(file_no: int) -> AttachmentRecord | None:
     """단일 첨부파일 조회"""
     with get_session() as session:
-        record = session.query(Attachment).get(file_no)
+        record = session.get(Attachment, file_no)
         if not record:
             return None
         return AttachmentRecord(
@@ -433,16 +433,6 @@ def get_attachment(file_no: int) -> AttachmentRecord | None:
             mime=file_parser.guess_mime(record.atch_file_nm or ""),
         )
 
-
-def get_download_info(file_no: int) -> tuple[str, str] | None:
-    """첨부파일 다운로드용 presigned URL + 파일명 반환"""
-    att = get_attachment(file_no)
-    if not att or not att.s3_prefix:
-        return None
-    ext = Path(att.file_name).suffix.lower()
-    s3_key = f"{att.s3_prefix}original{ext}"
-    url = storage_service.get_presigned_url(s3_key, filename=att.file_name)
-    return url, att.file_name
 
 
 def download_original_bytes(file_no: int) -> bytes | None:
@@ -492,7 +482,7 @@ def verify_ownership(file_no: int, emp_no: str) -> bool:
             return True
 
         # 2차: 메시지 미저장 상태 (pending) — 등록자로 폴백
-        record = session.query(Attachment).get(file_no)
+        record = session.get(Attachment, file_no)
         if record and record.rgsr_id == emp_no[:20]:
             return True
 

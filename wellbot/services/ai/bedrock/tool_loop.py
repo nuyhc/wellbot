@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -21,6 +22,8 @@ def _call_signature(name: str, tool_input: dict) -> tuple:
 
     query 는 소문자 strip, file_ids·file_names 는 정렬 후 tuple 로 변환해
     순서가 달라도 동일 호출로 인식.
+    그 외 입력 키(kb_scope, top_k 등)도 정규화해 포함 —
+    다른 파라미터의 호출이 중복으로 오인 차단되는 것을 방지.
     """
     inp = tool_input or {}
     query = (inp.get("query") or "").strip().lower()
@@ -31,7 +34,15 @@ def _call_signature(name: str, tool_input: dict) -> tuple:
         for n in (inp.get("file_names") or [])
         if isinstance(n, str) and n.strip()
     ))
-    return (name, query, file_ids, file_names)
+    known = {"query", "file_ids", "file_names"}
+    try:
+        extra = json.dumps(
+            {k: v for k, v in inp.items() if k not in known},
+            sort_keys=True, ensure_ascii=False, default=str,
+        )
+    except (TypeError, ValueError):
+        extra = ""
+    return (name, query, file_ids, file_names, extra)
 
 
 def _strip_tool_result_meta(result_content: dict) -> dict:
@@ -153,7 +164,7 @@ async def astream_chat_with_tools(
             # 마지막 tool_use 응답을 history 에 추가하지 않고 폴백 진입 (한도 초과 상태이므로)
             async for ev in _emit_no_tool_fallback(
                 bedrock_messages, model, system_prompt, thinking_enabled,
-                reason=end_reason,
+                reason=end_reason, tool_config=tool_config,
             ):
                 yield ev
             return
@@ -208,7 +219,13 @@ async def astream_chat_with_tools(
                     "content": [sanitized],
                 }
             })
-            yield ("tool_result", {"name": name, "text": sanitized.get("text", "")})
+            # kb_search 결과의 출처 문서(_meta.source_docs)를 이벤트로 전파 →
+            # ChatState 가 스트리밍 중 누적해 인용 출처로 표시
+            source_docs = (meta or {}).get("source_docs", []) if name == "kb_search" else []
+            yield (
+                "tool_result",
+                {"name": name, "text": sanitized.get("text", ""), "source_docs": source_docs},
+            )
 
             log.info(
                 "tool_loop call: iter=%d name=%s sig=%s result_count=%d "
@@ -228,7 +245,7 @@ async def astream_chat_with_tools(
             )
             async for ev in _emit_no_tool_fallback(
                 bedrock_messages, model, system_prompt, thinking_enabled,
-                reason=end_reason,
+                reason=end_reason, tool_config=tool_config,
             ):
                 yield ev
             return
@@ -241,11 +258,17 @@ async def _emit_no_tool_fallback(
     thinking_enabled: bool,
     *,
     reason: str,
+    tool_config: dict,
 ):
     """tool 비활성 상태로 한 턴 추가 호출해 폴백 답변 전달.
 
     reason 에 따라 시스템 프롬프트에 가이던스를 추가해 LLM 이
     지금까지의 toolResult 로 최선의 답변을 생성하도록 유도.
+
+    주의: 누적된 history 에 toolUse/toolResult 블록이 있으면 Bedrock 은
+    toolConfig 가 반드시 정의돼 있기를 요구한다. 따라서 도구를 더하더라도
+    tool_config 를 그대로 전달하고, '도구를 호출하지 말라'는 가이던스로
+    호출을 통제한다 (tool_config=None 으로 보내면 ValidationException 발생).
     """
     if reason == "max_iter":
         guidance = (
@@ -266,28 +289,68 @@ async def _emit_no_tool_fallback(
         (system_prompt + "\n\n" if system_prompt else "") + guidance
     )
 
-    gen = stream_one_turn_iter(
-        bedrock_messages,
-        model,
-        augmented_system,
-        thinking_enabled,
-        tool_config=None,
-    )
-
+    # Bedrock toolChoice 에는 'none' 이 없어 가이던스로만 도구 호출을 억제하므로,
+    # 모델이 텍스트 없이 tool_use 로만 응답할 수 있다. 그 경우 합성 toolResult 로
+    # 추가 검색을 차단하고 다시 답변을 유도(소수 재시도) — 그래도 텍스트가 없을 때만
+    # 최종 안내 메시지로 폴백. (무한 루프 방지 위해 시도 횟수 제한)
+    _MAX_FALLBACK_TURNS = 2
     yielded_any_text = False
-    while True:
-        has_value, value = await asyncio.to_thread(safe_next, gen)
-        if not has_value:
-            break
-        event_type, payload = value  # type: ignore[misc]
-        if event_type == "text":
-            yielded_any_text = True
-            yield ("text", payload)
-        elif event_type == "thinking":
-            yield ("thinking", payload)
-        elif event_type == "usage":
-            yield ("usage", payload)
-        # tool 비활성 폴백 턴에서 tool_use·assistant_content·stop_reason 는 불필요
+    for _ in range(_MAX_FALLBACK_TURNS):
+        gen = stream_one_turn_iter(
+            bedrock_messages,
+            model,
+            augmented_system,
+            thinking_enabled,
+            tool_config=tool_config,
+        )
+        pending_tool_uses: list[dict] = []
+        assistant_blocks: list[dict] = []
+        stop_reason: str | None = None
+        while True:
+            has_value, value = await asyncio.to_thread(safe_next, gen)
+            if not has_value:
+                break
+            event_type, payload = value  # type: ignore[misc]
+            if event_type == "text":
+                yielded_any_text = True
+                yield ("text", payload)
+            elif event_type == "thinking":
+                yield ("thinking", payload)
+            elif event_type == "usage":
+                yield ("usage", payload)
+            elif event_type == "tool_use":
+                pending_tool_uses.append(payload)
+            elif event_type == "assistant_content":
+                assistant_blocks = payload
+            elif event_type == "stop_reason":
+                stop_reason = payload
+
+        if yielded_any_text:
+            return
+
+        # 텍스트 없이 tool_use 로만 끝난 경우: 도구 호출을 합성 결과로 막고 한 번 더 유도.
+        if stop_reason == "tool_use" and pending_tool_uses:
+            if assistant_blocks:
+                bedrock_messages.append(
+                    {"role": "assistant", "content": assistant_blocks}
+                )
+            synthetic = {
+                "text": (
+                    "추가 도구 호출은 차단되었습니다. 더 이상 검색하지 말고, "
+                    "지금까지의 결과로 바로 답변하거나 관련 내용을 찾지 못했음을 안내하세요."
+                ),
+            }
+            bedrock_messages.append({
+                "role": "user",
+                "content": [
+                    {"toolResult": {"toolUseId": tu.get("toolUseId", ""), "content": [synthetic]}}
+                    for tu in pending_tool_uses
+                ],
+            })
+            continue  # 다음 폴백 시도
+
+        # tool_use 도 텍스트도 없으면(end_turn 등) 더 시도하지 않음
+        break
 
     if not yielded_any_text:
         # 폴백 턴에서도 텍스트가 없으면 최소 안내 메시지 송출

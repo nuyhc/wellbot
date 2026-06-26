@@ -152,9 +152,29 @@ def stream_one_turn(
 
             elif "reasoningContent" in delta:
                 rc = delta["reasoningContent"]
-                rtxt = rc.get("text", "") if isinstance(rc, dict) else str(rc)
-                if rtxt:
-                    yield ("thinking", rtxt)
+                # tool use 재호출 시 reasoning 블록 보존을 위해 누적
+                # (thinking + tool use 조합에서 후속 turn 에 reasoningContent
+                #  블록을 signature 와 함께 그대로 되돌려줘야 함)
+                blk = blocks.get(idx)
+                if blk is None or (blk.get("type") == "text" and not blk.get("text")):
+                    blk = {"type": "reasoning", "text": "", "signature": ""}
+                    blocks[idx] = blk
+                if isinstance(rc, dict):
+                    rtxt = rc.get("text", "")
+                    if rtxt:
+                        if blk.get("type") == "reasoning":
+                            blk["text"] += rtxt
+                        yield ("thinking", rtxt)
+                    if rc.get("signature") and blk.get("type") == "reasoning":
+                        blk["signature"] += rc["signature"]
+                    if rc.get("redactedContent") and blk.get("type") == "reasoning":
+                        blk["redacted"] = (
+                            blk.get("redacted", b"") + rc["redactedContent"]
+                        )
+                else:
+                    rtxt = str(rc)
+                    if rtxt:
+                        yield ("thinking", rtxt)
 
             elif "toolUse" in delta:
                 tu_delta = delta["toolUse"]
@@ -194,7 +214,25 @@ def stream_one_turn(
     assistant_blocks: list[dict] = []
     for i in ordered_indices:
         blk = blocks[i]
-        if blk.get("type") == "text" and blk.get("text"):
+        if blk.get("type") == "reasoning":
+            # thinking 활성 + tool use 시 reasoning 블록을 보존하지 않으면
+            # 다음 turn converse 호출에서 ValidationException 발생
+            if blk.get("redacted"):
+                assistant_blocks.append(
+                    {"reasoningContent": {"redactedContent": blk["redacted"]}}
+                )
+            elif blk.get("text"):
+                assistant_blocks.append(
+                    {
+                        "reasoningContent": {
+                            "reasoningText": {
+                                "text": blk["text"],
+                                "signature": blk.get("signature", ""),
+                            }
+                        }
+                    }
+                )
+        elif blk.get("type") == "text" and blk.get("text"):
             assistant_blocks.append({"text": blk["text"]})
         elif blk.get("type") == "tool_use":
             assistant_blocks.append(
