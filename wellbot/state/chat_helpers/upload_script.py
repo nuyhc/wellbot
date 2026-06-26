@@ -221,3 +221,110 @@ window.uploadKbFilesToApi = async function(empNo, uploadTarget, deptCd, allowedN
     }
 };
 """
+
+
+# ── 클립보드 이미지 붙여넣기 업로드 JS (페이지 레벨 window-global 정의) ──
+# 채팅 입력(textarea)에서 캡쳐 이미지를 Ctrl+V 로 붙여넣으면 첨부로 업로드.
+#
+# 동작:
+#   1. document paste 리스너가 textarea 대상 이미지 File 을 window._pastedFiles 에 적재
+#      (클립보드 이미지는 이름이 없을 수 있어 'pasted-*.png' 식 파일명을 부여)
+#   2. 숨김 버튼(#wellbot-paste-trigger) 클릭 → ChatState.handle_paste_upload 가
+#      대화 영속화 + conv_id/msg_id 발급 후 wellbotUploadPasted 를 call_script 로 호출
+#   3. wellbotUploadPasted 가 window._pastedFiles 를 /api/upload 로 전송
+#      (build_upload_script 와 동일한 backendBase/한도/에러 규칙)
+PASTE_UPLOAD_SCRIPT = """
+window._pastedFiles = window._pastedFiles || [];
+
+// 백엔드 base URL 결정 (build_upload_script / _kbBackendBase 와 동일 규칙).
+window._wellbotBackendBase = async function() {
+    try {
+        var envResp = await fetch('/env.json');
+        var env = await envResp.json();
+        var pingUrl = env.PING || '';
+        if (pingUrl) {
+            var u = new URL(pingUrl);
+            var loc = window.location;
+            var isLocalDev = (
+                (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1') &&
+                (u.hostname === 'localhost' || u.hostname === '127.0.0.1') &&
+                u.port !== loc.port
+            );
+            if (isLocalDev) {
+                return loc.protocol + '//' + loc.hostname + ':' + u.port;
+            }
+        }
+    } catch (e) {}
+    return '';
+};
+
+// 붙여넣은 이미지들(window._pastedFiles)을 /api/upload 로 전송.
+// 백엔드(ChatState.handle_paste_upload)가 conv_id/msg_id 발급 후 호출한다.
+window.wellbotUploadPasted = async function(convId, msgId, maxMb, maxPerMsg, currentCount) {
+    var files = window._pastedFiles || [];
+    window._pastedFiles = [];
+    if (!files.length) return;
+    if (files.length + currentCount > maxPerMsg) {
+        alert('메시지당 최대 ' + maxPerMsg + '개까지 첨부 가능합니다.');
+        return;
+    }
+    var maxBytes = maxMb * 1024 * 1024;
+    var backendBase = await window._wellbotBackendBase();
+    var errors = [];
+    for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        if (file.size > maxBytes) {
+            errors.push("'" + file.name + "' 파일이 " + maxMb + 'MB 를 초과합니다.');
+            continue;
+        }
+        var form = new FormData();
+        form.append('file', file);
+        form.append('conversation_id', convId);
+        form.append('message_id', msgId);
+        try {
+            var resp = await fetch(backendBase + '/api/upload', {
+                method: 'POST',
+                body: form,
+                credentials: 'include',
+            });
+            if (!resp.ok) {
+                var data = await resp.json().catch(function() { return {}; });
+                errors.push("'" + file.name + "': " + (data.detail || resp.status));
+            }
+        } catch (err) {
+            errors.push("'" + file.name + "': " + (err && err.message ? err.message : err));
+        }
+    }
+    if (errors.length) alert(errors.join('\\n'));
+};
+
+// SPA 라우팅으로 스크립트가 재실행돼도 리스너 중복 등록 방지
+if (!window._wellbotPasteBound) {
+    window._wellbotPasteBound = true;
+    document.addEventListener('paste', function(e) {
+        var target = e.target;
+        // 채팅 입력(textarea)에 포커스가 있을 때만 가로챈다
+        if (!target || target.tagName !== 'TEXTAREA') return;
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        var files = [];
+        for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            if (it.kind === 'file' && it.type && it.type.indexOf('image/') === 0) {
+                var f = it.getAsFile();
+                if (!f) continue;
+                // 클립보드 이미지는 이름/확장자가 없을 수 있어 부여 (서버는 확장자로 검증)
+                if (!f.name || f.name.indexOf('.') === -1) {
+                    var ext = (it.type.split('/')[1] || 'png').split('+')[0];
+                    f = new File([f], 'pasted-' + Date.now() + '-' + (i + 1) + '.' + ext, {type: it.type});
+                }
+                files.push(f);
+            }
+        }
+        if (!files.length) return;
+        e.preventDefault();
+        window._pastedFiles = files;
+        var trigger = document.getElementById('wellbot-paste-trigger');
+        if (trigger) trigger.click();
+    });
+}
+"""

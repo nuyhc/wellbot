@@ -1405,13 +1405,12 @@ class ChatState(rx.State):
             await asyncio.sleep(interval)
             interval = min(3.0, interval + 0.5)
 
-    def trigger_upload(self) -> rx.event.EventSpec | None:
-        """파일 선택 다이얼로그를 열고 업로드를 트리거.
+    def _prepare_attachment_upload(self) -> tuple[str, str] | None:
+        """첨부 업로드 공통 준비: 대화 영속화 + 한도 체크 + msg_id 발급.
 
-        흐름:
-            1. 대화가 미저장 상태라면 DB 에 먼저 저장
-            2. JS 가 파일 선택 + fetch POST /api/upload 실행
-            3. poll_attachments 백그라운드 이벤트가 DB 를 폴링해 UI 갱신
+        Returns:
+            (conv_id, msg_id): 준비 완료
+            None: 실패 (attachment_error 설정됨)
         """
         self.attachment_error = ""
         conv_id = self._ensure_conversation_persisted()
@@ -1428,7 +1427,20 @@ class ChatState(rx.State):
         # 첨부파일-메시지 매핑용 msg_id 를 미리 생성 후 send_message 에서 재사용
         if not self._pending_msg_id:
             self._pending_msg_id = uuid.uuid4().hex[:50]
-        msg_id = self._pending_msg_id
+        return conv_id, self._pending_msg_id
+
+    def trigger_upload(self) -> rx.event.EventSpec | None:
+        """파일 선택 다이얼로그를 열고 업로드를 트리거.
+
+        흐름:
+            1. 대화가 미저장 상태라면 DB 에 먼저 저장
+            2. JS 가 파일 선택 + fetch POST /api/upload 실행
+            3. poll_attachments 백그라운드 이벤트가 DB 를 폴링해 UI 갱신
+        """
+        prep = self._prepare_attachment_upload()
+        if prep is None:
+            return None
+        conv_id, msg_id = prep
 
         script = build_upload_script(
             accept=self.accepted_file_extensions,
@@ -1439,6 +1451,34 @@ class ChatState(rx.State):
             current_count=len(self.pending_attachments),
         )
         # JS 실행 + Python 폴링을 함께 반환
+        return [
+            rx.call_script(script),
+            ChatState.poll_attachments,
+        ]
+
+    def handle_paste_upload(self) -> rx.event.EventSpec | list | None:
+        """클립보드 이미지 붙여넣기 업로드 (JS paste 리스너가 트리거).
+
+        JS 가 붙여넣은 이미지를 window._pastedFiles 에 담고 숨김 버튼을 눌러
+        호출한다. 여기서 conv_id/msg_id 를 발급한 뒤, JS(wellbotUploadPasted)가
+        그 파일들을 /api/upload 로 전송하도록 call_script 를 돌려준다.
+        """
+        # vision 미지원 모델에서는 이미지 첨부 의미가 없으므로 차단 (파일 선택 picker 와 동일)
+        if not self.model_supports_vision:
+            self.attachment_error = "현재 모델은 이미지 입력을 지원하지 않습니다."
+            return rx.call_script("window._pastedFiles = [];")
+
+        prep = self._prepare_attachment_upload()
+        if prep is None:
+            # 한도 초과 등으로 중단 시 적재된 클립보드 파일을 비워 다음 붙여넣기와 섞이지 않게 함
+            return rx.call_script("window._pastedFiles = [];")
+        conv_id, msg_id = prep
+
+        script = (
+            f"window.wellbotUploadPasted("
+            f"'{conv_id}', '{msg_id}', {FILE_MAX_SIZE_MB}, "
+            f"{FILE_MAX_PER_MESSAGE}, {len(self.pending_attachments)})"
+        )
         return [
             rx.call_script(script),
             ChatState.poll_attachments,
