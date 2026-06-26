@@ -277,6 +277,15 @@ class ChatState(rx.State):
         return len(self.sorted_conversations) > 0
 
     @rx.var
+    def on_chat_page(self) -> bool:
+        """현재 채팅 페이지(홈, '/')에 있는지 여부.
+
+        /ai-services 등 다른 페이지에서는 사이드바 대화 항목을
+        하이라이트하지 않기 위해 사용.
+        """
+        return self.router.url.path == "/"
+
+    @rx.var
     def model_names(self) -> list[str]:
         """설정에서 읽은 사용 가능한 모델 이름 목록"""
         try:
