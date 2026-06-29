@@ -1137,153 +1137,60 @@ class ChatState(rx.State):
 
         emp_no = self._emp_no
         upload_target = self.upload_target
-        dept_cd = None
-
-        async def _rollback_orphans() -> None:
-            """ingestion 실패로 색인되지 못한 이번 turn 의 S3 파일을 삭제.
-
-            S3 에는 올라가 있어 문서 목록엔 보이지만 색인 실패로 검색은 안 되는
-            '고아 파일'을 정리한다. best-effort (삭제 실패해도 본 흐름은 진행).
-            """
-            if not uploaded_names:
-                return
-            try:
-                from wellbot.services.knowledgebase.personal_kb_manager import (
-                    delete_files_from_personal_kb as _del_personal,
-                )
-                from wellbot.services.knowledgebase.team_kb_manager import (
-                    delete_files_from_team_kb as _del_team,
-                    get_dept_cd as _get_dept_cd2,
-                )
-                loop2 = _asyncio.get_running_loop()
-                if upload_target == "team":
-                    d = dept_cd or await loop2.run_in_executor(None, lambda: _get_dept_cd2(emp_no))
-                    if d:
-                        await loop2.run_in_executor(None, lambda: _del_team(d, uploaded_names))
-                else:
-                    await loop2.run_in_executor(None, lambda: _del_personal(emp_no, uploaded_names))
-                log.warning("KB ingestion 실패 → 업로드 파일 롤백 삭제: %s", uploaded_names)
-            except Exception:
-                log.exception("KB ingestion 실패 후 S3 롤백 삭제 실패")
 
         try:
-            from wellbot.services.knowledgebase.personal_kb_manager import (
-                get_user_kb as _get_user_kb,
-                get_or_create_personal_kb as _get_or_create_personal_kb,
-                _insert_user_kb,
-                start_ingestion as personal_start_ingestion,
-            )
-            from wellbot.services.knowledgebase.team_kb_manager import (
-                get_or_create_team_kb as _get_or_create_team_kb,
-                start_ingestion as team_start_ingestion,
-            )
-            from wellbot.services.knowledgebase.kb_utils import poll_ingestion_status as _poll
+            # 축2(변환+KB확보+ingest+poll+롤백)는 kb_ingest_service 가 담당. blocking 이라
+            # run_in_executor 로 한 번에 실행하고, 여기선 결과를 UI 상태로 매핑만 한다.
+            from wellbot.services.knowledgebase.kb_ingest_service import ingest_staged
 
             loop = _asyncio.get_running_loop()
+            outcome = await loop.run_in_executor(
+                None, lambda: ingest_staged(upload_target, emp_no, uploaded_names)
+            )
 
-            if upload_target == "team":
-                from wellbot.services.knowledgebase.team_kb_manager import (
-                    get_dept_cd as _get_dept_cd,
+            if outcome.busy:
+                self.ingestion_status = "error"
+                self.ingestion_error = (
+                    "현재 다른 팀원이 문서를 처리 중입니다. 잠시 후 다시 시도해주세요."
                 )
-                from wellbot.services.knowledgebase.kb_utils import (
-                    is_ingestion_in_progress as _in_progress,
-                )
+                return
 
-                # 업로드(kb_upload.py)와 동일하게 dept_cd 는 클라이언트 상태가 아니라
-                # emp_no 로 서버에서 도출 — 업로드 prefix(서버 도출)와 ingest 대상 KB 가
-                # 어긋나 방금 올린 파일이 색인되지 않는 desync 를 방지.
-                dept_cd = await loop.run_in_executor(None, lambda: _get_dept_cd(emp_no))
-                if not dept_cd:
-                    raise ValueError("소속 팀 정보가 없습니다.")
-                kb_info = await loop.run_in_executor(
-                    None, lambda: _get_or_create_team_kb(emp_no, dept_cd)
-                )
-                # 같은 데이터소스에 동시 ingestion 은 Bedrock 이 거부(ConflictException)
-                # 하므로, 다른 팀원이 처리 중이면 명확한 안내로 분기 (삭제 경로와 동일 정책).
-                # 단, 여기서 raise 하면 안 된다: 진행 중인 job 이 teams/{dept}/raw/ 전체를
-                # 스캔하므로 방금 올린 파일도 그 job 이 색인한다(=고아 아님). raise 하면
-                # 아래 except 의 _rollback_orphans 가 색인 예정 파일을 지워 유실/역-고아를
-                # 유발하므로, 롤백을 타지 않도록 안내만 하고 종료한다.
-                if await loop.run_in_executor(
-                    None,
-                    lambda: _in_progress(kb_info["kb_id"], kb_info["data_source_id"]),
-                ):
-                    self.ingestion_status = "error"
-                    self.ingestion_error = (
-                        "현재 다른 팀원이 문서를 처리 중입니다. 잠시 후 다시 시도해주세요."
-                    )
-                    return
-                job_id = await loop.run_in_executor(
-                    None, lambda: team_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
-                )
-                status = await loop.run_in_executor(
-                    None, lambda: _poll(kb_info["kb_id"], kb_info["data_source_id"], job_id)
-                )
-            else:
-                is_first = await loop.run_in_executor(
-                    None, lambda: _get_user_kb(emp_no) is None
-                )
-                kb_info = await loop.run_in_executor(
-                    None, lambda: _get_or_create_personal_kb(emp_no)
-                )
-                job_id = await loop.run_in_executor(
-                    None, lambda: personal_start_ingestion(kb_info["kb_id"], kb_info["data_source_id"])
-                )
-                status = await loop.run_in_executor(
-                    None, lambda: _poll(kb_info["kb_id"], kb_info["data_source_id"], job_id)
-                )
-                # 부분 실패(COMPLETE_WITH_ERRORS)도 KB 는 Bedrock 에 생성되고 일부
-                # 문서가 색인되므로 DB 에 등록. 그래야 아래에서 personal_kb_exists 를
-                # True 로 켠 것과 DB 가 일치하고, 다음 on_load 에서 그 값이 False 로
-                # 뒤집혀 retrieve 가 개인 KB 를 조용히 건너뛰는 desync 를 방지.
-                if is_first and status.startswith("COMPLETE"):
-                    await loop.run_in_executor(
-                        None, lambda: _insert_user_kb(emp_no, kb_info["kb_id"], kb_info["data_source_id"])
-                    )
-
+            status = outcome.status
             if status == "COMPLETE":
                 self.ingestion_status = "ready"
                 self.ingestion_error = ""
-                if upload_target == "team":
-                    self.team_kb_exists = True
-                    if "team" not in self.kb_modes:
-                        self.kb_modes = self.kb_modes + ["team"]
-                else:
-                    self.personal_kb_exists = True
-                    if "personal" not in self.kb_modes:
-                        self.kb_modes = self.kb_modes + ["personal"]
+                self._mark_kb_exists(upload_target)
             elif status.startswith("COMPLETE_WITH_ERRORS"):
                 self.ingestion_status = "ready"
                 self.ingestion_error = "일부 문서 처리에 실패했습니다. 관리자에게 문의해주세요."
                 log.warning("KB ingestion 부분 실패: %s", status)
-                if upload_target == "team":
-                    self.team_kb_exists = True
-                    if "team" not in self.kb_modes:
-                        self.kb_modes = self.kb_modes + ["team"]
-                else:
-                    self.personal_kb_exists = True
-                    if "personal" not in self.kb_modes:
-                        self.kb_modes = self.kb_modes + ["personal"]
+                self._mark_kb_exists(upload_target)
             else:
                 self.ingestion_status = "error"
                 self.ingestion_error = "문서 처리에 실패했습니다. 관리자에게 문의해주세요."
-                log.error("KB ingestion 실패: %s", status)
-                await _rollback_orphans()
 
         except TimeoutError:
             self.ingestion_status = "error"
             self.ingestion_error = "처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요."
             log.warning("KB ingestion 타임아웃")
-            # 타임아웃은 ingestion job 이 아직 진행 중일 수 있어 자동 롤백 삭제하지 않음
-            # (진행 중인 job 의 소스를 지우면 인덱스/job 이 깨질 수 있음).
         except Exception as e:
             self.ingestion_status = "error"
             self.ingestion_error = self._user_friendly_error(str(e))
             log.exception("KB ingestion 예외")
-            await _rollback_orphans()
         finally:
             self.pending_files = []
             self._pending_file_data = {}
+
+    def _mark_kb_exists(self, upload_target: str) -> None:
+        """ingestion 성공 후 해당 scope 의 KB 존재 플래그 + kb_modes 갱신."""
+        if upload_target == "team":
+            self.team_kb_exists = True
+            if "team" not in self.kb_modes:
+                self.kb_modes = self.kb_modes + ["team"]
+        else:
+            self.personal_kb_exists = True
+            if "personal" not in self.kb_modes:
+                self.kb_modes = self.kb_modes + ["personal"]
 
     # ── 첨부파일 ──
 
