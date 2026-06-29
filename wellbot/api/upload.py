@@ -42,6 +42,7 @@ from wellbot.constants import (
     UPSTAGE_SUPPORTED_EXTS,
 )
 from wellbot.logger import log_context
+from wellbot.paths import wellbot_temp_dir
 from wellbot.services.auth import auth_service
 from wellbot.services.files import attachment_service, file_parser
 
@@ -101,8 +102,7 @@ def _stream_to_tempfile(upload: UploadFile, max_bytes: int) -> tuple[Path, int]:
     Returns:
         (임시파일 경로, 실제 바이트 크기)
     """
-    tmp_dir = Path(tempfile.gettempdir()) / "wellbot_upload"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = wellbot_temp_dir("wellbot_upload")
 
     fd, name = tempfile.mkstemp(
         prefix="upload_",
