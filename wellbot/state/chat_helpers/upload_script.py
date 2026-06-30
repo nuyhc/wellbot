@@ -348,3 +348,65 @@ if (!window._wellbotPasteBound) {
     });
 }
 """
+
+
+# ── 클라이언트 오류 비콘 ────────────────────────────────────────────
+# 브라우저에서만 발생해 서버 로그에 안 잡히는 실패(JS 예외/unhandled rejection 등 —
+# 웹/Reflex/websocket 계층)를 /api/client_log 로 전송한다. 백엔드는 기존 미들웨어로
+# request_id 를 부여해 구조화 로그(dev=콘솔/prod=wellbot.log)에 남긴다.
+# - 백엔드 base 는 기존 _wellbotBackendBase 재사용(로컬 포트 분리 환경 대응).
+# - 실패만 전송(성공 비콘 없음). 동일 메시지는 5초 throttle, 비콘 자체 오류는 무시(재귀 방지).
+CLIENT_LOG_SCRIPT = """
+(function() {
+    if (window.__wellbotClientLogInstalled) return;  // 1회만 설치
+    window.__wellbotClientLogInstalled = true;
+
+    var lastSent = {};
+    function send(kind, message, detail) {
+        try {
+            if (!message) return;
+            var key = kind + '|' + message;
+            var now = Date.now();
+            if (lastSent[key] && (now - lastSent[key]) < 5000) return;  // 동일건 throttle
+            lastSent[key] = now;
+            var payload = {
+                kind: kind,
+                message: String(message).slice(0, 500),
+                detail: detail ? String(detail).slice(0, 2000) : '',
+                url: (window.location ? window.location.href : '')
+            };
+            var doSend = function(base) {
+                try {
+                    fetch((base || '') + '/api/client_log', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload),
+                        credentials: 'include',
+                        keepalive: true
+                    }).catch(function() {});  // 전송 실패는 무시(재귀 방지)
+                } catch (e) {}
+            };
+            if (typeof window._wellbotBackendBase === 'function') {
+                window._wellbotBackendBase().then(doSend).catch(function() { doSend(''); });
+            } else {
+                doSend('');
+            }
+        } catch (e) { /* 비콘 자체 오류는 삼킨다 */ }
+    }
+
+    window.addEventListener('error', function(e) {
+        var msg = (e && e.message) ? e.message : 'script error';
+        var detail = '';
+        if (e && e.error && e.error.stack) detail = e.error.stack;
+        else if (e && e.filename) detail = e.filename + ':' + (e.lineno || '') + ':' + (e.colno || '');
+        send('error', msg, detail);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        var r = e ? e.reason : null;
+        var msg = (r && r.message) ? r.message : (typeof r === 'string' ? r : 'unhandled rejection');
+        var detail = (r && r.stack) ? r.stack : '';
+        send('unhandledrejection', msg, detail);
+    });
+})();
+"""
+
