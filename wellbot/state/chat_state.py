@@ -981,7 +981,20 @@ class ChatState(rx.State):
         ingestion/delete 의 'ready'·'error' 종료 메시지도 함께 정리.
         진행 중인 'processing' 상태는 유지하여 알림 끊김을 방지.
         회사 KB 폴더 펼침 상태는 패널 닫힐 때 초기화 (다음 열림에서 깔끔한 상태로).
+
+        주의: 이 핸들러는 메시지 영역 전체(message_area)의 on_click 으로도 걸려 있어,
+        답변 텍스트를 드래그 선택하고 마우스를 놓는 click 에서도 호출된다. 닫을 패널이
+        없는데도 state 를 재할당하면 빈 delta 가 전송돼 마크다운이 re-render 되고
+        브라우저의 텍스트 선택이 풀린다. 변경할 게 없으면 early-return 하여 막는다.
         """
+        if not (
+            self.active_panel
+            or self.show_style_panel
+            or self.expanded_kb_folders
+            or self.ingestion_status in ("ready", "error")
+            or self.kb_delete_status in ("ready", "error")
+        ):
+            return
         self.active_panel = ""
         self.show_style_panel = False
         self.expanded_kb_folders = []
