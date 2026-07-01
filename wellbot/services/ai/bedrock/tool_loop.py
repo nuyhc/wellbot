@@ -8,8 +8,8 @@ import logging
 from typing import Any
 
 from wellbot.services.ai.bedrock.converse import (
+    adrain_generator,
     build_messages,
-    safe_next,
     stream_one_turn_iter,
 )
 from wellbot.services.core.settings import ModelConfig
@@ -112,23 +112,19 @@ async def astream_chat_with_tools(
     end_reason = "end_turn"
 
     for iteration in range(max_iterations + 1):
-        gen = stream_one_turn_iter(
-            bedrock_messages,
-            model,
-            system_prompt,
-            thinking_enabled,
-            tool_config,
-        )
         pending_tool_uses: list[dict] = []
         assistant_blocks: list[dict] = []
         stop_reason: str | None = None
 
-        while True:
-            has_value, value = await asyncio.to_thread(safe_next, gen)
-            if not has_value:
-                break
-            event_type, payload = value  # type: ignore[misc]
-
+        async for event_type, payload in adrain_generator(
+            lambda: stream_one_turn_iter(
+                bedrock_messages,
+                model,
+                system_prompt,
+                thinking_enabled,
+                tool_config,
+            )
+        ):
             if event_type == "text":
                 yield ("text", payload)
             elif event_type == "thinking":
@@ -296,21 +292,18 @@ async def _emit_no_tool_fallback(
     _MAX_FALLBACK_TURNS = 2
     yielded_any_text = False
     for _ in range(_MAX_FALLBACK_TURNS):
-        gen = stream_one_turn_iter(
-            bedrock_messages,
-            model,
-            augmented_system,
-            thinking_enabled,
-            tool_config=tool_config,
-        )
         pending_tool_uses: list[dict] = []
         assistant_blocks: list[dict] = []
         stop_reason: str | None = None
-        while True:
-            has_value, value = await asyncio.to_thread(safe_next, gen)
-            if not has_value:
-                break
-            event_type, payload = value  # type: ignore[misc]
+        async for event_type, payload in adrain_generator(
+            lambda: stream_one_turn_iter(
+                bedrock_messages,
+                model,
+                augmented_system,
+                thinking_enabled,
+                tool_config=tool_config,
+            )
+        ):
             if event_type == "text":
                 yielded_any_text = True
                 yield ("text", payload)

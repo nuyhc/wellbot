@@ -21,6 +21,7 @@ from wellbot.constants import (
     FILE_PARSER_MODE,
     KB_NOT_FOUND_PATTERNS,
     LOCAL_SUPPORTED_EXTS,
+    STREAM_FLUSH_INTERVAL_SEC,
     TITLE_MAX_LENGTH,
     TOOL_USE_MAX_ITERATIONS,
     UPSTAGE_SUPPORTED_EXTS,
@@ -31,6 +32,7 @@ from wellbot.services.ai.bedrock import (
     generate_title,
 )
 from wellbot.services.chat import chat_service, response_filter, tool_executor
+from wellbot.services.core.executor import ensure_io_executor
 from wellbot.services.core.settings import get_config, get_greetings
 from wellbot.services.files import attachment_service, file_parser
 from wellbot.state.chat_helpers.attachments import (
@@ -403,6 +405,10 @@ class ChatState(rx.State):
         AuthState 에서 사번 취득 후 모델·프롬프트 기본값 설정,
         DB 에서 대화 목록 로드. 이미 로드된 경우 재조회 생략.
         """
+        # 블로킹 I/O 처리용 기본 스레드풀 확대 (멱등, 첫 로드 시 1회 설치).
+        # lifespan 에서도 설치하지만 Reflex 이벤트 루프 컨텍스트를 보장하기 위해 재호출.
+        ensure_io_executor()
+
         # AuthState 에서 emp_no 취득
         from wellbot.state.auth_state import AuthState
         auth = await self.get_state(AuthState)
@@ -415,7 +421,9 @@ class ChatState(rx.State):
                 from wellbot.services.knowledgebase.personal_kb_manager import (
                     get_user_kb as _get_user_kb,
                 )
-                self.personal_kb_exists = _get_user_kb(self._emp_no) is not None
+                self.personal_kb_exists = (
+                    await asyncio.to_thread(_get_user_kb, self._emp_no) is not None
+                )
             except Exception:
                 self.personal_kb_exists = False
             try:
@@ -426,7 +434,10 @@ class ChatState(rx.State):
                     )
                     # 같은 팀의 다른 팀원이 이미 만든 팀 KB 가 있으면 본인 행 자동 등록
                     self.team_kb_exists = (
-                        _ensure_team_kb_membership(self._emp_no, self.dept_cd) is not None
+                        await asyncio.to_thread(
+                            _ensure_team_kb_membership, self._emp_no, self.dept_cd
+                        )
+                        is not None
                     )
             except Exception:
                 self.dept_cd = ""
@@ -455,7 +466,7 @@ class ChatState(rx.State):
 
         # DB 에서 대화 목록 로드
         if self._emp_no:
-            convs = chat_service.list_conversations(self._emp_no)
+            convs = await asyncio.to_thread(chat_service.list_conversations, self._emp_no)
             db_conversations = [
                 Conversation(
                     id=c["id"],
@@ -1483,8 +1494,9 @@ class ChatState(rx.State):
             # DB 에서 최신 상태 재조회해 처리 완료 여부 반영
             if self.pending_attachments and self._pending_msg_id:
                 try:
-                    fresh = attachment_service.get_attachments_by_msg_id(
-                        self._pending_msg_id
+                    fresh = await asyncio.to_thread(
+                        attachment_service.get_attachments_by_msg_id,
+                        self._pending_msg_id,
                     )
                     refreshed = rows_to_attachment_infos(fresh)
                     if refreshed:
@@ -1547,16 +1559,20 @@ class ChatState(rx.State):
                 for m in updated_messages
             ]
 
-        # DB 저장: 대화·시스템 프롬프트·사용자 메시지 (State 락 밖)
+        # DB 저장: 대화·시스템 프롬프트·사용자 메시지 (State 락 밖).
+        # 동기 pymysql 호출을 to_thread 로 오프로드해 단일 이벤트 루프 블로킹 방지.
         if emp_no:
             if not is_persisted:
-                chat_service.save_conversation(emp_no, conv_id, title, model_name)
+                await asyncio.to_thread(
+                    chat_service.save_conversation, emp_no, conv_id, title, model_name
+                )
                 # 시스템 프롬프트를 첫 번째 메시지로 저장
                 try:
                     cfg = get_config()
                     prompt = cfg.get_prompt(prompt_name)
                     sys_content = prompt.content if prompt else cfg.system_prompt
-                    chat_service.append_message(
+                    await asyncio.to_thread(
+                        chat_service.append_message,
                         smry_id=conv_id,
                         role="system", content=sys_content,
                         emp_no=emp_no, model_name=prompt_name,
@@ -1564,8 +1580,11 @@ class ChatState(rx.State):
                 except Exception:
                     log.warning("첫 turn system 메시지 저장 실패", exc_info=True)
             elif is_first_msg:
-                chat_service.update_conversation_title(conv_id, title, emp_no)
-            user_msg_id = chat_service.append_message(
+                await asyncio.to_thread(
+                    chat_service.update_conversation_title, conv_id, title, emp_no
+                )
+            user_msg_id = await asyncio.to_thread(
+                chat_service.append_message,
                 smry_id=conv_id,
                 role="user", content=text,
                 emp_no=emp_no, model_name=model_name,
@@ -1621,7 +1640,9 @@ class ChatState(rx.State):
             has_attachments = False
             try:
                 has_attachments = bool(
-                    attachment_service.get_conversation_attachments(conv_id)
+                    await asyncio.to_thread(
+                        attachment_service.get_conversation_attachments, conv_id
+                    )
                 )
             except Exception:
                 log.warning("첨부 보유 여부 조회 실패 conv_id=%s", conv_id, exc_info=True)
@@ -1654,24 +1675,45 @@ class ChatState(rx.State):
                     thinking_enabled=use_thinking,
                 )
 
-            async for event_type, chunk in stream:
-                # 취소 요청 확인
-                async with self:
-                    if self._cancel_requested:
-                        stream_interrupted = True
-                        break
+            # 토큰 배치 스트리밍: streaming_content 갱신(state 락 + WebSocket push)을
+            # STREAM_FLUSH_INTERVAL_SEC 간격으로 묶어 토큰당 락·네트워크 폭주를 방지.
+            # content 누적은 락 없이 수행하고, 취소 확인도 flush/경계 시점에만 한다.
+            last_flush = time.monotonic()
+            pending_text = False  # content 에 반영됐지만 아직 push 안 된 텍스트 존재
 
-                if event_type == "thinking":
-                    async with self:
-                        self.is_thinking = True
-                elif event_type == "text":
+            async for event_type, chunk in stream:
+                if event_type == "text":
                     content += chunk
+                    pending_text = True
+                    if time.monotonic() - last_flush >= STREAM_FLUSH_INTERVAL_SEC:
+                        async with self:
+                            if self._cancel_requested:
+                                stream_interrupted = True
+                                break
+                            self.is_thinking = False
+                            self.streaming_content = content
+                        pending_text = False
+                        last_flush = time.monotonic()
+                elif event_type == "thinking":
                     async with self:
-                        self.is_thinking = False
-                        self.streaming_content = content
+                        if pending_text:  # 경계 전 대기 텍스트 먼저 반영(순서 보존)
+                            self.streaming_content = content
+                            pending_text = False
+                        if self._cancel_requested:
+                            stream_interrupted = True
+                            break
+                        self.is_thinking = True
+                    last_flush = time.monotonic()
                 elif event_type == "tool_use":
                     async with self:
+                        if pending_text:
+                            self.streaming_content = content
+                            pending_text = False
+                        if self._cancel_requested:
+                            stream_interrupted = True
+                            break
                         self.is_thinking = True  # tool 실행 중 스피너 표시
+                    last_flush = time.monotonic()
                 elif event_type == "tool_result":
                     # kb_search 결과 출처 누적 (같은 source_uri 는 ranks 만 병합 — 인용 마커 매칭 보존).
                     # search_attachment 결과는 LLM 이 다음 turn 에서 활용 → UI 에 직접 표시 제외
@@ -1679,6 +1721,9 @@ class ChatState(rx.State):
                         new_docs = chunk.get("source_docs") or []
                         if new_docs:
                             async with self:
+                                if pending_text:  # 경계 전 대기 텍스트 먼저 반영
+                                    self.streaming_content = content
+                                    pending_text = False
                                 by_uri = {
                                     d.get("source_uri"): d
                                     for d in self._streaming_kb_sources
@@ -1819,7 +1864,8 @@ class ChatState(rx.State):
 
         # DB 저장: AI 응답 메시지 (State 락 밖). 텍스트 없이 중단된 경우 저장 생략
         if emp_no and content:
-            chat_service.append_message(
+            await asyncio.to_thread(
+                chat_service.append_message,
                 smry_id=conv_id,
                 role="assistant", content=content,
                 emp_no=emp_no, model_name=model_name,
@@ -1829,12 +1875,16 @@ class ChatState(rx.State):
                 reply_time=elapsed,
             )
 
-        # 4. 첫 메시지 교환 후 LLM 으로 대화 제목 자동 생성
+        # 4. 첫 메시지 교환 후 LLM 으로 대화 제목 자동 생성.
+        # generate_title 은 동기 Bedrock 호출 → to_thread 로 루프 블로킹 방지.
         if is_first_msg and content and emp_no:
             try:
-                generated = generate_title(text, content)
+                generated = await asyncio.to_thread(generate_title, text, content)
                 if generated:
-                    chat_service.update_conversation_title(conv_id, generated, emp_no)
+                    await asyncio.to_thread(
+                        chat_service.update_conversation_title,
+                        conv_id, generated, emp_no,
+                    )
                     async with self:
                         idx = self._get_current_index()
                         if idx is not None:
