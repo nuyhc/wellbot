@@ -44,7 +44,12 @@ from wellbot.state.chat_helpers.attachments import (
     rows_to_attachment_infos,
 )
 from wellbot.state.chat_helpers.context_window import select_context_window
-from wellbot.state.chat_helpers.model_params import apply_overrides, parse_overrides
+from wellbot.state.chat_helpers.model_params import (
+    EFFORT_LABELS,
+    EFFORT_PRESETS,
+    apply_overrides,
+    parse_overrides,
+)
 from wellbot.state.chat_helpers.download_script import (
     build_download_script,
     build_kb_download_script,
@@ -419,6 +424,25 @@ class ChatState(rx.State):
         return str(val) if val is not None else ""
 
     @rx.var
+    def current_effort_index(self) -> int:
+        """유효 effort 의 슬라이더 인덱스 (0=low ~ 3=xhigh)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        eff = str(ov.get("effort", m.effort if m else "high"))
+        try:
+            return EFFORT_PRESETS.index(eff)
+        except ValueError:
+            return EFFORT_PRESETS.index("high")
+
+    @rx.var
+    def current_effort_label(self) -> str:
+        """effort 슬라이더 라벨: 'Effort (High)' 형태"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        eff = str(ov.get("effort", m.effort if m else "high"))
+        return f"Effort ({EFFORT_LABELS.get(eff, eff)})"
+
+    @rx.var
     def prompt_list(self) -> list[PromptInfo]:
         """설정에서 읽은 사용 가능한 프롬프트 템플릿 목록"""
         try:
@@ -609,6 +633,15 @@ class ChatState(rx.State):
 
     def set_model_effort(self, value: str) -> None:
         self._set_model_param("effort", value)
+
+    def set_model_effort_index(self, value: list) -> None:
+        """effort 슬라이더(0~3) → effort 레벨 문자열로 저장."""
+        try:
+            idx = int(value[0])
+        except (ValueError, TypeError, IndexError):
+            return
+        idx = max(0, min(len(EFFORT_PRESETS) - 1, idx))
+        self._set_model_param("effort", EFFORT_PRESETS[idx])
 
     def set_model_max_tokens(self, value: str) -> None:
         self._set_model_param("max_tokens", value)

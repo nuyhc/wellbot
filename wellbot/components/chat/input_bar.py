@@ -17,7 +17,6 @@ from wellbot.components.chat.kb_panels import (
     kb_upload_panel,
 )
 from wellbot.state.chat_helpers.model_params import (
-    EFFORT_PRESETS,
     MAX_TOKENS_PRESETS,
     TEMPERATURE_PRESETS,
     THINKING_BUDGET_PRESETS,
@@ -388,17 +387,21 @@ def _model_settings_panel() -> rx.Component:
                         size="1",
                     ),
                 ),
-                # Effort (adaptive 모델)
+                # Effort (adaptive 모델) — 4단계 눈금 슬라이더
                 rx.cond(
                     ChatState.model_is_adaptive,
                     _setting_row(
-                        "Effort",
+                        ChatState.current_effort_label,
                         "사고 깊이 (adaptive)",
-                        rx.select(
-                            EFFORT_PRESETS,
-                            value=ChatState.current_effort,
-                            on_change=ChatState.set_model_effort,
+                        rx.slider(
+                            value=[ChatState.current_effort_index],
+                            min=0,
+                            max=3,
+                            step=1,
+                            on_change=ChatState.set_model_effort_index,
                             size="1",
+                            width="120px",
+                            flex_shrink="0",
                         ),
                     ),
                 ),
