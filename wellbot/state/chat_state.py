@@ -47,7 +47,10 @@ from wellbot.state.chat_helpers.context_window import select_context_window
 from wellbot.state.chat_helpers.model_params import (
     EFFORT_LABELS,
     EFFORT_PRESETS,
+    MAX_TOKENS_PRESETS,
+    THINKING_BUDGET_PRESETS,
     apply_overrides,
+    nearest_index,
     parse_overrides,
 )
 from wellbot.state.chat_helpers.download_script import (
@@ -388,40 +391,58 @@ class ChatState(rx.State):
         return bool(m and m.top_p is not None)
 
     @rx.var
-    def current_temperature(self) -> str:
-        """선택 모델의 유효 temperature (오버라이드 우선)"""
+    def current_temperature_num(self) -> float:
+        """선택 모델의 유효 temperature (슬라이더 값)"""
         ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
         m = self._selected_model_config()
-        return str(ov.get("temperature", m.temperature if m else 0.5))
+        base = m.temperature if m else 0.5
+        try:
+            return float(ov.get("temperature", base))
+        except (ValueError, TypeError):
+            return base
 
     @rx.var
-    def current_effort(self) -> str:
-        """선택 모델의 유효 effort (adaptive)"""
-        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
-        m = self._selected_model_config()
-        return str(ov.get("effort", m.effort if m else "high"))
+    def current_temperature_label(self) -> str:
+        return f"Temperature ({self.current_temperature_num})"
 
     @rx.var
-    def current_max_tokens(self) -> str:
-        """선택 모델의 유효 max_tokens"""
+    def current_top_p_num(self) -> float:
+        """선택 모델의 유효 top_p (슬라이더 값)"""
         ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
         m = self._selected_model_config()
-        return str(ov.get("max_tokens", m.max_tokens if m else 8192))
+        base = m.top_p if (m and m.top_p is not None) else 0.9
+        try:
+            return float(ov.get("top_p", base))
+        except (ValueError, TypeError):
+            return base
 
     @rx.var
-    def current_thinking_budget(self) -> str:
-        """선택 모델의 유효 thinking_budget (manual 모드)"""
-        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
-        m = self._selected_model_config()
-        return str(ov.get("thinking_budget", m.thinking_budget if m else 4096))
+    def current_top_p_label(self) -> str:
+        return f"Top-p ({self.current_top_p_num})"
 
     @rx.var
-    def current_top_p(self) -> str:
-        """선택 모델의 유효 top_p (없으면 빈 문자열)"""
+    def current_max_tokens_index(self) -> int:
+        """max_tokens 슬라이더 인덱스 (프리셋 위치)"""
         ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
         m = self._selected_model_config()
-        val = ov.get("top_p", (m.top_p if m else None))
-        return str(val) if val is not None else ""
+        val = ov.get("max_tokens", m.max_tokens if m else 8192)
+        return nearest_index(MAX_TOKENS_PRESETS, val)
+
+    @rx.var
+    def current_max_tokens_label(self) -> str:
+        return f"Max tokens ({MAX_TOKENS_PRESETS[self.current_max_tokens_index]})"
+
+    @rx.var
+    def current_thinking_budget_index(self) -> int:
+        """thinking_budget 슬라이더 인덱스 (프리셋 위치)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        val = ov.get("thinking_budget", m.thinking_budget if m else 4096)
+        return nearest_index(THINKING_BUDGET_PRESETS, val)
+
+    @rx.var
+    def current_thinking_budget_label(self) -> str:
+        return f"Thinking budget ({THINKING_BUDGET_PRESETS[self.current_thinking_budget_index]})"
 
     @rx.var
     def current_effort_index(self) -> int:
@@ -628,29 +649,46 @@ class ChatState(rx.State):
         data[self.selected_model] = entry
         self.model_settings_raw = json.dumps(data)
 
-    def set_model_temperature(self, value: str) -> None:
-        self._set_model_param("temperature", value)
+    def _slider_first(self, value) -> float | None:
+        """rx.slider on_change 가 넘기는 list 에서 첫 값 추출."""
+        try:
+            return float(value[0])
+        except (ValueError, TypeError, IndexError):
+            return None
 
-    def set_model_effort(self, value: str) -> None:
-        self._set_model_param("effort", value)
+    def set_model_temperature_slider(self, value: list) -> None:
+        v = self._slider_first(value)
+        if v is not None:
+            self._set_model_param("temperature", str(round(v, 2)))
+
+    def set_model_top_p_slider(self, value: list) -> None:
+        v = self._slider_first(value)
+        if v is not None:
+            self._set_model_param("top_p", str(round(v, 2)))
 
     def set_model_effort_index(self, value: list) -> None:
         """effort 슬라이더(0~3) → effort 레벨 문자열로 저장."""
-        try:
-            idx = int(value[0])
-        except (ValueError, TypeError, IndexError):
+        v = self._slider_first(value)
+        if v is None:
             return
-        idx = max(0, min(len(EFFORT_PRESETS) - 1, idx))
+        idx = max(0, min(len(EFFORT_PRESETS) - 1, int(v)))
         self._set_model_param("effort", EFFORT_PRESETS[idx])
 
-    def set_model_max_tokens(self, value: str) -> None:
-        self._set_model_param("max_tokens", value)
+    def set_model_max_tokens_index(self, value: list) -> None:
+        """max_tokens 슬라이더 인덱스 → 프리셋 값 저장."""
+        v = self._slider_first(value)
+        if v is None:
+            return
+        idx = max(0, min(len(MAX_TOKENS_PRESETS) - 1, int(v)))
+        self._set_model_param("max_tokens", MAX_TOKENS_PRESETS[idx])
 
-    def set_model_thinking_budget(self, value: str) -> None:
-        self._set_model_param("thinking_budget", value)
-
-    def set_model_top_p(self, value: str) -> None:
-        self._set_model_param("top_p", value)
+    def set_model_thinking_budget_index(self, value: list) -> None:
+        """thinking_budget 슬라이더 인덱스 → 프리셋 값 저장."""
+        v = self._slider_first(value)
+        if v is None:
+            return
+        idx = max(0, min(len(THINKING_BUDGET_PRESETS) - 1, int(v)))
+        self._set_model_param("thinking_budget", THINKING_BUDGET_PRESETS[idx])
 
     def reset_model_settings(self) -> None:
         """선택 모델의 오버라이드 제거 → 기본값(models.yaml)으로 복귀."""

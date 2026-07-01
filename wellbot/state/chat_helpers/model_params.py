@@ -32,6 +32,23 @@ def _clampf(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def nearest_index(presets: list[str], value) -> int:
+    """value 에 가장 가까운 preset 의 인덱스 (프리셋 슬라이더 위치 산출용, 안전 폴백)."""
+    try:
+        target = float(value)
+    except (ValueError, TypeError):
+        return 0
+    best, best_diff = 0, None
+    for i, p in enumerate(presets):
+        try:
+            diff = abs(float(p) - target)
+        except (ValueError, TypeError):
+            continue
+        if best_diff is None or diff < best_diff:
+            best, best_diff = i, diff
+    return best
+
+
 def parse_overrides(raw: str) -> dict:
     """LocalStorage JSON 문자열 → {model_name: {param: value}} (안전 파싱)."""
     try:

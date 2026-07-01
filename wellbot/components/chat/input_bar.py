@@ -18,9 +18,7 @@ from wellbot.components.chat.kb_panels import (
 )
 from wellbot.state.chat_helpers.model_params import (
     MAX_TOKENS_PRESETS,
-    TEMPERATURE_PRESETS,
     THINKING_BUDGET_PRESETS,
-    TOP_P_PRESETS,
 )
 from wellbot.state.chat_models import ModelInfo, PromptInfo
 from wellbot.state.chat_state import ChatState
@@ -376,15 +374,19 @@ def _model_settings_panel() -> rx.Component:
                     gap="0.5em",
                 ),
                 rx.separator(size="4", color=COLORS["border"]),
-                # Temperature (모든 모델)
+                # Temperature (모든 모델) — 0~1 연속 슬라이더
                 _setting_row(
-                    "Temperature",
+                    ChatState.current_temperature_label,
                     "무작위성 (확장 사고 OFF 일 때 적용)",
-                    rx.select(
-                        TEMPERATURE_PRESETS,
-                        value=ChatState.current_temperature,
-                        on_change=ChatState.set_model_temperature,
+                    rx.slider(
+                        value=[ChatState.current_temperature_num],
+                        min=0,
+                        max=1,
+                        step=0.05,
+                        on_change=ChatState.set_model_temperature_slider,
                         size="1",
+                        width="120px",
+                        flex_shrink="0",
                     ),
                 ),
                 # Effort (adaptive 모델) — 4단계 눈금 슬라이더
@@ -405,45 +407,57 @@ def _model_settings_panel() -> rx.Component:
                         ),
                     ),
                 ),
-                # Thinking budget (manual thinking 모델)
+                # Thinking budget (manual thinking 모델) — 프리셋 눈금 슬라이더
                 rx.cond(
                     ChatState.model_supports_thinking & ~ChatState.model_is_adaptive,
                     _setting_row(
-                        "Thinking budget",
+                        ChatState.current_thinking_budget_label,
                         "확장 사고 토큰",
-                        rx.select(
-                            THINKING_BUDGET_PRESETS,
-                            value=ChatState.current_thinking_budget,
-                            on_change=ChatState.set_model_thinking_budget,
+                        rx.slider(
+                            value=[ChatState.current_thinking_budget_index],
+                            min=0,
+                            max=len(THINKING_BUDGET_PRESETS) - 1,
+                            step=1,
+                            on_change=ChatState.set_model_thinking_budget_index,
                             size="1",
+                            width="120px",
+                            flex_shrink="0",
                         ),
                     ),
                 ),
-                # Max tokens (확장 사고 지원 모델)
+                # Max tokens (확장 사고 지원 모델) — 프리셋 눈금 슬라이더
                 rx.cond(
                     ChatState.model_supports_thinking,
                     _setting_row(
-                        "Max tokens",
+                        ChatState.current_max_tokens_label,
                         "최대 출력 (사고+응답)",
-                        rx.select(
-                            MAX_TOKENS_PRESETS,
-                            value=ChatState.current_max_tokens,
-                            on_change=ChatState.set_model_max_tokens,
+                        rx.slider(
+                            value=[ChatState.current_max_tokens_index],
+                            min=0,
+                            max=len(MAX_TOKENS_PRESETS) - 1,
+                            step=1,
+                            on_change=ChatState.set_model_max_tokens_index,
                             size="1",
+                            width="120px",
+                            flex_shrink="0",
                         ),
                     ),
                 ),
-                # Top-p (top_p 사용 모델: Nova 등)
+                # Top-p (top_p 사용 모델: Nova 등) — 0~1 연속 슬라이더
                 rx.cond(
                     ChatState.model_has_top_p,
                     _setting_row(
-                        "Top-p",
+                        ChatState.current_top_p_label,
                         "누적 확률 컷오프",
-                        rx.select(
-                            TOP_P_PRESETS,
-                            value=ChatState.current_top_p,
-                            on_change=ChatState.set_model_top_p,
+                        rx.slider(
+                            value=[ChatState.current_top_p_num],
+                            min=0,
+                            max=1,
+                            step=0.05,
+                            on_change=ChatState.set_model_top_p_slider,
                             size="1",
+                            width="120px",
+                            flex_shrink="0",
                         ),
                     ),
                 ),
