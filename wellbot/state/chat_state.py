@@ -402,8 +402,8 @@ class ChatState(rx.State):
             return base
 
     @rx.var
-    def current_temperature_label(self) -> str:
-        return f"Temperature ({self.current_temperature_num})"
+    def current_temperature_display(self) -> str:
+        return str(self.current_temperature_num)
 
     @rx.var
     def current_top_p_num(self) -> float:
@@ -417,8 +417,8 @@ class ChatState(rx.State):
             return base
 
     @rx.var
-    def current_top_p_label(self) -> str:
-        return f"Top-p ({self.current_top_p_num})"
+    def current_top_p_display(self) -> str:
+        return str(self.current_top_p_num)
 
     @rx.var
     def current_max_tokens_index(self) -> int:
@@ -429,8 +429,8 @@ class ChatState(rx.State):
         return nearest_index(MAX_TOKENS_PRESETS, val)
 
     @rx.var
-    def current_max_tokens_label(self) -> str:
-        return f"Max tokens ({MAX_TOKENS_PRESETS[self.current_max_tokens_index]})"
+    def current_max_tokens_display(self) -> str:
+        return MAX_TOKENS_PRESETS[self.current_max_tokens_index]
 
     @rx.var
     def current_thinking_budget_index(self) -> int:
@@ -441,8 +441,8 @@ class ChatState(rx.State):
         return nearest_index(THINKING_BUDGET_PRESETS, val)
 
     @rx.var
-    def current_thinking_budget_label(self) -> str:
-        return f"Thinking budget ({THINKING_BUDGET_PRESETS[self.current_thinking_budget_index]})"
+    def current_thinking_budget_display(self) -> str:
+        return THINKING_BUDGET_PRESETS[self.current_thinking_budget_index]
 
     @rx.var
     def current_effort_index(self) -> int:
@@ -456,12 +456,12 @@ class ChatState(rx.State):
             return EFFORT_PRESETS.index("high")
 
     @rx.var
-    def current_effort_label(self) -> str:
-        """effort 슬라이더 라벨: 'Effort (High)' 형태"""
+    def current_effort_display(self) -> str:
+        """effort 값 표시: 'High' / 'Extra high' 등"""
         ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
         m = self._selected_model_config()
         eff = str(ov.get("effort", m.effort if m else "high"))
-        return f"Effort ({EFFORT_LABELS.get(eff, eff)})"
+        return EFFORT_LABELS.get(eff, eff)
 
     @rx.var
     def prompt_list(self) -> list[PromptInfo]:

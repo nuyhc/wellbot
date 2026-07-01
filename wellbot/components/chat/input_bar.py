@@ -317,8 +317,8 @@ def _style_panel() -> rx.Component:
     )
 
 
-def _setting_row(label: str, hint: str, control: rx.Component) -> rx.Component:
-    """모델 설정 패널의 개별 파라미터 행 (라벨/설명 + 컨트롤)."""
+def _setting_row(label, hint: str, control: rx.Component, value) -> rx.Component:
+    """모델 설정 패널의 개별 파라미터 행 (이름/설명 + 슬라이더 + 우측 값)."""
     return rx.hstack(
         rx.vstack(
             rx.text(label, size="1", weight="medium"),
@@ -329,6 +329,16 @@ def _setting_row(label: str, hint: str, control: rx.Component) -> rx.Component:
             min_width="0",
         ),
         control,
+        rx.text(
+            value,
+            size="1",
+            weight="medium",
+            color=COLORS["text_primary"],
+            width="64px",
+            text_align="right",
+            white_space="nowrap",
+            flex_shrink="0",
+        ),
         width="100%",
         align="center",
         gap="0.5em",
@@ -376,7 +386,7 @@ def _model_settings_panel() -> rx.Component:
                 rx.separator(size="4", color=COLORS["border"]),
                 # Temperature (모든 모델) — 0~1 연속 슬라이더
                 _setting_row(
-                    ChatState.current_temperature_label,
+                    "Temperature",
                     "무작위성 (확장 사고 OFF 일 때 적용)",
                     rx.slider(
                         value=[ChatState.current_temperature_num],
@@ -385,15 +395,16 @@ def _model_settings_panel() -> rx.Component:
                         step=0.05,
                         on_change=ChatState.set_model_temperature_slider,
                         size="1",
-                        width="120px",
+                        width="84px",
                         flex_shrink="0",
                     ),
+                    ChatState.current_temperature_display,
                 ),
                 # Effort (adaptive 모델) — 4단계 눈금 슬라이더
                 rx.cond(
                     ChatState.model_is_adaptive,
                     _setting_row(
-                        ChatState.current_effort_label,
+                        "Effort",
                         "사고 깊이 (adaptive)",
                         rx.slider(
                             value=[ChatState.current_effort_index],
@@ -402,16 +413,17 @@ def _model_settings_panel() -> rx.Component:
                             step=1,
                             on_change=ChatState.set_model_effort_index,
                             size="1",
-                            width="120px",
+                            width="84px",
                             flex_shrink="0",
                         ),
+                        ChatState.current_effort_display,
                     ),
                 ),
                 # Thinking budget (manual thinking 모델) — 프리셋 눈금 슬라이더
                 rx.cond(
                     ChatState.model_supports_thinking & ~ChatState.model_is_adaptive,
                     _setting_row(
-                        ChatState.current_thinking_budget_label,
+                        "Thinking budget",
                         "확장 사고 토큰",
                         rx.slider(
                             value=[ChatState.current_thinking_budget_index],
@@ -420,16 +432,17 @@ def _model_settings_panel() -> rx.Component:
                             step=1,
                             on_change=ChatState.set_model_thinking_budget_index,
                             size="1",
-                            width="120px",
+                            width="84px",
                             flex_shrink="0",
                         ),
+                        ChatState.current_thinking_budget_display,
                     ),
                 ),
                 # Max tokens (확장 사고 지원 모델) — 프리셋 눈금 슬라이더
                 rx.cond(
                     ChatState.model_supports_thinking,
                     _setting_row(
-                        ChatState.current_max_tokens_label,
+                        "Max tokens",
                         "최대 출력 (사고+응답)",
                         rx.slider(
                             value=[ChatState.current_max_tokens_index],
@@ -438,16 +451,17 @@ def _model_settings_panel() -> rx.Component:
                             step=1,
                             on_change=ChatState.set_model_max_tokens_index,
                             size="1",
-                            width="120px",
+                            width="84px",
                             flex_shrink="0",
                         ),
+                        ChatState.current_max_tokens_display,
                     ),
                 ),
                 # Top-p (top_p 사용 모델: Nova 등) — 0~1 연속 슬라이더
                 rx.cond(
                     ChatState.model_has_top_p,
                     _setting_row(
-                        ChatState.current_top_p_label,
+                        "Top-p",
                         "누적 확률 컷오프",
                         rx.slider(
                             value=[ChatState.current_top_p_num],
@@ -456,9 +470,10 @@ def _model_settings_panel() -> rx.Component:
                             step=0.05,
                             on_change=ChatState.set_model_top_p_slider,
                             size="1",
-                            width="120px",
+                            width="84px",
                             flex_shrink="0",
                         ),
+                        ChatState.current_top_p_display,
                     ),
                 ),
                 spacing="2",
