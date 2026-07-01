@@ -95,17 +95,33 @@ def stream_one_turn(
     if tool_config:
         kwargs["toolConfig"] = tool_config
 
-    if model.thinking and model.thinking_budget > 0 and thinking_enabled:
-        kwargs["additionalModelRequestFields"] = {
-            "thinking": {
-                "type": "enabled",
-                "budget_tokens": model.thinking_budget,
+    # thinking 활성 여부·방식 결정.
+    #   adaptive: thinking:{type:adaptive} + output_config.effort (Opus 4.6+/Sonnet 4.6+/신형)
+    #             — effort 는 반드시 별도 output_config 에. thinking 안에 넣으면 ValidationException.
+    #             — Opus 4.7/4.8 은 manual(budget_tokens) 전송 시 400 이므로 반드시 이 경로.
+    #   manual:   thinking:{type:enabled, budget_tokens} (레거시: Sonnet 4.5/Opus 4.5)
+    thinking_active = False
+    if model.thinking and thinking_enabled:
+        if model.thinking_mode == "adaptive":
+            adaptive_fields: dict[str, Any] = {"thinking": {"type": "adaptive"}}
+            if model.effort:
+                adaptive_fields["output_config"] = {"effort": model.effort}
+            kwargs["additionalModelRequestFields"] = adaptive_fields
+            thinking_active = True
+        elif model.thinking_budget > 0:
+            kwargs["additionalModelRequestFields"] = {
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": model.thinking_budget,
+                }
             }
-        }
-    else:
+            thinking_active = True
+
+    # thinking 활성 시 Bedrock 은 temperature/topP 지정을 허용하지 않는다.
+    if not thinking_active:
         kwargs["inferenceConfig"]["temperature"] = model.temperature
-    if model.top_p is not None:
-        kwargs["inferenceConfig"]["topP"] = model.top_p
+        if model.top_p is not None:
+            kwargs["inferenceConfig"]["topP"] = model.top_p
 
     call_start = time.perf_counter()
     has_tools = bool(tool_config)

@@ -21,7 +21,34 @@ models:
     max_tokens: 16384
     temperature: 0.4
     thinking: true
-    thinking_budget: 8192
+    thinking_budget: 8192      # 4.6 은 manual(budget_tokens) 허용(deprecated). adaptive 원하면 thinking_mode: adaptive + effort
+    supports_vision: true
+    supports_document: true
+
+  - name: "Claude Opus 4.7"
+    description: "고난도 작업에 강력함"
+    provider: "bedrock"
+    # 서울(ap-northeast-2)은 In-Region/Geo 미지원 → Global 프로파일 사용. 4.7 부터 -v1 접미사 없음.
+    model_id: "global.anthropic.claude-opus-4-7"
+    context_window: 1000000
+    max_tokens: 32768          # adaptive thinking(high effort)은 thinking+응답을 함께 소비 → 여유 있게
+    temperature: 0.4           # adaptive thinking 활성 시에는 전송 안 됨(비활성일 때만)
+    thinking: true
+    thinking_mode: "adaptive"  # 4.7 은 budget_tokens 미지원(400) → adaptive 필수
+    effort: "high"             # 권장 기본값(= API 기본). 비용절감 medium / 심층 xhigh
+    supports_vision: true
+    supports_document: true
+
+  - name: "Claude Opus 4.8"
+    description: "고난도 작업에 가장 강력함 (최신)"
+    provider: "bedrock"
+    model_id: "global.anthropic.claude-opus-4-8"
+    context_window: 1000000
+    max_tokens: 32768
+    temperature: 0.4
+    thinking: true
+    thinking_mode: "adaptive"  # 4.8 은 budget_tokens 미지원(400) → adaptive 필수
+    effort: "high"
     supports_vision: true
     supports_document: true
 
