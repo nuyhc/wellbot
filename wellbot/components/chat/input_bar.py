@@ -16,6 +16,13 @@ from wellbot.components.chat.kb_panels import (
     kb_flyout,
     kb_upload_panel,
 )
+from wellbot.state.chat_helpers.model_params import (
+    EFFORT_PRESETS,
+    MAX_TOKENS_PRESETS,
+    TEMPERATURE_PRESETS,
+    THINKING_BUDGET_PRESETS,
+    TOP_P_PRESETS,
+)
 from wellbot.state.chat_models import ModelInfo, PromptInfo
 from wellbot.state.chat_state import ChatState
 from wellbot.styles import COLORS, SPACING
@@ -168,6 +175,11 @@ def _plus_menu_popover() -> rx.Component:
                     "스타일",
                     on_click=ChatState.toggle_style_panel,
                 ),
+                _plus_menu_item(
+                    "sliders-horizontal",
+                    "모델 설정",
+                    on_click=ChatState.toggle_model_settings_panel,
+                ),
                 spacing="1",
                 width="100%",
             ),
@@ -308,6 +320,145 @@ def _style_panel() -> rx.Component:
     )
 
 
+def _setting_row(label: str, hint: str, control: rx.Component) -> rx.Component:
+    """모델 설정 패널의 개별 파라미터 행 (라벨/설명 + 컨트롤)."""
+    return rx.hstack(
+        rx.vstack(
+            rx.text(label, size="1", weight="medium"),
+            rx.text(hint, font_size="11px", color=COLORS["text_secondary"]),
+            spacing="0",
+            align_items="start",
+            flex="1",
+            min_width="0",
+        ),
+        control,
+        width="100%",
+        align="center",
+        gap="0.5em",
+        padding="0.35em 0.6em",
+    )
+
+
+def _model_settings_panel() -> rx.Component:
+    """선택 모델이 지원하는 파라미터만 조절하는 패널 (LocalStorage 영구 저장)."""
+    return rx.cond(
+        ChatState.show_model_settings_panel,
+        rx.box(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon(
+                        "sliders-horizontal", size=14, color=COLORS["text_secondary"]
+                    ),
+                    rx.text("모델 설정", size="2", weight="medium"),
+                    rx.text(
+                        ChatState.selected_model,
+                        size="1",
+                        color=COLORS["text_secondary"],
+                    ),
+                    rx.spacer(),
+                    rx.button(
+                        "기본값",
+                        variant="ghost",
+                        size="1",
+                        cursor="pointer",
+                        color=COLORS["text_secondary"],
+                        on_click=ChatState.reset_model_settings,
+                    ),
+                    rx.icon_button(
+                        rx.icon("x", size=14),
+                        variant="ghost",
+                        size="1",
+                        cursor="pointer",
+                        color=COLORS["text_secondary"],
+                        on_click=ChatState.toggle_model_settings_panel,
+                    ),
+                    width="100%",
+                    align="center",
+                    gap="0.5em",
+                ),
+                rx.separator(size="4", color=COLORS["border"]),
+                # Temperature (모든 모델)
+                _setting_row(
+                    "Temperature",
+                    "무작위성 (확장 사고 OFF 일 때 적용)",
+                    rx.select(
+                        TEMPERATURE_PRESETS,
+                        value=ChatState.current_temperature,
+                        on_change=ChatState.set_model_temperature,
+                        size="1",
+                    ),
+                ),
+                # Effort (adaptive 모델)
+                rx.cond(
+                    ChatState.model_is_adaptive,
+                    _setting_row(
+                        "Effort",
+                        "사고 깊이 (adaptive)",
+                        rx.select(
+                            EFFORT_PRESETS,
+                            value=ChatState.current_effort,
+                            on_change=ChatState.set_model_effort,
+                            size="1",
+                        ),
+                    ),
+                ),
+                # Thinking budget (manual thinking 모델)
+                rx.cond(
+                    ChatState.model_supports_thinking & ~ChatState.model_is_adaptive,
+                    _setting_row(
+                        "Thinking budget",
+                        "확장 사고 토큰",
+                        rx.select(
+                            THINKING_BUDGET_PRESETS,
+                            value=ChatState.current_thinking_budget,
+                            on_change=ChatState.set_model_thinking_budget,
+                            size="1",
+                        ),
+                    ),
+                ),
+                # Max tokens (확장 사고 지원 모델)
+                rx.cond(
+                    ChatState.model_supports_thinking,
+                    _setting_row(
+                        "Max tokens",
+                        "최대 출력 (사고+응답)",
+                        rx.select(
+                            MAX_TOKENS_PRESETS,
+                            value=ChatState.current_max_tokens,
+                            on_change=ChatState.set_model_max_tokens,
+                            size="1",
+                        ),
+                    ),
+                ),
+                # Top-p (top_p 사용 모델: Nova 등)
+                rx.cond(
+                    ChatState.model_has_top_p,
+                    _setting_row(
+                        "Top-p",
+                        "누적 확률 컷오프",
+                        rx.select(
+                            TOP_P_PRESETS,
+                            value=ChatState.current_top_p,
+                            on_change=ChatState.set_model_top_p,
+                            size="1",
+                        ),
+                    ),
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            bg=COLORS["sidebar_bg"],
+            border=f"1px solid {COLORS['border']}",
+            border_radius=SPACING["border_radius_md"],
+            padding="0.75em",
+            width="100%",
+            max_width=SPACING["message_max_width"],
+            margin_x="auto",
+            margin_bottom="0.5em",
+        ),
+    )
+
+
 def _processing_toast() -> rx.Component:
     """첨부 분석 중 안내 — 입력 박스 직상단의 persistent pill."""
     return rx.cond(
@@ -360,6 +511,8 @@ def input_bar() -> rx.Component:
             rx.vstack(
                 # 스타일 선택 패널
                 _style_panel(),
+                # 모델 설정(파라미터) 패널
+                _model_settings_panel(),
                 # KB 문서 목록 패널
                 kb_docs_panel(),
                 # KB 파일 업로드 패널

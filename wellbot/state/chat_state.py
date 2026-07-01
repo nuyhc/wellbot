@@ -5,6 +5,7 @@ DB 연동으로 대화 이력 영속화 보장.
 """
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -35,7 +36,7 @@ from wellbot.services.ai.bedrock import (
 )
 from wellbot.services.chat import chat_service, response_filter, tool_executor
 from wellbot.services.core.executor import ensure_io_executor
-from wellbot.services.core.settings import get_config, get_greetings
+from wellbot.services.core.settings import ModelConfig, get_config, get_greetings
 from wellbot.services.files import attachment_service, file_parser
 from wellbot.state.chat_helpers.attachments import (
     collect_image_blocks,
@@ -43,6 +44,7 @@ from wellbot.state.chat_helpers.attachments import (
     rows_to_attachment_infos,
 )
 from wellbot.state.chat_helpers.context_window import select_context_window
+from wellbot.state.chat_helpers.model_params import apply_overrides, parse_overrides
 from wellbot.state.chat_helpers.download_script import (
     build_download_script,
     build_kb_download_script,
@@ -81,6 +83,10 @@ class ChatState(rx.State):
     thinking_enabled: bool = False
     selected_prompt: str = "default"
     show_style_panel: bool = False
+    show_model_settings_panel: bool = False
+    # 모델별 파라미터 오버라이드. 브라우저 LocalStorage 에 JSON 으로 영구 저장
+    # ({model_name: {param: value}}). 서버 state 로 동기화되어 send_message 에서 읽힘.
+    model_settings_raw: str = rx.LocalStorage("{}", name="wellbot_model_settings")
     greeting_text: str = ""
 
     # ── 대화 검색 ──
@@ -355,6 +361,63 @@ class ChatState(rx.State):
         except Exception:
             return False
 
+    # ── 모델 설정(파라미터 오버라이드) ──
+
+    def _selected_model_config(self) -> ModelConfig | None:
+        """현재 선택된 모델의 base 설정 (없으면 None)."""
+        try:
+            return get_config().get_model(self.selected_model)
+        except Exception:
+            return None
+
+    @rx.var
+    def model_is_adaptive(self) -> bool:
+        """선택 모델이 adaptive thinking(effort 제어) 모델인지 여부"""
+        m = self._selected_model_config()
+        return bool(m and m.thinking_mode == "adaptive")
+
+    @rx.var
+    def model_has_top_p(self) -> bool:
+        """선택 모델이 top_p 파라미터를 쓰는지 여부"""
+        m = self._selected_model_config()
+        return bool(m and m.top_p is not None)
+
+    @rx.var
+    def current_temperature(self) -> str:
+        """선택 모델의 유효 temperature (오버라이드 우선)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        return str(ov.get("temperature", m.temperature if m else 0.5))
+
+    @rx.var
+    def current_effort(self) -> str:
+        """선택 모델의 유효 effort (adaptive)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        return str(ov.get("effort", m.effort if m else "high"))
+
+    @rx.var
+    def current_max_tokens(self) -> str:
+        """선택 모델의 유효 max_tokens"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        return str(ov.get("max_tokens", m.max_tokens if m else 8192))
+
+    @rx.var
+    def current_thinking_budget(self) -> str:
+        """선택 모델의 유효 thinking_budget (manual 모드)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        return str(ov.get("thinking_budget", m.thinking_budget if m else 4096))
+
+    @rx.var
+    def current_top_p(self) -> str:
+        """선택 모델의 유효 top_p (없으면 빈 문자열)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        val = ov.get("top_p", (m.top_p if m else None))
+        return str(val) if val is not None else ""
+
     @rx.var
     def prompt_list(self) -> list[PromptInfo]:
         """설정에서 읽은 사용 가능한 프롬프트 템플릿 목록"""
@@ -524,6 +587,44 @@ class ChatState(rx.State):
     def toggle_style_panel(self) -> None:
         """스타일 패널 표시/숨김 토글"""
         self.show_style_panel = not self.show_style_panel
+        if self.show_style_panel:
+            self.show_model_settings_panel = False
+
+    def toggle_model_settings_panel(self) -> None:
+        """모델 설정 패널 표시/숨김 토글"""
+        self.show_model_settings_panel = not self.show_model_settings_panel
+        if self.show_model_settings_panel:
+            self.show_style_panel = False
+
+    def _set_model_param(self, param: str, value: str) -> None:
+        """선택 모델의 파라미터 오버라이드를 LocalStorage(JSON)에 기록."""
+        data = parse_overrides(self.model_settings_raw)
+        entry = dict(data.get(self.selected_model, {}))
+        entry[param] = value
+        data[self.selected_model] = entry
+        self.model_settings_raw = json.dumps(data)
+
+    def set_model_temperature(self, value: str) -> None:
+        self._set_model_param("temperature", value)
+
+    def set_model_effort(self, value: str) -> None:
+        self._set_model_param("effort", value)
+
+    def set_model_max_tokens(self, value: str) -> None:
+        self._set_model_param("max_tokens", value)
+
+    def set_model_thinking_budget(self, value: str) -> None:
+        self._set_model_param("thinking_budget", value)
+
+    def set_model_top_p(self, value: str) -> None:
+        self._set_model_param("top_p", value)
+
+    def reset_model_settings(self) -> None:
+        """선택 모델의 오버라이드 제거 → 기본값(models.yaml)으로 복귀."""
+        data = parse_overrides(self.model_settings_raw)
+        if self.selected_model in data:
+            del data[self.selected_model]
+            self.model_settings_raw = json.dumps(data)
 
     def select_prompt(self, name: str) -> None:
         """시스템 프롬프트 템플릿 선택 후 패널 닫기.
@@ -1077,6 +1178,7 @@ class ChatState(rx.State):
         if not (
             self.active_panel
             or self.show_style_panel
+            or self.show_model_settings_panel
             or self.expanded_kb_folders
             or self.ingestion_status in ("ready", "error")
             or self.kb_delete_status in ("ready", "error")
@@ -1084,6 +1186,7 @@ class ChatState(rx.State):
             return
         self.active_panel = ""
         self.show_style_panel = False
+        self.show_model_settings_panel = False
         self.expanded_kb_folders = []
         if self.ingestion_status in ("ready", "error"):
             self.ingestion_status = "idle"
@@ -1609,6 +1712,7 @@ class ChatState(rx.State):
             prompt_name = self.selected_prompt
             use_kb = self.use_kb
             kb_modes = list(self.kb_modes)
+            model_overrides_raw = self.model_settings_raw
 
             # 첨부파일이 있으면 미리 생성한 msg_id 재사용, 없으면 빈 문자열
             pending_msg_id = self._pending_msg_id or ""
@@ -1687,6 +1791,10 @@ class ChatState(rx.State):
         try:
             cfg = get_config()
             model = cfg.get_model(model_name) or cfg.default_model
+            # 사용자 파라미터 오버라이드(모델 설정 패널) 적용
+            model = apply_overrides(
+                model, parse_overrides(model_overrides_raw).get(model_name, {})
+            )
             provider = model.provider
             prompt = cfg.get_prompt(prompt_name)
             base_system = prompt.content if prompt else cfg.system_prompt
