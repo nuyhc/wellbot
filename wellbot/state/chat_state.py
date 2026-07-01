@@ -20,7 +20,9 @@ from wellbot.constants import (
     FILE_MAX_SIZE_MB,
     FILE_PARSER_MODE,
     KB_NOT_FOUND_PATTERNS,
+    LLM_CONTEXT_MAX_TOKENS,
     LOCAL_SUPPORTED_EXTS,
+    MESSAGE_PAGE_SIZE,
     STREAM_FLUSH_INTERVAL_SEC,
     TITLE_MAX_LENGTH,
     TOOL_USE_MAX_ITERATIONS,
@@ -40,6 +42,7 @@ from wellbot.state.chat_helpers.attachments import (
     fetch_pending_attachments,
     rows_to_attachment_infos,
 )
+from wellbot.state.chat_helpers.context_window import select_context_window
 from wellbot.state.chat_helpers.download_script import (
     build_download_script,
     build_kb_download_script,
@@ -156,18 +159,24 @@ class ChatState(rx.State):
             model_name=kwargs.get("model_name", conv.model_name),  # type: ignore[arg-type]
             is_loaded=kwargs.get("is_loaded", conv.is_loaded),  # type: ignore[arg-type]
             is_persisted=kwargs.get("is_persisted", conv.is_persisted),  # type: ignore[arg-type]
+            has_more_older=kwargs.get("has_more_older", conv.has_more_older),  # type: ignore[arg-type]
         )
         self.conversations = [
             updated if c.id == updated.id else c for c in self.conversations
         ]
 
     def _load_messages_for(self, idx: int) -> None:
-        """DB 에서 대화 메시지 로드. 이미 로드된 경우 첨부파일 목록만 갱신"""
+        """DB 에서 대화 최근 메시지(MESSAGE_PAGE_SIZE) 로드. 이미 로드된 경우 첨부만 갱신.
+
+        이전 메시지는 load_older_messages 로 커서 기반 추가 로드.
+        """
         conv = self.conversations[idx]
         if conv.is_loaded:
             self._load_conversation_attachments(conv.id)
             return
-        msgs = chat_service.get_conversation_messages(conv.id, self._emp_no)
+        msgs, has_more = chat_service.get_conversation_messages(
+            conv.id, self._emp_no, limit=MESSAGE_PAGE_SIZE
+        )
         loaded = [
             Message(
                 role=m["role"],
@@ -178,7 +187,9 @@ class ChatState(rx.State):
             )
             for m in msgs
         ]
-        self._update_conversation(idx, messages=loaded, is_loaded=True)
+        self._update_conversation(
+            idx, messages=loaded, is_loaded=True, has_more_older=has_more
+        )
         self._load_conversation_attachments(conv.id)
 
     def _load_conversation_attachments(self, conv_id: str) -> None:
@@ -203,6 +214,14 @@ class ChatState(rx.State):
     def has_messages(self) -> bool:
         """현재 대화에 메시지가 하나 이상 존재하는지 여부"""
         return len(self.current_messages) > 0
+
+    @rx.var
+    def can_load_older(self) -> bool:
+        """현재 대화에 로드되지 않은 이전 메시지가 DB 에 남아있는지 여부"""
+        idx = self._get_current_index()
+        if idx is None:
+            return False
+        return self.conversations[idx].has_more_older
 
     @rx.var
     def current_title(self) -> str:
@@ -586,6 +605,48 @@ class ChatState(rx.State):
             return rx.redirect("/")
         return rx.call_script(
             "if (window.__resetAutoScroll) { window.__resetAutoScroll(); }"
+        )
+
+    async def load_older_messages(self) -> None:
+        """현재 대화의 이전(더 오래된) 메시지 페이지를 커서 기반으로 추가 로드.
+
+        DB 조회는 to_thread 로 오프로드해 이벤트 루프를 막지 않는다.
+        """
+        idx = self._get_current_index()
+        if idx is None:
+            return
+        conv = self.conversations[idx]
+        if not conv.messages or not conv.has_more_older:
+            return
+
+        oldest_seq = conv.messages[0].seq
+        older, has_more = await asyncio.to_thread(
+            chat_service.get_conversation_messages,
+            conv.id,
+            self._emp_no,
+            limit=MESSAGE_PAGE_SIZE,
+            before_seq=oldest_seq,
+        )
+        older_msgs = [
+            Message(
+                role=m["role"],
+                content=m["content"],
+                timestamp=m["timestamp"],
+                model_name=m.get("model_name", ""),
+                seq=m.get("seq", 0),
+            )
+            for m in older
+        ]
+
+        # 로드 사이 대화가 전환되지 않았는지 재확인 후 prepend
+        idx = self._get_current_index()
+        if idx is None or self.conversations[idx].id != conv.id:
+            return
+        current = self.conversations[idx]
+        self._update_conversation(
+            idx,
+            messages=[*older_msgs, *current.messages],
+            has_more_older=has_more if older_msgs else False,
         )
 
     def delete_conversation(self, conv_id: str) -> None:
@@ -1553,10 +1614,15 @@ class ChatState(rx.State):
             pending_msg_id = self._pending_msg_id or ""
             self._pending_msg_id = ""  # 소비 후 초기화
 
-            # API 호출용 메시지 — 텍스트만 포함 (이미지는 image_blocks 로 별도 전달해 중복 방지)
+            # API 호출용 메시지 — 텍스트만 포함 (이미지는 image_blocks 로 별도 전달해 중복 방지).
+            # 히스토리는 토큰 예산(LLM_CONTEXT_MAX_TOKENS)으로 제한해 긴 대화의
+            # 입력 토큰 폭증을 방지 (최근 우선 윈도우, 문서 회상은 툴이 담당).
+            context_messages = select_context_window(
+                updated_messages, LLM_CONTEXT_MAX_TOKENS
+            )
             api_messages = [
                 {"role": m.role, "content": m.content}
-                for m in updated_messages
+                for m in context_messages
             ]
 
         # DB 저장: 대화·시스템 프롬프트·사용자 메시지 (State 락 밖).

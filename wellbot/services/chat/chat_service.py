@@ -47,30 +47,59 @@ def list_conversations(emp_no: str) -> list[dict]:
         ]
 
 
-def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
+def get_conversation_messages(
+    smry_id: str,
+    emp_no: str,
+    *,
+    limit: int | None = None,
+    before_seq: int | None = None,
+) -> tuple[list[dict], bool]:
     """대화의 메시지 목록 조회 (소유권 검증 포함).
+
+    Args:
+        limit: 반환할 최근 메시지 최대 개수. None 이면 전체(레거시 동작).
+        before_seq: 이 seq 미만(더 오래된) 메시지만 조회 — "이전 더 보기" 커서.
+
+    Returns:
+        (messages, has_more_older):
+          - messages: 시간순(오름차순) dict 목록
+          - has_more_older: 더 오래된 메시지가 남아있는지 여부
 
     첨부파일은 GNB 팝오버에서 별도 표시하므로 메시지에 미포함.
     """
     with get_session() as session:
         if not _verify_ownership(session, smry_id, emp_no):
-            return []
+            return [], False
 
-        rows = (
-            session.query(ChatMessage)
-            .filter(
-                ChatMessage.chtb_tlk_smry_id == smry_id,
-                ChatMessage.msg_role_nm != "system",
-            )
-            .order_by(
+        base = session.query(ChatMessage).filter(
+            ChatMessage.chtb_tlk_smry_id == smry_id,
+            ChatMessage.msg_role_nm != "system",
+        )
+        if before_seq is not None:
+            base = base.filter(ChatMessage.chtb_tlk_seq < before_seq)
+
+        if limit is None:
+            rows = base.order_by(
                 ChatMessage.chtb_tlk_seq.asc(),
                 ChatMessage.rgst_dtm.asc(),
                 ChatMessage.chtb_tlk_id.asc(),
+            ).all()
+            has_more = False
+        else:
+            # 최근 limit+1 개를 내림차순으로 가져와 has_more 판정 후 시간순 복원.
+            rows_desc = (
+                base.order_by(
+                    ChatMessage.chtb_tlk_seq.desc(),
+                    ChatMessage.rgst_dtm.desc(),
+                    ChatMessage.chtb_tlk_id.desc(),
+                )
+                .limit(limit + 1)
+                .all()
             )
-            .all()
-        )
+            has_more = len(rows_desc) > limit
+            rows = list(reversed(rows_desc[:limit]))
 
-        return [
+        messages = [
             {
                 "role": r.msg_role_nm or "user",
                 "content": r.chtb_msg_cntt or "",
@@ -81,6 +110,7 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
             }
             for r in rows
         ]
+        return messages, has_more
 
 
 def save_conversation(

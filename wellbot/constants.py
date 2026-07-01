@@ -131,6 +131,16 @@ STREAM_FLUSH_INTERVAL_SEC: float = float(
     os.environ.get("STREAM_FLUSH_INTERVAL_SEC", "0.08")
 )
 
+# ── LLM 컨텍스트 / 히스토리 ──
+# 매 턴 Bedrock 에 보낼 대화 히스토리의 최대 토큰(추정). 긴 대화에서 입력 토큰이
+# 무한정 커지는 것을 막아 비용·지연·컨텍스트 한도 초과를 방지(최근 우선 슬라이딩 윈도우).
+# 문서 회상은 kb_search·search_attachment 툴이 담당하므로 요약 없이 윈도우로 충분.
+LLM_CONTEXT_MAX_TOKENS: int = int(os.environ.get("LLM_CONTEXT_MAX_TOKENS", "12000"))
+
+# 대화를 열 때 처음 로드/표시할 최근 메시지 수. 이전 메시지는 "이전 대화 더 보기"로
+# 커서 기반 추가 로드 → 무한정 state 적재·WS 전송 방지.
+MESSAGE_PAGE_SIZE: int = int(os.environ.get("MESSAGE_PAGE_SIZE", "50"))
+
 # ── DB 커넥션 풀 ──
 # SQLAlchemy QueuePool 기본값(pool_size=5 + max_overflow=10 = 15)은
 # 다중 동시 사용자·스레드 오프로드 환경에 부족. 명시적으로 확대.
