@@ -384,21 +384,25 @@ def _model_settings_panel() -> rx.Component:
                     gap="0.5em",
                 ),
                 rx.separator(size="4", color=COLORS["border"]),
-                # Temperature (모든 모델) — 0~1 연속 슬라이더
-                _setting_row(
-                    "Temperature",
-                    "무작위성 (확장 사고 OFF 일 때 적용)",
-                    rx.slider(
-                        value=[ChatState.current_temperature_num],
-                        min=0,
-                        max=1,
-                        step=0.05,
-                        on_change=ChatState.set_model_temperature_slider,
-                        size="1",
-                        width="84px",
-                        flex_shrink="0",
+                # Temperature (sampling 지원 모델) — 0~1 연속 슬라이더.
+                # Opus 4.7/4.8 등 sampling 폐기 모델에서는 숨긴다.
+                rx.cond(
+                    ChatState.model_supports_temperature,
+                    _setting_row(
+                        "Temperature",
+                        "무작위성 (확장 사고 OFF 일 때 적용)",
+                        rx.slider(
+                            value=[ChatState.current_temperature_num],
+                            min=0,
+                            max=1,
+                            step=0.05,
+                            on_change=ChatState.set_model_temperature_slider,
+                            size="1",
+                            width="84px",
+                            flex_shrink="0",
+                        ),
+                        ChatState.current_temperature_display,
                     ),
-                    ChatState.current_temperature_display,
                 ),
                 # Effort (adaptive 모델) — 4단계 눈금 슬라이더
                 rx.cond(

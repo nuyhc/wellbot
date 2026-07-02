@@ -48,6 +48,11 @@ class ModelConfig:
     thinking_budget: int = 0           # manual 모드 전용
     effort: str = "high"               # adaptive 모드 thinking 깊이 (low|medium|high|xhigh|max)
     top_p: float | None = None
+    # Opus 4.7/4.8·Sonnet 5·Fable 5 등 신형 모델은 temperature/top_p/top_k 샘플링
+    # 파라미터를 폐기(deprecated)했으며, 전송 시 ConverseStream 이 ValidationException
+    # ('temperature' is deprecated for this model) 을 던진다. False 면 thinking 여부와
+    # 무관하게 inferenceConfig 에 temperature/topP 를 넣지 않는다.
+    supports_temperature: bool = True
     supports_vision: bool = False      # 이미지 입력 (Converse image block)
     supports_document: bool = False    # document block 입력
 

@@ -388,7 +388,16 @@ class ChatState(rx.State):
     def model_has_top_p(self) -> bool:
         """선택 모델이 top_p 파라미터를 쓰는지 여부"""
         m = self._selected_model_config()
-        return bool(m and m.top_p is not None)
+        return bool(m and m.top_p is not None and m.supports_temperature)
+
+    @rx.var
+    def model_supports_temperature(self) -> bool:
+        """선택 모델이 temperature 등 sampling 파라미터를 지원하는지 여부.
+
+        Opus 4.7/4.8 등은 sampling 폐기 모델이라 False → 설정 패널에서 숨긴다.
+        """
+        m = self._selected_model_config()
+        return m.supports_temperature if m else True
 
     @rx.var
     def current_temperature_num(self) -> float:

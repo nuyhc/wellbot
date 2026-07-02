@@ -117,8 +117,12 @@ def stream_one_turn(
             }
             thinking_active = True
 
-    # thinking 활성 시 Bedrock 은 temperature/topP 지정을 허용하지 않는다.
-    if not thinking_active:
+    # temperature/topP 는 두 경우에 전송하지 않는다.
+    #   1) thinking 활성 시 — Bedrock 이 sampling 지정을 허용하지 않음
+    #   2) supports_temperature=False (Opus 4.7/4.8 등) — 신형 모델이 sampling
+    #      파라미터를 폐기해 전송 시 ValidationException
+    #      ('temperature' is deprecated for this model) 발생
+    if not thinking_active and model.supports_temperature:
         kwargs["inferenceConfig"]["temperature"] = model.temperature
         if model.top_p is not None:
             kwargs["inferenceConfig"]["topP"] = model.top_p

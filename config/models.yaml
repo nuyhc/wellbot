@@ -30,11 +30,12 @@ models:
     provider: "bedrock"
     model_id: "global.anthropic.claude-opus-4-7"
     context_window: 1000000
-    max_tokens: 32768         
-    temperature: 0.4
+    max_tokens: 32768
+    temperature: 0.4         
+    supports_temperature: false 
     thinking: true
     thinking_mode: "adaptive"
-    effort: "high"          
+    effort: "high"
     supports_vision: true
     supports_document: true
 
@@ -44,7 +45,8 @@ models:
     model_id: "global.anthropic.claude-opus-4-8"
     context_window: 1000000
     max_tokens: 32768
-    temperature: 0.4
+    temperature: 0.4         
+    supports_temperature: false 
     thinking: true
     thinking_mode: "adaptive"
     effort: "high"
