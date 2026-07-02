@@ -107,6 +107,48 @@ IMAGE_MAX_DIMENSION: int = 8000           # px
 # ── FAISS 캐시 ──
 FAISS_CACHE_MAX_CONVERSATIONS: int = 10   # 메모리 LRU
 
+# ── 동시성 / 성능 튜닝 ──
+# 단일 이벤트 루프에서 블로킹 I/O(DB·Bedrock 토큰 스트리밍·S3)를 처리할
+# 기본 스레드풀 크기. asyncio 기본값 min(32, cpu+4)는 vCPU 4 기준 8개로
+# 다중 동시 사용자에 과소하다. I/O 바운드(대기 중 GIL 해제)라 코어 수보다
+# 크게 잡아도 안전. 운영 튜닝을 위해 환경변수로 주입.
+IO_EXECUTOR_MAX_WORKERS: int = int(os.environ.get("IO_EXECUTOR_MAX_WORKERS", "32"))
+
+# CPU 바운드 파일 파싱(pdfplumber/pandas/python-pptx)을 메인 프로세스 GIL
+# 밖으로 오프로드할 프로세스풀 크기. 0 이하면 비활성(스레드 내 파싱으로 폴백).
+CPU_POOL_MAX_WORKERS: int = int(os.environ.get("CPU_POOL_MAX_WORKERS", "2"))
+
+# ── 스트리밍 ──
+# Bedrock 동기 스트림을 소비할 producer 스레드 전용 풀 크기 = 동시 스트림 상한.
+# 토큰당 to_thread 대신 스트림(턴)당 스레드 1개만 점유하므로 이 값이 동시 실시간
+# 응답의 상한이 된다. 초과 스트림은 슬롯이 빌 때까지 대기(backpressure).
+STREAM_MAX_CONCURRENT: int = int(os.environ.get("STREAM_MAX_CONCURRENT", "24"))
+
+# 스트리밍 상태 갱신(state 락 + WebSocket push) 배치 주기(초). 이 간격마다
+# 최대 1회만 streaming_content 를 갱신해 토큰당 락/네트워크 폭주를 줄인다.
+# 첫 토큰·thinking/tool 경계는 즉시 반영되므로 TTFT 체감에는 영향이 없다.
+STREAM_FLUSH_INTERVAL_SEC: float = float(
+    os.environ.get("STREAM_FLUSH_INTERVAL_SEC", "0.08")
+)
+
+# ── LLM 컨텍스트 / 히스토리 ──
+# 매 턴 Bedrock 에 보낼 대화 히스토리의 최대 토큰(추정). 긴 대화에서 입력 토큰이
+# 무한정 커지는 것을 막아 비용·지연·컨텍스트 한도 초과를 방지(최근 우선 슬라이딩 윈도우).
+# 문서 회상은 kb_search·search_attachment 툴이 담당하므로 요약 없이 윈도우로 충분.
+LLM_CONTEXT_MAX_TOKENS: int = int(os.environ.get("LLM_CONTEXT_MAX_TOKENS", "12000"))
+
+# 대화를 열 때 처음 로드/표시할 최근 메시지 수. 이전 메시지는 "이전 대화 더 보기"로
+# 커서 기반 추가 로드 → 무한정 state 적재·WS 전송 방지.
+MESSAGE_PAGE_SIZE: int = int(os.environ.get("MESSAGE_PAGE_SIZE", "50"))
+
+# ── DB 커넥션 풀 ──
+# SQLAlchemy QueuePool 기본값(pool_size=5 + max_overflow=10 = 15)은
+# 다중 동시 사용자·스레드 오프로드 환경에 부족. 명시적으로 확대.
+DB_POOL_SIZE: int = int(os.environ.get("DB_POOL_SIZE", "20"))
+DB_MAX_OVERFLOW: int = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+DB_POOL_RECYCLE_SEC: int = int(os.environ.get("DB_POOL_RECYCLE_SEC", "3600"))
+DB_POOL_TIMEOUT_SEC: int = int(os.environ.get("DB_POOL_TIMEOUT_SEC", "10"))
+
 # ── 파일 타입 집합 ──
 AUTO_SPLITTABLE_EXTS: frozenset[str] = frozenset({".pdf"})
 IMAGE_EXTS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp"})

@@ -27,6 +27,7 @@ from wellbot.constants import (
 from wellbot.logger import log_timing
 from wellbot.paths import wellbot_temp_dir
 from wellbot.services.ai import embedding_service
+from wellbot.services.core import cpu_pool
 from wellbot.services.core.database import get_session
 from wellbot.services.files import chunker, file_parser, storage_service
 
@@ -208,8 +209,9 @@ def process_attachment(file_no: int, emp_no: str) -> bool:
             storage_service.download_to_file(original_key, tmp_path)
 
         with log_timing("attachment.parse", logger=log, file_no=file_no):
-            parser = file_parser.get_parser()
-            parsed = parser.parse(tmp_path)
+            # CPU 바운드 파싱을 별도 프로세스로 오프로드(GIL 분리).
+            # 풀 비활성/실패 시 현재 스레드에서 파싱으로 자동 폴백.
+            parsed = cpu_pool.parse_document(None, tmp_path)
 
         if not parsed.text.strip():
             log.warning("process_attachment: file_no=%s 파싱 결과 비어있음", file_no)

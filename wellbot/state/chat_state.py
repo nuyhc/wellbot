@@ -5,6 +5,7 @@ DB 연동으로 대화 이력 영속화 보장.
 """
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -20,7 +21,10 @@ from wellbot.constants import (
     FILE_MAX_SIZE_MB,
     FILE_PARSER_MODE,
     KB_NOT_FOUND_PATTERNS,
+    LLM_CONTEXT_MAX_TOKENS,
     LOCAL_SUPPORTED_EXTS,
+    MESSAGE_PAGE_SIZE,
+    STREAM_FLUSH_INTERVAL_SEC,
     TITLE_MAX_LENGTH,
     TOOL_USE_MAX_ITERATIONS,
     UPSTAGE_SUPPORTED_EXTS,
@@ -31,12 +35,23 @@ from wellbot.services.ai.bedrock import (
     generate_title,
 )
 from wellbot.services.chat import chat_service, response_filter, tool_executor
-from wellbot.services.core.settings import get_config, get_greetings
+from wellbot.services.core.executor import ensure_io_executor
+from wellbot.services.core.settings import ModelConfig, get_config, get_greetings
 from wellbot.services.files import attachment_service, file_parser
 from wellbot.state.chat_helpers.attachments import (
     collect_image_blocks,
     fetch_pending_attachments,
     rows_to_attachment_infos,
+)
+from wellbot.state.chat_helpers.context_window import select_context_window
+from wellbot.state.chat_helpers.model_params import (
+    EFFORT_LABELS,
+    EFFORT_PRESETS,
+    MAX_TOKENS_PRESETS,
+    THINKING_BUDGET_PRESETS,
+    apply_overrides,
+    nearest_index,
+    parse_overrides,
 )
 from wellbot.state.chat_helpers.download_script import (
     build_download_script,
@@ -76,6 +91,10 @@ class ChatState(rx.State):
     thinking_enabled: bool = False
     selected_prompt: str = "default"
     show_style_panel: bool = False
+    show_model_settings_panel: bool = False
+    # 모델별 파라미터 오버라이드. 브라우저 LocalStorage 에 JSON 으로 영구 저장
+    # ({model_name: {param: value}}). 서버 state 로 동기화되어 send_message 에서 읽힘.
+    model_settings_raw: str = rx.LocalStorage("{}", name="wellbot_model_settings")
     greeting_text: str = ""
 
     # ── 대화 검색 ──
@@ -154,18 +173,24 @@ class ChatState(rx.State):
             model_name=kwargs.get("model_name", conv.model_name),  # type: ignore[arg-type]
             is_loaded=kwargs.get("is_loaded", conv.is_loaded),  # type: ignore[arg-type]
             is_persisted=kwargs.get("is_persisted", conv.is_persisted),  # type: ignore[arg-type]
+            has_more_older=kwargs.get("has_more_older", conv.has_more_older),  # type: ignore[arg-type]
         )
         self.conversations = [
             updated if c.id == updated.id else c for c in self.conversations
         ]
 
     def _load_messages_for(self, idx: int) -> None:
-        """DB 에서 대화 메시지 로드. 이미 로드된 경우 첨부파일 목록만 갱신"""
+        """DB 에서 대화 최근 메시지(MESSAGE_PAGE_SIZE) 로드. 이미 로드된 경우 첨부만 갱신.
+
+        이전 메시지는 load_older_messages 로 커서 기반 추가 로드.
+        """
         conv = self.conversations[idx]
         if conv.is_loaded:
             self._load_conversation_attachments(conv.id)
             return
-        msgs = chat_service.get_conversation_messages(conv.id, self._emp_no)
+        msgs, has_more = chat_service.get_conversation_messages(
+            conv.id, self._emp_no, limit=MESSAGE_PAGE_SIZE
+        )
         loaded = [
             Message(
                 role=m["role"],
@@ -176,7 +201,9 @@ class ChatState(rx.State):
             )
             for m in msgs
         ]
-        self._update_conversation(idx, messages=loaded, is_loaded=True)
+        self._update_conversation(
+            idx, messages=loaded, is_loaded=True, has_more_older=has_more
+        )
         self._load_conversation_attachments(conv.id)
 
     def _load_conversation_attachments(self, conv_id: str) -> None:
@@ -201,6 +228,14 @@ class ChatState(rx.State):
     def has_messages(self) -> bool:
         """현재 대화에 메시지가 하나 이상 존재하는지 여부"""
         return len(self.current_messages) > 0
+
+    @rx.var
+    def can_load_older(self) -> bool:
+        """현재 대화에 로드되지 않은 이전 메시지가 DB 에 남아있는지 여부"""
+        idx = self._get_current_index()
+        if idx is None:
+            return False
+        return self.conversations[idx].has_more_older
 
     @rx.var
     def current_title(self) -> str:
@@ -334,6 +369,109 @@ class ChatState(rx.State):
         except Exception:
             return False
 
+    # ── 모델 설정(파라미터 오버라이드) ──
+
+    def _selected_model_config(self) -> ModelConfig | None:
+        """현재 선택된 모델의 base 설정 (없으면 None)."""
+        try:
+            return get_config().get_model(self.selected_model)
+        except Exception:
+            return None
+
+    @rx.var
+    def model_is_adaptive(self) -> bool:
+        """선택 모델이 adaptive thinking(effort 제어) 모델인지 여부"""
+        m = self._selected_model_config()
+        return bool(m and m.thinking_mode == "adaptive")
+
+    @rx.var
+    def model_has_top_p(self) -> bool:
+        """선택 모델이 top_p 파라미터를 쓰는지 여부"""
+        m = self._selected_model_config()
+        return bool(m and m.top_p is not None and m.supports_temperature)
+
+    @rx.var
+    def model_supports_temperature(self) -> bool:
+        """선택 모델이 temperature 등 sampling 파라미터를 지원하는지 여부.
+
+        Opus 4.7/4.8 등은 sampling 폐기 모델이라 False → 설정 패널에서 숨긴다.
+        """
+        m = self._selected_model_config()
+        return m.supports_temperature if m else True
+
+    @rx.var
+    def current_temperature_num(self) -> float:
+        """선택 모델의 유효 temperature (슬라이더 값)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        base = m.temperature if m else 0.5
+        try:
+            return float(ov.get("temperature", base))
+        except (ValueError, TypeError):
+            return base
+
+    @rx.var
+    def current_temperature_display(self) -> str:
+        return str(self.current_temperature_num)
+
+    @rx.var
+    def current_top_p_num(self) -> float:
+        """선택 모델의 유효 top_p (슬라이더 값)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        base = m.top_p if (m and m.top_p is not None) else 0.9
+        try:
+            return float(ov.get("top_p", base))
+        except (ValueError, TypeError):
+            return base
+
+    @rx.var
+    def current_top_p_display(self) -> str:
+        return str(self.current_top_p_num)
+
+    @rx.var
+    def current_max_tokens_index(self) -> int:
+        """max_tokens 슬라이더 인덱스 (프리셋 위치)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        val = ov.get("max_tokens", m.max_tokens if m else 8192)
+        return nearest_index(MAX_TOKENS_PRESETS, val)
+
+    @rx.var
+    def current_max_tokens_display(self) -> str:
+        return MAX_TOKENS_PRESETS[self.current_max_tokens_index]
+
+    @rx.var
+    def current_thinking_budget_index(self) -> int:
+        """thinking_budget 슬라이더 인덱스 (프리셋 위치)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        val = ov.get("thinking_budget", m.thinking_budget if m else 4096)
+        return nearest_index(THINKING_BUDGET_PRESETS, val)
+
+    @rx.var
+    def current_thinking_budget_display(self) -> str:
+        return THINKING_BUDGET_PRESETS[self.current_thinking_budget_index]
+
+    @rx.var
+    def current_effort_index(self) -> int:
+        """유효 effort 의 슬라이더 인덱스 (0=low ~ 3=xhigh)"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        eff = str(ov.get("effort", m.effort if m else "high"))
+        try:
+            return EFFORT_PRESETS.index(eff)
+        except ValueError:
+            return EFFORT_PRESETS.index("high")
+
+    @rx.var
+    def current_effort_display(self) -> str:
+        """effort 값 표시: 'High' / 'Extra high' 등"""
+        ov = parse_overrides(self.model_settings_raw).get(self.selected_model, {})
+        m = self._selected_model_config()
+        eff = str(ov.get("effort", m.effort if m else "high"))
+        return EFFORT_LABELS.get(eff, eff)
+
     @rx.var
     def prompt_list(self) -> list[PromptInfo]:
         """설정에서 읽은 사용 가능한 프롬프트 템플릿 목록"""
@@ -403,6 +541,10 @@ class ChatState(rx.State):
         AuthState 에서 사번 취득 후 모델·프롬프트 기본값 설정,
         DB 에서 대화 목록 로드. 이미 로드된 경우 재조회 생략.
         """
+        # 블로킹 I/O 처리용 기본 스레드풀 확대 (멱등, 첫 로드 시 1회 설치).
+        # lifespan 에서도 설치하지만 Reflex 이벤트 루프 컨텍스트를 보장하기 위해 재호출.
+        ensure_io_executor()
+
         # AuthState 에서 emp_no 취득
         from wellbot.state.auth_state import AuthState
         auth = await self.get_state(AuthState)
@@ -415,7 +557,9 @@ class ChatState(rx.State):
                 from wellbot.services.knowledgebase.personal_kb_manager import (
                     get_user_kb as _get_user_kb,
                 )
-                self.personal_kb_exists = _get_user_kb(self._emp_no) is not None
+                self.personal_kb_exists = (
+                    await asyncio.to_thread(_get_user_kb, self._emp_no) is not None
+                )
             except Exception:
                 self.personal_kb_exists = False
             try:
@@ -426,7 +570,10 @@ class ChatState(rx.State):
                     )
                     # 같은 팀의 다른 팀원이 이미 만든 팀 KB 가 있으면 본인 행 자동 등록
                     self.team_kb_exists = (
-                        _ensure_team_kb_membership(self._emp_no, self.dept_cd) is not None
+                        await asyncio.to_thread(
+                            _ensure_team_kb_membership, self._emp_no, self.dept_cd
+                        )
+                        is not None
                     )
             except Exception:
                 self.dept_cd = ""
@@ -455,7 +602,7 @@ class ChatState(rx.State):
 
         # DB 에서 대화 목록 로드
         if self._emp_no:
-            convs = chat_service.list_conversations(self._emp_no)
+            convs = await asyncio.to_thread(chat_service.list_conversations, self._emp_no)
             db_conversations = [
                 Conversation(
                     id=c["id"],
@@ -494,6 +641,70 @@ class ChatState(rx.State):
     def toggle_style_panel(self) -> None:
         """스타일 패널 표시/숨김 토글"""
         self.show_style_panel = not self.show_style_panel
+        if self.show_style_panel:
+            self.show_model_settings_panel = False
+
+    def toggle_model_settings_panel(self) -> None:
+        """모델 설정 패널 표시/숨김 토글"""
+        self.show_model_settings_panel = not self.show_model_settings_panel
+        if self.show_model_settings_panel:
+            self.show_style_panel = False
+
+    def _set_model_param(self, param: str, value: str) -> None:
+        """선택 모델의 파라미터 오버라이드를 LocalStorage(JSON)에 기록."""
+        data = parse_overrides(self.model_settings_raw)
+        entry = dict(data.get(self.selected_model, {}))
+        entry[param] = value
+        data[self.selected_model] = entry
+        self.model_settings_raw = json.dumps(data)
+
+    def _slider_first(self, value) -> float | None:
+        """rx.slider on_change 가 넘기는 list 에서 첫 값 추출."""
+        try:
+            return float(value[0])
+        except (ValueError, TypeError, IndexError):
+            return None
+
+    def set_model_temperature_slider(self, value: list) -> None:
+        v = self._slider_first(value)
+        if v is not None:
+            self._set_model_param("temperature", str(round(v, 2)))
+
+    def set_model_top_p_slider(self, value: list) -> None:
+        v = self._slider_first(value)
+        if v is not None:
+            self._set_model_param("top_p", str(round(v, 2)))
+
+    def set_model_effort_index(self, value: list) -> None:
+        """effort 슬라이더(0~3) → effort 레벨 문자열로 저장."""
+        v = self._slider_first(value)
+        if v is None:
+            return
+        idx = max(0, min(len(EFFORT_PRESETS) - 1, int(v)))
+        self._set_model_param("effort", EFFORT_PRESETS[idx])
+
+    def set_model_max_tokens_index(self, value: list) -> None:
+        """max_tokens 슬라이더 인덱스 → 프리셋 값 저장."""
+        v = self._slider_first(value)
+        if v is None:
+            return
+        idx = max(0, min(len(MAX_TOKENS_PRESETS) - 1, int(v)))
+        self._set_model_param("max_tokens", MAX_TOKENS_PRESETS[idx])
+
+    def set_model_thinking_budget_index(self, value: list) -> None:
+        """thinking_budget 슬라이더 인덱스 → 프리셋 값 저장."""
+        v = self._slider_first(value)
+        if v is None:
+            return
+        idx = max(0, min(len(THINKING_BUDGET_PRESETS) - 1, int(v)))
+        self._set_model_param("thinking_budget", THINKING_BUDGET_PRESETS[idx])
+
+    def reset_model_settings(self) -> None:
+        """선택 모델의 오버라이드 제거 → 기본값(models.yaml)으로 복귀."""
+        data = parse_overrides(self.model_settings_raw)
+        if self.selected_model in data:
+            del data[self.selected_model]
+            self.model_settings_raw = json.dumps(data)
 
     def select_prompt(self, name: str) -> None:
         """시스템 프롬프트 템플릿 선택 후 패널 닫기.
@@ -575,6 +786,48 @@ class ChatState(rx.State):
             return rx.redirect("/")
         return rx.call_script(
             "if (window.__resetAutoScroll) { window.__resetAutoScroll(); }"
+        )
+
+    async def load_older_messages(self) -> None:
+        """현재 대화의 이전(더 오래된) 메시지 페이지를 커서 기반으로 추가 로드.
+
+        DB 조회는 to_thread 로 오프로드해 이벤트 루프를 막지 않는다.
+        """
+        idx = self._get_current_index()
+        if idx is None:
+            return
+        conv = self.conversations[idx]
+        if not conv.messages or not conv.has_more_older:
+            return
+
+        oldest_seq = conv.messages[0].seq
+        older, has_more = await asyncio.to_thread(
+            chat_service.get_conversation_messages,
+            conv.id,
+            self._emp_no,
+            limit=MESSAGE_PAGE_SIZE,
+            before_seq=oldest_seq,
+        )
+        older_msgs = [
+            Message(
+                role=m["role"],
+                content=m["content"],
+                timestamp=m["timestamp"],
+                model_name=m.get("model_name", ""),
+                seq=m.get("seq", 0),
+            )
+            for m in older
+        ]
+
+        # 로드 사이 대화가 전환되지 않았는지 재확인 후 prepend
+        idx = self._get_current_index()
+        if idx is None or self.conversations[idx].id != conv.id:
+            return
+        current = self.conversations[idx]
+        self._update_conversation(
+            idx,
+            messages=[*older_msgs, *current.messages],
+            has_more_older=has_more if older_msgs else False,
         )
 
     def delete_conversation(self, conv_id: str) -> None:
@@ -1005,6 +1258,7 @@ class ChatState(rx.State):
         if not (
             self.active_panel
             or self.show_style_panel
+            or self.show_model_settings_panel
             or self.expanded_kb_folders
             or self.ingestion_status in ("ready", "error")
             or self.kb_delete_status in ("ready", "error")
@@ -1012,6 +1266,7 @@ class ChatState(rx.State):
             return
         self.active_panel = ""
         self.show_style_panel = False
+        self.show_model_settings_panel = False
         self.expanded_kb_folders = []
         if self.ingestion_status in ("ready", "error"):
             self.ingestion_status = "idle"
@@ -1483,8 +1738,9 @@ class ChatState(rx.State):
             # DB 에서 최신 상태 재조회해 처리 완료 여부 반영
             if self.pending_attachments and self._pending_msg_id:
                 try:
-                    fresh = attachment_service.get_attachments_by_msg_id(
-                        self._pending_msg_id
+                    fresh = await asyncio.to_thread(
+                        attachment_service.get_attachments_by_msg_id,
+                        self._pending_msg_id,
                     )
                     refreshed = rows_to_attachment_infos(fresh)
                     if refreshed:
@@ -1536,27 +1792,37 @@ class ChatState(rx.State):
             prompt_name = self.selected_prompt
             use_kb = self.use_kb
             kb_modes = list(self.kb_modes)
+            model_overrides_raw = self.model_settings_raw
 
             # 첨부파일이 있으면 미리 생성한 msg_id 재사용, 없으면 빈 문자열
             pending_msg_id = self._pending_msg_id or ""
             self._pending_msg_id = ""  # 소비 후 초기화
 
-            # API 호출용 메시지 — 텍스트만 포함 (이미지는 image_blocks 로 별도 전달해 중복 방지)
+            # API 호출용 메시지 — 텍스트만 포함 (이미지는 image_blocks 로 별도 전달해 중복 방지).
+            # 히스토리는 토큰 예산(LLM_CONTEXT_MAX_TOKENS)으로 제한해 긴 대화의
+            # 입력 토큰 폭증을 방지 (최근 우선 윈도우, 문서 회상은 툴이 담당).
+            context_messages = select_context_window(
+                updated_messages, LLM_CONTEXT_MAX_TOKENS
+            )
             api_messages = [
                 {"role": m.role, "content": m.content}
-                for m in updated_messages
+                for m in context_messages
             ]
 
-        # DB 저장: 대화·시스템 프롬프트·사용자 메시지 (State 락 밖)
+        # DB 저장: 대화·시스템 프롬프트·사용자 메시지 (State 락 밖).
+        # 동기 pymysql 호출을 to_thread 로 오프로드해 단일 이벤트 루프 블로킹 방지.
         if emp_no:
             if not is_persisted:
-                chat_service.save_conversation(emp_no, conv_id, title, model_name)
+                await asyncio.to_thread(
+                    chat_service.save_conversation, emp_no, conv_id, title, model_name
+                )
                 # 시스템 프롬프트를 첫 번째 메시지로 저장
                 try:
                     cfg = get_config()
                     prompt = cfg.get_prompt(prompt_name)
                     sys_content = prompt.content if prompt else cfg.system_prompt
-                    chat_service.append_message(
+                    await asyncio.to_thread(
+                        chat_service.append_message,
                         smry_id=conv_id,
                         role="system", content=sys_content,
                         emp_no=emp_no, model_name=prompt_name,
@@ -1564,8 +1830,11 @@ class ChatState(rx.State):
                 except Exception:
                     log.warning("첫 turn system 메시지 저장 실패", exc_info=True)
             elif is_first_msg:
-                chat_service.update_conversation_title(conv_id, title, emp_no)
-            user_msg_id = chat_service.append_message(
+                await asyncio.to_thread(
+                    chat_service.update_conversation_title, conv_id, title, emp_no
+                )
+            user_msg_id = await asyncio.to_thread(
+                chat_service.append_message,
                 smry_id=conv_id,
                 role="user", content=text,
                 emp_no=emp_no, model_name=model_name,
@@ -1602,6 +1871,10 @@ class ChatState(rx.State):
         try:
             cfg = get_config()
             model = cfg.get_model(model_name) or cfg.default_model
+            # 사용자 파라미터 오버라이드(모델 설정 패널) 적용
+            model = apply_overrides(
+                model, parse_overrides(model_overrides_raw).get(model_name, {})
+            )
             provider = model.provider
             prompt = cfg.get_prompt(prompt_name)
             base_system = prompt.content if prompt else cfg.system_prompt
@@ -1621,7 +1894,9 @@ class ChatState(rx.State):
             has_attachments = False
             try:
                 has_attachments = bool(
-                    attachment_service.get_conversation_attachments(conv_id)
+                    await asyncio.to_thread(
+                        attachment_service.get_conversation_attachments, conv_id
+                    )
                 )
             except Exception:
                 log.warning("첨부 보유 여부 조회 실패 conv_id=%s", conv_id, exc_info=True)
@@ -1654,24 +1929,45 @@ class ChatState(rx.State):
                     thinking_enabled=use_thinking,
                 )
 
-            async for event_type, chunk in stream:
-                # 취소 요청 확인
-                async with self:
-                    if self._cancel_requested:
-                        stream_interrupted = True
-                        break
+            # 토큰 배치 스트리밍: streaming_content 갱신(state 락 + WebSocket push)을
+            # STREAM_FLUSH_INTERVAL_SEC 간격으로 묶어 토큰당 락·네트워크 폭주를 방지.
+            # content 누적은 락 없이 수행하고, 취소 확인도 flush/경계 시점에만 한다.
+            last_flush = time.monotonic()
+            pending_text = False  # content 에 반영됐지만 아직 push 안 된 텍스트 존재
 
-                if event_type == "thinking":
-                    async with self:
-                        self.is_thinking = True
-                elif event_type == "text":
+            async for event_type, chunk in stream:
+                if event_type == "text":
                     content += chunk
+                    pending_text = True
+                    if time.monotonic() - last_flush >= STREAM_FLUSH_INTERVAL_SEC:
+                        async with self:
+                            if self._cancel_requested:
+                                stream_interrupted = True
+                                break
+                            self.is_thinking = False
+                            self.streaming_content = content
+                        pending_text = False
+                        last_flush = time.monotonic()
+                elif event_type == "thinking":
                     async with self:
-                        self.is_thinking = False
-                        self.streaming_content = content
+                        if pending_text:  # 경계 전 대기 텍스트 먼저 반영(순서 보존)
+                            self.streaming_content = content
+                            pending_text = False
+                        if self._cancel_requested:
+                            stream_interrupted = True
+                            break
+                        self.is_thinking = True
+                    last_flush = time.monotonic()
                 elif event_type == "tool_use":
                     async with self:
+                        if pending_text:
+                            self.streaming_content = content
+                            pending_text = False
+                        if self._cancel_requested:
+                            stream_interrupted = True
+                            break
                         self.is_thinking = True  # tool 실행 중 스피너 표시
+                    last_flush = time.monotonic()
                 elif event_type == "tool_result":
                     # kb_search 결과 출처 누적 (같은 source_uri 는 ranks 만 병합 — 인용 마커 매칭 보존).
                     # search_attachment 결과는 LLM 이 다음 turn 에서 활용 → UI 에 직접 표시 제외
@@ -1679,6 +1975,9 @@ class ChatState(rx.State):
                         new_docs = chunk.get("source_docs") or []
                         if new_docs:
                             async with self:
+                                if pending_text:  # 경계 전 대기 텍스트 먼저 반영
+                                    self.streaming_content = content
+                                    pending_text = False
                                 by_uri = {
                                     d.get("source_uri"): d
                                     for d in self._streaming_kb_sources
@@ -1819,7 +2118,8 @@ class ChatState(rx.State):
 
         # DB 저장: AI 응답 메시지 (State 락 밖). 텍스트 없이 중단된 경우 저장 생략
         if emp_no and content:
-            chat_service.append_message(
+            await asyncio.to_thread(
+                chat_service.append_message,
                 smry_id=conv_id,
                 role="assistant", content=content,
                 emp_no=emp_no, model_name=model_name,
@@ -1829,12 +2129,16 @@ class ChatState(rx.State):
                 reply_time=elapsed,
             )
 
-        # 4. 첫 메시지 교환 후 LLM 으로 대화 제목 자동 생성
+        # 4. 첫 메시지 교환 후 LLM 으로 대화 제목 자동 생성.
+        # generate_title 은 동기 Bedrock 호출 → to_thread 로 루프 블로킹 방지.
         if is_first_msg and content and emp_no:
             try:
-                generated = generate_title(text, content)
+                generated = await asyncio.to_thread(generate_title, text, content)
                 if generated:
-                    chat_service.update_conversation_title(conv_id, generated, emp_no)
+                    await asyncio.to_thread(
+                        chat_service.update_conversation_title,
+                        conv_id, generated, emp_no,
+                    )
                     async with self:
                         idx = self._get_current_index()
                         if idx is not None:
