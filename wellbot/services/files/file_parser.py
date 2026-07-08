@@ -116,6 +116,20 @@ def _count_pdf_pages(pdf_path: Path) -> int:
         return len(reader.pages)
 
 
+def _count_pptx_slides(path: Path) -> int:
+    """pptx 슬라이드 수 조회 (Upstage 페이지 프리플라이트용).
+
+    실패 시 0 반환 → 프리플라이트 스킵(반응적 413 처리로 폴백).
+    """
+    try:
+        from pptx import Presentation
+
+        return len(Presentation(str(path)).slides)
+    except Exception:
+        log.debug("pptx 슬라이드 수 계산 실패 path=%s", path, exc_info=True)
+        return 0
+
+
 # ── 로컬 파서 ──
 class LocalParser:
     """로컬 라이브러리 기반 파서"""
@@ -272,6 +286,22 @@ class UpstageParser:
                 f"파일 크기 {size_mb:.1f}MB 가 제한 {UPSTAGE_MAX_SIZE_MB}MB 를 "
                 f"초과합니다. 파일을 직접 분할하여 재업로드해주세요."
             )
+
+        # pptx 페이지(슬라이드) 프리플라이트: 비-PDF 는 자동 분할이 불가하므로,
+        # Upstage 호출·타임아웃·413 을 낭비하기 전에 슬라이드 수로 미리 차단.
+        # (docx/xlsx 는 렌더링 없이 페이지 수를 신뢰성 있게 셀 수 없어 제외 — A3 의
+        #  반응적 413 처리로 폴백.)
+        if ext == ".pptx":
+            slides = _count_pptx_slides(file_path)
+            if slides > SPLIT_SAFETY_PAGES:
+                raise FileTooLargeError(
+                    f"'{file_path.name}' 의 슬라이드 {slides}장이 처리 한도"
+                    f"({UPSTAGE_MAX_PAGES}p)를 초과합니다. "
+                    f"파일을 나눠 다시 업로드해주세요."
+                )
+            result = self._call_api(file_path)
+            result.page_count = slides
+            return result
 
         return self._call_api(file_path)
 
