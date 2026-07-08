@@ -9,6 +9,7 @@ import bcrypt
 import jwt
 
 from wellbot.constants import KST, LOCK_DURATION_MINUTES, LOCK_THRESHOLD, TOKEN_EXPIRE_HOURS
+from wellbot.logger import log_context
 from wellbot.models.auth_token import AuthToken
 from wellbot.models.dept import Dept
 from wellbot.models.employee import Employee
@@ -48,6 +49,8 @@ def authenticate_user(emp_no: str, password: str) -> dict:
         {"success": True, "user": {...}} 또는
         {"success": False, "error": "에러 메시지"}
     """
+    # 로그 상관관계: 로그인 시도는 Reflex 이벤트라 API 스코프가 없어 emp_no 를 직접 바인딩
+    log_context.bind(emp_no=emp_no)
     with get_session() as session:
         emp = session.get(Employee, emp_no)
         if not emp:
@@ -113,6 +116,7 @@ def authenticate_user(emp_no: str, password: str) -> dict:
 
 def create_session_token(emp_no: str) -> str:
     """세션 토큰(JWT) 발급 및 DB 저장"""
+    log_context.bind(emp_no=emp_no)
     now = datetime.now(KST)
     expires = now + timedelta(hours=TOKEN_EXPIRE_HOURS)
     token_id = uuid.uuid4().hex[:50]
@@ -194,6 +198,7 @@ def invalidate_session_token(token: str) -> bool:
     if not token_id or not emp_no:
         return False
 
+    log_context.bind(emp_no=emp_no)
     now = datetime.now(KST)
     with get_session() as session:
         record = session.get(AuthToken, (token_id, emp_no))
@@ -222,6 +227,7 @@ def register_user(
     if not emp_no or not password or not user_nm:
         return {"success": False, "error": "모든 필드를 입력해주세요."}
 
+    log_context.bind(emp_no=emp_no)
     with get_session() as session:
         existing = session.get(Employee, emp_no)
         if existing:
