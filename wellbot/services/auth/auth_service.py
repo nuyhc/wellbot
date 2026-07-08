@@ -58,6 +58,12 @@ def authenticate_user(emp_no: str, password: str) -> dict:
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
 
         if emp.acnt_sts_nm != "ACTIVE":
+            if emp.acnt_sts_nm == "PENDING":
+                log.info("login denied: pending emp_no=%s", emp_no)
+                return {
+                    "success": False,
+                    "error": "가입 승인 대기 중입니다. 관리자 승인 후 이용할 수 있습니다.",
+                }
             log.info("login denied: inactive emp_no=%s status=%s", emp_no, emp.acnt_sts_nm)
             return {"success": False, "error": "비활성 계정입니다. 관리자에게 문의하세요."}
 
@@ -79,6 +85,8 @@ def authenticate_user(emp_no: str, password: str) -> dict:
             password.encode(), emp.ecr_pwd.encode()
         ):
             emp.lgn_flr_tscnt = int(emp.lgn_flr_tscnt or 0) + 1
+            emp.upd_dtm = datetime.now(KST)
+            emp.uppr_id = emp_no
             if int(emp.lgn_flr_tscnt) >= LOCK_THRESHOLD:
                 emp.lock_dsbn_dtm = datetime.now(KST) + timedelta(
                     minutes=LOCK_DURATION_MINUTES
@@ -87,13 +95,18 @@ def authenticate_user(emp_no: str, password: str) -> dict:
                     "account locked: emp_no=%s fail_count=%s lock_min=%s",
                     emp_no, emp.lgn_flr_tscnt, LOCK_DURATION_MINUTES,
                 )
-            else:
-                log.info(
-                    "login failed: bad password emp_no=%s fail_count=%s",
-                    emp_no, emp.lgn_flr_tscnt,
-                )
-            emp.upd_dtm = datetime.now(KST)
-            emp.uppr_id = emp_no
+                # 잠금을 유발한 시도에서 바로 잠금 사실을 안내 (다음 시도까지 미루지 않음)
+                return {
+                    "success": False,
+                    "error": (
+                        f"로그인 실패가 {LOCK_THRESHOLD}회 누적되어 계정이 잠겼습니다. "
+                        f"{LOCK_DURATION_MINUTES}분 후 다시 시도하거나 관리자에게 문의하세요."
+                    ),
+                }
+            log.info(
+                "login failed: bad password emp_no=%s fail_count=%s",
+                emp_no, emp.lgn_flr_tscnt,
+            )
             return {"success": False, "error": "사원번호 또는 비밀번호가 올바르지 않습니다."}
 
         emp.lgn_flr_tscnt = 0
