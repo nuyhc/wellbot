@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+from wellbot.services.report_checker.attention_checker import check_attention
 from wellbot.services.report_checker.consistency_checker import (
     extract_facts,
     find_conflicts,
@@ -43,7 +44,11 @@ def run_analysis(
     # 1) 오탈자 검사 (기본)
     result.typo_errors = check_typos(pages, dictionary, on_progress)
 
-    # 2) 일관성 검사 (3단계, 선택)
+    # 2) 주의 항목 검사 (사용자 규칙이 있을 때만)
+    if dictionary.watch_items:
+        result.attention_errors = check_attention(pages, dictionary, on_progress)
+
+    # 3) 일관성 검사 (3단계, 선택)
     if do_consistency:
         facts = extract_facts(pages, on_progress)
         conflicts = find_conflicts(facts, dictionary)

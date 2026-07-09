@@ -58,11 +58,30 @@ class ConsistencyError:
 
 
 @dataclass
+class AttentionIssue:
+    """사용자 지정 주의 항목(가이드라인) 위반 1건."""
+
+    page: int
+    rule: str       # 위반한 주의 규칙
+    excerpt: str    # 위반이 발견된 원문 발췌
+    issue: str      # 무엇이 규칙에 어긋나는지 설명
+
+    def to_dict(self) -> dict:
+        return {
+            "page": self.page,
+            "rule": self.rule,
+            "excerpt": self.excerpt,
+            "issue": self.issue,
+        }
+
+
+@dataclass
 class AnalysisResult:
     """분석 최종 결과."""
 
     typo_errors: list = field(default_factory=list)
     consistency_errors: list = field(default_factory=list)
+    attention_errors: list = field(default_factory=list)
 
 
 @dataclass
@@ -79,6 +98,10 @@ class UserDictionary:
 
     exclusions: list[str] = field(default_factory=list)
     synonym_groups: list[list[str]] = field(default_factory=list)
+    # 주의 항목: 자연어 규칙 목록. 각 규칙 위반을 AI 가 텍스트에서 찾아 보고.
+    # (예: "'2025년'은 한자 '2025年'으로 표기", "금액은 항상 '원' 단위 명시")
+    # 주의: 윗첨자/굵게 등 순수 서식은 텍스트 추출로 판별 불가하여 검증 대상이 아님.
+    watch_items: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict | None) -> "UserDictionary":
@@ -89,10 +112,11 @@ class UserDictionary:
             terms = [str(t).strip() for t in (grp or []) if str(t).strip()]
             if len(terms) >= 2:
                 groups.append(terms)
-        return cls(exclusions=exclusions, synonym_groups=groups)
+        watch = [str(w).strip() for w in (data.get("watch_items") or []) if str(w).strip()]
+        return cls(exclusions=exclusions, synonym_groups=groups, watch_items=watch)
 
     def is_empty(self) -> bool:
-        return not self.exclusions and not self.synonym_groups
+        return not self.exclusions and not self.synonym_groups and not self.watch_items
 
 
 @dataclass

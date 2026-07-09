@@ -8,6 +8,7 @@ PDF 보고서의 오탈자와 수치/기술 일관성 오류를 AWS Bedrock(Clau
 from wellbot.services.report_checker.config import CheckerConfig, get_config
 from wellbot.services.report_checker.models import (
     AnalysisResult,
+    AttentionIssue,
     ConsistencyError,
     Fact,
     ProgressEvent,
@@ -25,6 +26,7 @@ __all__ = [
     "CheckerConfig",
     "get_config",
     "AnalysisResult",
+    "AttentionIssue",
     "ConsistencyError",
     "Fact",
     "ProgressEvent",
