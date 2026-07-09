@@ -35,8 +35,10 @@ class ReportCheckerState(rx.State):
     pending_file_size: int = 0
     exclusions_text: str = ""       # 제외어 (콤마/줄바꿈 구분)
     synonyms_text: str = ""         # 동의어 (한 줄 = 한 그룹, 콤마 구분)
+    watch_items_text: str = ""      # 주의 항목 (한 줄 = 한 규칙)
     include_consistency: bool = False  # 일관성 검사 포함 여부 (기본: 오탈자만, 일관성은 선택)
     ran_consistency: bool = True    # 이번 결과에 일관성 검사가 실제 수행됐는지
+    watch_active: bool = False      # 이번 결과에 주의 항목 검사가 수행됐는지
 
     # ── 진행 ──
     status: str = "idle"        # idle | uploading | analyzing | done | error
@@ -52,6 +54,8 @@ class ReportCheckerState(rx.State):
     source_file_name: str = ""
     typo_errors: list[dict] = []
     consistency_errors: list[dict] = []
+    attention_errors: list[dict] = []
+    attention_count: int = 0
     download_url: str = ""
 
     # ── 파생 ──
@@ -69,7 +73,7 @@ class ReportCheckerState(rx.State):
 
     @rx.var
     def total_errors(self) -> int:
-        return self.typo_count + self.consistency_count
+        return self.typo_count + self.consistency_count + self.attention_count
 
     @rx.var
     def file_size_label(self) -> str:
@@ -84,6 +88,9 @@ class ReportCheckerState(rx.State):
 
     def set_synonyms_text(self, value: str) -> None:
         self.synonyms_text = value
+
+    def set_watch_items_text(self, value: str) -> None:
+        self.watch_items_text = value
 
     def set_include_consistency(self, value: bool) -> None:
         self.include_consistency = value
@@ -114,8 +121,10 @@ class ReportCheckerState(rx.State):
         self.error_message = ""
         self.typo_errors = []
         self.consistency_errors = []
+        self.attention_errors = []
         self.typo_count = 0
         self.consistency_count = 0
+        self.attention_count = 0
         self.download_url = ""
         self.progress_pct = 0
         self.progress_detail = "업로드 중..."
@@ -147,7 +156,10 @@ class ReportCheckerState(rx.State):
             terms = [t.strip() for t in line.split(",") if t.strip()]
             if len(terms) >= 2:
                 groups.append(terms)
-        return UserDictionary(exclusions=exclusions, synonym_groups=groups)
+        watch = [ln.strip() for ln in self.watch_items_text.splitlines() if ln.strip()]
+        return UserDictionary(
+            exclusions=exclusions, synonym_groups=groups, watch_items=watch
+        )
 
     def _apply_progress(self, evt: ProgressEvent) -> None:
         self.stage = evt.stage
@@ -158,16 +170,22 @@ class ReportCheckerState(rx.State):
         if evt.consistency_count:
             self.consistency_count = evt.consistency_count
         total = evt.total or 1
+        # 활성 단계들에 5→100% 구간을 균등 배분 (오탈자는 항상 포함).
+        active = ["typo"]
+        if self.watch_active:
+            active.append("attention")
+        if self.include_consistency:
+            active.append("consistency")
         if evt.stage == "parsing":
             self.progress_pct = 5
-        elif evt.stage == "typo":
-            # 일관성 검사가 없으면 오탈자만으로 5→95% 사용
-            span = 45 if self.include_consistency else 90
-            self.progress_pct = 5 + int(span * evt.current / total)
-        elif evt.stage == "consistency":
-            self.progress_pct = 50 + int(45 * evt.current / total)
         elif evt.stage == "done":
             self.progress_pct = 100
+        elif evt.stage in active:
+            span = 95 / len(active)
+            idx = active.index(evt.stage)
+            self.progress_pct = min(
+                99, int(5 + span * idx + span * (evt.current / total))
+            )
 
     @rx.event(background=True)
     async def analyze(self):
@@ -179,6 +197,8 @@ class ReportCheckerState(rx.State):
             source_name = self.source_file_name
             dictionary = self._parse_dictionary()
             do_consistency = self.include_consistency
+            watch_active = bool(dictionary.watch_items)
+            self.watch_active = watch_active
 
         if not emp_no or not job_id:
             async with self:
@@ -226,7 +246,12 @@ class ReportCheckerState(rx.State):
             return
 
         # 결과 HTML 생성 + S3 저장 + 다운로드 URL (블로킹은 스레드로)
-        html = generate_html(result, source_name, consistency_checked=do_consistency)
+        html = generate_html(
+            result,
+            source_name,
+            consistency_checked=do_consistency,
+            attention_checked=watch_active,
+        )
         stem = Path(source_name).stem or "report"
         filename = f"{stem}_검출결과.html"
 
@@ -254,6 +279,8 @@ class ReportCheckerState(rx.State):
             self.typo_count = len(result.typo_errors)
             self.consistency_count = len(result.consistency_errors)
             self.ran_consistency = do_consistency
+            self.attention_errors = [e.to_dict() for e in result.attention_errors]
+            self.attention_count = len(result.attention_errors)
             self.download_url = url
             self.status = "done"
             self.stage = "done"
@@ -268,8 +295,10 @@ class ReportCheckerState(rx.State):
         self.pending_file_size = 0
         self.exclusions_text = ""
         self.synonyms_text = ""
+        self.watch_items_text = ""
         self.include_consistency = False
         self.ran_consistency = False
+        self.watch_active = False
         self.progress_pct = 0
         self.progress_detail = ""
         self.typo_count = 0
@@ -279,4 +308,6 @@ class ReportCheckerState(rx.State):
         self.source_file_name = ""
         self.typo_errors = []
         self.consistency_errors = []
+        self.attention_errors = []
+        self.attention_count = 0
         self.download_url = ""

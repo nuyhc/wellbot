@@ -155,6 +155,29 @@ def _dictionary_inputs() -> rx.Component:
                     width="100%",
                     align="start",
                 ),
+                rx.vstack(
+                    rx.text(
+                        "주의 항목 — 특별히 확인할 규칙 (한 줄에 하나)",
+                        size="1",
+                        color=COLORS["text_secondary"],
+                    ),
+                    rx.text_area(
+                        placeholder="예: '2025년'은 한자 '2025年'으로 표기\n금액은 항상 '원' 단위 명시\n'AI'는 최초 1회 '인공지능(AI)'로 풀어쓰기",
+                        value=ReportCheckerState.watch_items_text,
+                        on_change=ReportCheckerState.set_watch_items_text,
+                        rows="3",
+                        width="100%",
+                        disabled=ReportCheckerState.is_running,
+                    ),
+                    rx.text(
+                        "※ 윗첨자·굵게 등 서식 규칙은 텍스트 추출 특성상 판별할 수 없습니다.",
+                        size="1",
+                        color=COLORS["text_secondary"],
+                    ),
+                    spacing="1",
+                    width="100%",
+                    align="start",
+                ),
                 spacing="3",
                 width="100%",
                 padding_top="0.75em",
@@ -313,6 +336,55 @@ def _consistency_table() -> rx.Component:
     )
 
 
+def _attention_table() -> rx.Component:
+    return rx.table.root(
+        rx.table.header(
+            rx.table.row(
+                rx.table.column_header_cell("페이지"),
+                rx.table.column_header_cell("규칙"),
+                rx.table.column_header_cell("발췌"),
+                rx.table.column_header_cell("위반 내용"),
+            ),
+        ),
+        rx.table.body(
+            rx.foreach(
+                ReportCheckerState.attention_errors,
+                lambda e: rx.table.row(
+                    rx.table.cell(rx.badge(e["page"], "p", color_scheme="green", variant="soft")),
+                    rx.table.cell(rx.badge(e["rule"], color_scheme="green", variant="soft")),
+                    rx.table.cell(rx.text(e["excerpt"], size="1", color=COLORS["text_secondary"])),
+                    rx.table.cell(rx.text(e["issue"], size="1")),
+                ),
+            ),
+        ),
+        variant="surface",
+        size="1",
+        width="100%",
+    )
+
+
+def _attention_section() -> rx.Component:
+    return _section_card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("scan-search", size=18, color=rx.color("green", 11)),
+                rx.text("주의 항목", size="4", weight="bold", color=COLORS["text_primary"]),
+                rx.badge(ReportCheckerState.attention_count, "건", color_scheme="green", variant="soft"),
+                align="center",
+                spacing="2",
+            ),
+            rx.cond(
+                ReportCheckerState.attention_count > 0,
+                _attention_table(),
+                rx.text("주의 항목 위반이 발견되지 않았습니다.", size="2", color=COLORS["text_secondary"]),
+            ),
+            spacing="3",
+            width="100%",
+            align="start",
+        ),
+    )
+
+
 def _result_panel() -> rx.Component:
     return rx.vstack(
         _section_card(
@@ -323,6 +395,11 @@ def _result_panel() -> rx.Component:
                     rx.cond(ReportCheckerState.ran_consistency, ReportCheckerState.consistency_count, "—"),
                     "수치/기술 오류",
                     "orange",
+                ),
+                rx.cond(
+                    ReportCheckerState.watch_active,
+                    _stat(ReportCheckerState.attention_count, "주의 항목", "green"),
+                    rx.fragment(),
                 ),
                 rx.spacer(),
                 rx.vstack(
@@ -401,6 +478,7 @@ def _result_panel() -> rx.Component:
                 align="start",
             ),
         ),
+        rx.cond(ReportCheckerState.watch_active, _attention_section(), rx.fragment()),
         spacing="4",
         width="100%",
     )
