@@ -20,7 +20,7 @@ from pathlib import Path
 import reflex as rx
 
 from wellbot.logger import log_context
-from wellbot.services.report_checker import storage
+from wellbot.services.report_checker import db, storage
 from wellbot.services.report_checker.config import get_config
 from wellbot.services.report_checker.models import (
     AnalysisCancelled,
@@ -37,7 +37,14 @@ from wellbot.state.report_checker_scripts import build_report_download_script
 log = logging.getLogger(__name__)
 
 # 스텝퍼 순서 (건너뛴 단계가 있어도 비교는 이 인덱스로 일관되게 동작)
-_STAGE_ORDER = {"parsing": 0, "typo": 1, "attention": 2, "consistency": 3, "done": 4}
+_STAGE_ORDER = {
+    "parsing": 0,
+    "typo": 1,
+    "attention": 2,
+    "notation": 3,
+    "consistency": 4,
+    "done": 5,
+}
 
 # job_id → 취소 신호 Event. State 는 스레드 Event 를 var 로 못 들고 있으므로
 # (같은 프로세스) 모듈 레지스트리로 백그라운드 워커와 취소 이벤트를 연결한다.
@@ -51,11 +58,13 @@ class ReportCheckerState(rx.State):
     pending_file_name: str = ""
     pending_file_size: int = 0
     exclusions_text: str = ""       # 제외어 (콤마/줄바꿈 구분)
-    assertions_text: str = ""       # 정합성 어서션 (한 줄 = 한 묶음, 콤마 구분)
+    aliases_text: str = ""          # 동일 항목 별칭 (한 줄 = 한 묶음, 콤마 구분)
     watch_items_text: str = ""      # 주의 항목 (한 줄 = 한 규칙)
-    include_consistency: bool = False  # 일관성 검사 포함 여부 (기본: 오탈자만, 일관성은 선택)
-    ran_consistency: bool = True    # 이번 결과에 일관성 검사가 실제 수행됐는지
+    include_consistency: bool = False  # 값 일관성 검사 포함 여부 (기본: 오탈자만)
+    include_notation: bool = False  # 표기 일관성 검사 포함 여부
+    ran_consistency: bool = True    # 이번 결과에 값 일관성 검사가 실제 수행됐는지
     watch_active: bool = False      # 이번 결과에 주의 항목 검사가 수행됐는지
+    notation_active: bool = False   # 이번 결과에 표기 일관성 검사가 수행됐는지
 
     # ── 진행 ──
     status: str = "idle"        # idle | uploading | analyzing | done | error
@@ -78,6 +87,8 @@ class ReportCheckerState(rx.State):
     consistency_errors: list[dict] = []
     attention_errors: list[dict] = []
     attention_count: int = 0
+    notation_errors: list[dict] = []
+    notation_count: int = 0
     download_ready: bool = False
     download_filename: str = ""
 
@@ -96,7 +107,12 @@ class ReportCheckerState(rx.State):
 
     @rx.var
     def total_errors(self) -> int:
-        return self.typo_count + self.consistency_count + self.attention_count
+        return (
+            self.typo_count
+            + self.consistency_count
+            + self.attention_count
+            + self.notation_count
+        )
 
     @rx.var
     def file_size_label(self) -> str:
@@ -109,14 +125,17 @@ class ReportCheckerState(rx.State):
     def set_exclusions_text(self, value: str) -> None:
         self.exclusions_text = value
 
-    def set_assertions_text(self, value: str) -> None:
-        self.assertions_text = value
+    def set_aliases_text(self, value: str) -> None:
+        self.aliases_text = value
 
     def set_watch_items_text(self, value: str) -> None:
         self.watch_items_text = value
 
     def set_include_consistency(self, value: bool) -> None:
         self.include_consistency = value
+
+    def set_include_notation(self, value: bool) -> None:
+        self.include_notation = value
 
     # ── 파일 선택 ──
     def pick_file(self):
@@ -146,9 +165,11 @@ class ReportCheckerState(rx.State):
         self.typo_errors = []
         self.consistency_errors = []
         self.attention_errors = []
+        self.notation_errors = []
         self.typo_count = 0
         self.consistency_count = 0
         self.attention_count = 0
+        self.notation_count = 0
         self.download_ready = False
         self.download_filename = ""
         self.progress_pct = 0
@@ -184,13 +205,13 @@ class ReportCheckerState(rx.State):
     def _parse_dictionary(self) -> UserDictionary:
         exclusions = [t.strip() for t in re.split(r"[\n,]", self.exclusions_text) if t.strip()]
         groups: list[list[str]] = []
-        for line in self.assertions_text.splitlines():
+        for line in self.aliases_text.splitlines():
             terms = [t.strip() for t in line.split(",") if t.strip()]
-            if terms:
+            if len(terms) >= 2:  # 별칭은 최소 2개 표기가 있어야 의미
                 groups.append(terms)
         watch = [ln.strip() for ln in self.watch_items_text.splitlines() if ln.strip()]
         return UserDictionary(
-            exclusions=exclusions, assertion_groups=groups, watch_items=watch
+            exclusions=exclusions, alias_groups=groups, watch_items=watch
         )
 
     def _apply_progress(self, evt: ProgressEvent) -> None:
@@ -206,11 +227,15 @@ class ReportCheckerState(rx.State):
             self.consistency_count = evt.consistency_count
         if evt.attention_count:
             self.attention_count = evt.attention_count
+        if evt.notation_count:
+            self.notation_count = evt.notation_count
         total = evt.total or 1
         # 활성 단계들에 5→100% 구간을 균등 배분 (오탈자는 항상 포함).
         active = ["typo"]
         if self.watch_active:
             active.append("attention")
+        if self.notation_active:
+            active.append("notation")
         if self.include_consistency:
             active.append("consistency")
         if evt.stage == "parsing":
@@ -233,8 +258,10 @@ class ReportCheckerState(rx.State):
             source_name = self.source_file_name
             dictionary = self._parse_dictionary()
             do_consistency = self.include_consistency
+            do_notation = self.include_notation
             watch_active = bool(dictionary.watch_items)
             self.watch_active = watch_active
+            self.notation_active = do_notation
 
         if not emp_no or not job_id:
             async with self:
@@ -275,6 +302,7 @@ class ReportCheckerState(rx.State):
                 dictionary,
                 on_progress,
                 do_consistency=do_consistency,
+                do_notation=do_notation,
                 cancel_check=cancel_event.is_set,
                 usage=usage,
             )
@@ -297,10 +325,37 @@ class ReportCheckerState(rx.State):
                     "typo_count": len(result.typo_errors) if result else 0,
                     "consistency_count": len(result.consistency_errors) if result else 0,
                     "attention_count": len(result.attention_errors) if result else 0,
+                    "notation_count": len(result.notation_errors) if result else 0,
                     "consistency_checked": do_consistency,
+                    "notation_checked": do_notation,
                     "attention_checked": watch_active,
                     "elapsed_ms": int((time.perf_counter() - started) * 1000),
                 },
+            )
+
+        async def persist_usage(status: str, result=None) -> None:
+            """로그 + DB 원장 기록(chtb 재활용). DB 는 블로킹이라 스레드로."""
+            emit_usage_log(status, result)
+            if result is not None:
+                summary = (
+                    f"오탈자 {len(result.typo_errors)} · 표기 {len(result.notation_errors)} · "
+                    f"값 {len(result.consistency_errors)} · 주의 {len(result.attention_errors)}건 "
+                    f"(페이지 {job_stats['pages']})"
+                )
+            else:
+                summary = f"분석 {status} (페이지 {job_stats['pages']})"
+            await asyncio.to_thread(
+                db.record_usage,
+                emp_no=emp_no,
+                agent_id=cfg.agent_id,
+                source_file=source_name,
+                model_name=cfg.model_id,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                total_tokens=usage.total_tokens,
+                elapsed_sec=time.perf_counter() - started,
+                status=status,
+                summary=summary,
             )
         try:
             task = asyncio.create_task(asyncio.to_thread(worker))
@@ -315,7 +370,7 @@ class ReportCheckerState(rx.State):
                 result = await task
             except AnalysisCancelled:
                 log.info("report_checker 분석 중단 job_id=%s", job_id)
-                emit_usage_log("cancelled")
+                await persist_usage("cancelled")
                 async with self:
                     self.status = "cancelled"
                     self.stage = ""
@@ -324,7 +379,7 @@ class ReportCheckerState(rx.State):
                 return
             except Exception as e:  # noqa: BLE001 - UI 에 표면화
                 log.exception("report_checker 분석 실패 job_id=%s", job_id)
-                emit_usage_log("failed")
+                await persist_usage("failed")
                 async with self:
                     self.status = "error"
                     self.cancel_requested = False
@@ -339,6 +394,7 @@ class ReportCheckerState(rx.State):
             source_name,
             consistency_checked=do_consistency,
             attention_checked=watch_active,
+            notation_checked=do_notation,
         )
         stem = Path(source_name).stem or "report"
         filename = f"{stem}_검출결과.html"
@@ -350,8 +406,8 @@ class ReportCheckerState(rx.State):
             log.exception("report_checker 결과 저장 실패 job_id=%s", job_id)
             download_ready = False
 
-        # 사용량 로그 (완료) — 모니터링(로그 기반) 분리 집계 소스.
-        emit_usage_log("done", result)
+        # 사용량 로그 + DB 원장 기록 (완료)
+        await persist_usage("done", result)
 
         async with self:
             self.typo_errors = [e.to_dict() for e in result.typo_errors]
@@ -369,6 +425,8 @@ class ReportCheckerState(rx.State):
             self.ran_consistency = do_consistency
             self.attention_errors = [e.to_dict() for e in result.attention_errors]
             self.attention_count = len(result.attention_errors)
+            self.notation_errors = [e.to_dict() for e in result.notation_errors]
+            self.notation_count = len(result.notation_errors)
             self.download_filename = filename
             self.download_ready = download_ready
             self.status = "done"
@@ -401,11 +459,13 @@ class ReportCheckerState(rx.State):
         self.pending_file_name = ""
         self.pending_file_size = 0
         self.exclusions_text = ""
-        self.assertions_text = ""
+        self.aliases_text = ""
         self.watch_items_text = ""
         self.include_consistency = False
+        self.include_notation = False
         self.ran_consistency = False
         self.watch_active = False
+        self.notation_active = False
         self.cancel_requested = False
         self.progress_pct = 0
         self.stage_index = 0
@@ -421,5 +481,7 @@ class ReportCheckerState(rx.State):
         self.consistency_errors = []
         self.attention_errors = []
         self.attention_count = 0
+        self.notation_errors = []
+        self.notation_count = 0
         self.download_ready = False
         self.download_filename = ""
