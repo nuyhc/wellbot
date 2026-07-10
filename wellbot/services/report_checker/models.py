@@ -160,3 +160,4 @@ class ProgressEvent:
     total: int = 0
     typo_count: int = 0
     consistency_count: int = 0
+    attention_count: int = 0

@@ -113,5 +113,17 @@ def check_typos(
             log.warning("report_checker 오탈자 청크 실패 chunk=%s err=%s", chunk, e)
         time.sleep(cfg.call_interval_sec)
 
+    # 마지막 청크까지 반영한 최종 누적 카운트 통지 (이후 단계에서도 정확히 표시)
+    if on_progress and total:
+        on_progress(
+            ProgressEvent(
+                stage="typo",
+                detail=f"오탈자 검사 완료 ({len(errors)}건)",
+                current=total,
+                total=total,
+                typo_count=len(errors),
+            )
+        )
+
     log.info("report_checker 오탈자 합계 count=%d", len(errors))
     return errors

@@ -204,6 +204,8 @@ class ReportCheckerState(rx.State):
             self.typo_count = evt.typo_count
         if evt.consistency_count:
             self.consistency_count = evt.consistency_count
+        if evt.attention_count:
+            self.attention_count = evt.attention_count
         total = evt.total or 1
         # 활성 단계들에 5→100% 구간을 균등 배분 (오탈자는 항상 포함).
         active = ["typo"]

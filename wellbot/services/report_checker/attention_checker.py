@@ -80,6 +80,7 @@ def check_attention(
                     detail=f"주의 항목 검사 {idx}/{total} (p{chunk[0]}~p{chunk[-1]})",
                     current=idx,
                     total=total,
+                    attention_count=len(issues),
                 )
             )
         text = "\n\n".join(f"=== 페이지 {p} ===\n{pages[p]}" for p in chunk)
@@ -100,6 +101,19 @@ def check_attention(
         except Exception as e:
             log.warning("report_checker 주의항목 청크 실패 chunk=%s err=%s", chunk, e)
         time.sleep(cfg.call_interval_sec)
+
+    # 루프 종료 후 전체 누적 카운트를 한 번 더 통지 → 이후 단계(일관성) 동안에도
+    # 스텝퍼가 최종 위반 수를 표시하도록(마지막 청크 반영 포함).
+    if on_progress and total:
+        on_progress(
+            ProgressEvent(
+                stage="attention",
+                detail=f"주의 항목 검사 완료 ({len(issues)}건)",
+                current=total,
+                total=total,
+                attention_count=len(issues),
+            )
+        )
 
     log.info("report_checker 주의항목 위반 count=%d", len(issues))
     return issues
