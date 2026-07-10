@@ -14,14 +14,18 @@ import json
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 
 import reflex as rx
 
+from wellbot.logger import log_context
 from wellbot.services.report_checker import storage
+from wellbot.services.report_checker.config import get_config
 from wellbot.services.report_checker.models import (
     AnalysisCancelled,
     ProgressEvent,
+    Usage,
     UserDictionary,
 )
 from wellbot.services.report_checker.pdf_extract import extract_pages_from_bytes
@@ -241,6 +245,13 @@ class ReportCheckerState(rx.State):
         cancel_event = threading.Event()
         _CANCEL_EVENTS[job_id] = cancel_event
 
+        cfg = get_config()
+        # Usage 를 여기서 만들어 run_analysis 에 주입 → 취소/에러로 중단돼도
+        # 그때까지의 부분 토큰을 이 참조로 읽어 로깅할 수 있다.
+        usage = Usage()
+        job_stats = {"pages": 0}
+        started = time.perf_counter()
+
         def on_progress(evt: ProgressEvent) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, evt)
 
@@ -249,6 +260,7 @@ class ReportCheckerState(rx.State):
             pages = extract_pages_from_bytes(data)
             if not pages:
                 raise RuntimeError("PDF 에서 텍스트를 추출하지 못했습니다. 스캔본 PDF 는 지원하지 않습니다.")
+            job_stats["pages"] = len(pages)
             on_progress(
                 ProgressEvent(
                     stage="parsing",
@@ -262,8 +274,32 @@ class ReportCheckerState(rx.State):
                 on_progress,
                 do_consistency=do_consistency,
                 cancel_check=cancel_event.is_set,
+                usage=usage,
             )
 
+        def emit_usage_log(status: str, result=None) -> None:
+            """완료/취소/에러 공통 사용량 로그 — 모니터링 분리 집계 소스."""
+            log_context.bind(emp_no=emp_no)
+            log.info(
+                f"report_checker {status}",
+                extra={
+                    "service": "report_checker",
+                    "status": status,
+                    "agnt_id": cfg.agent_id,
+                    "model": cfg.model_id,
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "llm_calls": usage.calls,
+                    "pages": job_stats["pages"],
+                    "typo_count": len(result.typo_errors) if result else 0,
+                    "consistency_count": len(result.consistency_errors) if result else 0,
+                    "attention_count": len(result.attention_errors) if result else 0,
+                    "consistency_checked": do_consistency,
+                    "attention_checked": watch_active,
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
         try:
             task = asyncio.create_task(asyncio.to_thread(worker))
             try:
@@ -277,6 +313,7 @@ class ReportCheckerState(rx.State):
                 result = await task
             except AnalysisCancelled:
                 log.info("report_checker 분석 중단 job_id=%s", job_id)
+                emit_usage_log("cancelled")
                 async with self:
                     self.status = "cancelled"
                     self.stage = ""
@@ -285,6 +322,7 @@ class ReportCheckerState(rx.State):
                 return
             except Exception as e:  # noqa: BLE001 - UI 에 표면화
                 log.exception("report_checker 분석 실패 job_id=%s", job_id)
+                emit_usage_log("failed")
                 async with self:
                     self.status = "error"
                     self.cancel_requested = False
@@ -309,6 +347,9 @@ class ReportCheckerState(rx.State):
         except Exception:  # noqa: BLE001
             log.exception("report_checker 결과 저장 실패 job_id=%s", job_id)
             download_ready = False
+
+        # 사용량 로그 (완료) — 모니터링(로그 기반) 분리 집계 소스.
+        emit_usage_log("done", result)
 
         async with self:
             self.typo_errors = [e.to_dict() for e in result.typo_errors]
