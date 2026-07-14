@@ -578,13 +578,20 @@ def _ai_services(events: list[dict]) -> dict:
     total_runs = sum(a["runs"] for a in by_agent.values())
     total_in = sum(a["in"] for a in by_agent.values())
     total_out = sum(a["out"] for a in by_agent.values())
-    total_cost = sum(_cost(a["model"], a["in"], a["out"]) for a in by_agent.values())
+    agent_costs = [_cost(a["model"], a["in"], a["out"]) for a in by_agent.values()]
+    total_cost = sum(c for c in agent_costs if c is not None)
+    unpriced = sum(1 for c in agent_costs if c is None)
     total_users = len({emp for a in by_agent.values() for emp in a["emps"]})
 
     ai_cards = [
         _card("AI 서비스 실행", _num(total_runs), "에이전트 호출(잡)", _ACCENT["purple"]),
         _card("사용 토큰", _num(total_in + total_out), "입력+출력", _ACCENT["info"]),
-        _card("예상 비용", _usd(total_cost), "추정 단가 기준", _ACCENT["warn"]),
+        _card(
+            "예상 비용",
+            _usd(total_cost),
+            "추정 단가 기준" if not unpriced else f"단가미정 {unpriced}건 제외",
+            _ACCENT["warn"],
+        ),
         _card("고유 사용자", _num(total_users), "서비스 이용 사원", _ACCENT["good"]),
     ]
 
@@ -601,8 +608,8 @@ def _ai_services(events: list[dict]) -> dict:
                 "in_tok": _num(a["in"]),
                 "out_tok": _num(a["out"]),
                 "users": _num(len(a["emps"])),
-                "cost": _usd(cost),
-                "_sort": cost,
+                "cost": _usd(cost) if cost is not None else "단가미정",
+                "_sort": cost if cost is not None else -1.0,
             }
         )
     ai_rows.sort(key=lambda r: r["_sort"], reverse=True)
