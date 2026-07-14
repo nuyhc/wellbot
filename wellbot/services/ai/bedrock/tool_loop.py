@@ -7,7 +7,13 @@ import json
 import logging
 from typing import Any
 
-from wellbot.constants import READ_ATTACHMENT_MAX_TOKENS, TOOL_RESULT_MAX_TOKENS
+from wellbot.constants import (
+    LLM_CONTEXT_MAX_TOKENS,
+    READ_ATTACHMENT_CONTEXT_RESERVE,
+    READ_ATTACHMENT_MAX_TOKENS,
+    READ_ATTACHMENT_MIN_TOKENS,
+    TOOL_RESULT_MAX_TOKENS,
+)
 from wellbot.services.ai.bedrock.converse import (
     adrain_generator,
     build_messages,
@@ -19,22 +25,40 @@ from wellbot.services.files.chunker import estimate_tokens
 log = logging.getLogger(__name__)
 
 
-def _cap_tool_result_text(sanitized: Any, name: str = "") -> Any:
+def read_budget_for(context_window: int, max_output_tokens: int) -> int:
+    """모델 컨텍스트에서 read_attachment 단일 결과에 허용할 입력 토큰 예산.
+
+    시스템 프롬프트·대화 히스토리·출력 토큰·여유분을 뺀 몫을 문서 읽기에 배정한다.
+    모델 윈도우에 맞춰 한 번에 최대한 싣기 때문에, offset 이어읽기 누적으로 인한
+    컨텍스트 초과가 발생하지 않는다(대형 윈도우 모델은 문서를 통째로 적재).
+    """
+    window = context_window if context_window and context_window > 0 else 200_000
+    out = max_output_tokens if max_output_tokens and max_output_tokens > 0 else 8192
+    budget = window - LLM_CONTEXT_MAX_TOKENS - out - READ_ATTACHMENT_CONTEXT_RESERVE
+    return max(READ_ATTACHMENT_MIN_TOKENS, budget)
+
+
+def _cap_tool_result_text(
+    sanitized: Any, name: str = "", read_cap: int | None = None
+) -> Any:
     """tool 결과 텍스트를 토큰 예산으로 절단.
 
     루프가 tool_result 를 매 반복 재전송하므로 대용량 결과(kb_search 등)를
     그대로 두면 입력 토큰이 폭증한다. 검색 결과는 점수 내림차순이라 뒤쪽(저관련)을
     잘라 상위 청크를 보존한다.
 
-    read_attachment(전체 문서 읽기)는 성격상 큰 예산(READ_ATTACHMENT_MAX_TOKENS)을
-    적용하고, 이미 tool 자체가 예산 내로 잘라 반환하므로 여기선 안전망 역할.
+    read_attachment(전체 문서 읽기)는 모델 윈도우 기반 예산(read_cap)을 적용한다.
+    이미 tool 자체가 같은 예산으로 잘라 반환하므로 여기선 안전망 역할.
     """
     if not isinstance(sanitized, dict):
         return sanitized
     text = sanitized.get("text")
     if not isinstance(text, str) or not text:
         return sanitized
-    cap = READ_ATTACHMENT_MAX_TOKENS if name == "read_attachment" else TOOL_RESULT_MAX_TOKENS
+    if name == "read_attachment":
+        cap = read_cap if (read_cap and read_cap > 0) else READ_ATTACHMENT_MAX_TOKENS
+    else:
+        cap = TOOL_RESULT_MAX_TOKENS
     total = estimate_tokens(text)
     if total <= cap:
         return sanitized
@@ -141,6 +165,7 @@ async def astream_chat_with_tools(
     seen_calls: dict[tuple, int] = {}
     empty_streak = 0
     end_reason = "end_turn"
+    read_cap = read_budget_for(model.context_window, model.max_tokens)
 
     for iteration in range(max_iterations + 1):
         pending_tool_uses: list[dict] = []
@@ -239,7 +264,9 @@ async def astream_chat_with_tools(
             else:
                 empty_streak = 0
 
-            sanitized = _cap_tool_result_text(_strip_tool_result_meta(result_content), name)
+            sanitized = _cap_tool_result_text(
+                _strip_tool_result_meta(result_content), name, read_cap=read_cap
+            )
             tool_result_blocks.append({
                 "toolResult": {
                     "toolUseId": tu.get("toolUseId", ""),

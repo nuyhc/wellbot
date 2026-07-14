@@ -117,10 +117,21 @@ KB_NOT_FOUND_PATTERNS: tuple[str, ...] = (
 # 결과는 점수 내림차순이라 상위(고관련) 청크가 보존된다.
 TOOL_RESULT_MAX_TOKENS: int = int(os.environ.get("TOOL_RESULT_MAX_TOKENS", "6000"))
 
-# read_attachment(전체 문서 읽기) 전용 토큰 예산. 위 6000 캡과 별개로, 대용량
-# 컨텍스트 모델을 활용해 문서를 통째로 싣되 폭주는 막는다. 초과분은 잘리고
-# LLM 이 offset 으로 이어읽는다.
+# read_attachment(전체 문서 읽기) 폴백 상한. 모델 컨텍스트를 알 수 없을 때만 쓰이는
+# 고정 기본값. 실제로는 read_budget_for() 가 모델 context_window 기반으로 동적 산정한다.
 READ_ATTACHMENT_MAX_TOKENS: int = int(os.environ.get("READ_ATTACHMENT_MAX_TOKENS", "60000"))
+
+# read_attachment 예산을 모델 윈도우에서 산정할 때 남겨둘 여유분(시스템 프롬프트 +
+# toolConfig 스펙 + 안전 마진). 예산 = context_window − 히스토리(LLM_CONTEXT_MAX_TOKENS)
+# − 출력(max_tokens) − 이 값. 모델 윈도우에 맞춰 한 번에 싣기 때문에 offset 이어읽기
+# 누적으로 인한 컨텍스트 초과가 원천 차단된다.
+READ_ATTACHMENT_CONTEXT_RESERVE: int = int(
+    os.environ.get("READ_ATTACHMENT_CONTEXT_RESERVE", "8000")
+)
+# 동적 예산이 과도하게 작아지지 않도록 하는 하한(초소형 윈도우 모델 방어).
+READ_ATTACHMENT_MIN_TOKENS: int = int(
+    os.environ.get("READ_ATTACHMENT_MIN_TOKENS", "8000")
+)
 
 TOOL_USE_MAX_ITERATIONS: int = 3          # tool 호출 무한루프 방지 (천장)
 TOOL_USE_EMPTY_RESULT_LIMIT: int = 2      # 연속 빈 결과 시 강제 종료

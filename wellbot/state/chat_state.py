@@ -33,6 +33,7 @@ from wellbot.services.ai.bedrock import (
     astream_chat,
     astream_chat_with_tools,
     generate_title,
+    read_budget_for,
 )
 from wellbot.services.chat import chat_service, response_filter, tool_executor
 from wellbot.services.core.executor import ensure_io_executor
@@ -1929,13 +1930,18 @@ class ChatState(rx.State):
                 )
 
             if tool_config:
+                # read_attachment 결과를 모델 윈도우에 맞춰 한 번에 싣도록 예산 산정.
+                # 이렇게 하면 offset 이어읽기 누적으로 인한 컨텍스트 초과가 원천 차단된다.
+                read_budget = read_budget_for(model.context_window, model.max_tokens)
 
                 def _tool_exec(name: str, tool_input: dict) -> dict:
                     # 검색 범위는 사용자의 UI 선택(kb_modes)으로 결정. kb_scope 는 LLM 에
                     # 노출하지 않고 여기서 주입 (툴 스키마에도 부재).
                     if name == "kb_search":
                         tool_input = {**tool_input, "kb_scope": kb_modes}
-                    return tool_executor.execute_tool(name, tool_input, conv_id, emp_no)
+                    return tool_executor.execute_tool(
+                        name, tool_input, conv_id, emp_no, max_read_tokens=read_budget
+                    )
 
                 stream = astream_chat_with_tools(
                     api_messages,
@@ -2029,9 +2035,9 @@ class ChatState(rx.State):
                     input_tokens += int(chunk.get("inputTokens", 0) or 0)
                     output_tokens += int(chunk.get("outputTokens", 0) or 0)
 
-        except Exception:
+        except Exception as exc:
             log.exception("chat streaming 실패 model=%s conv_id=%s", model_name, conv_id)
-            content = "오류가 발생했습니다."
+            content = response_filter.classify_stream_error(exc) or "오류가 발생했습니다."
 
         finally:
             # Nova 등 확장 사고 미지원 모델이 <thinking> 블록을 출력하는 경우 제거

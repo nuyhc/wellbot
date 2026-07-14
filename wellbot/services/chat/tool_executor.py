@@ -80,7 +80,8 @@ READ_ATTACHMENT_TOOL: dict = {
             "문서 전체를 대상으로 하는 작업(전체 요약, 번역, 전수 검토, 목차·구조 파악 등)에 사용하세요. "
             "특정 사실·키워드만 필요하면 search_attachment 를 쓰세요. "
             "여러 파일이 필요하면 file_ids 에 모두 포함하세요. "
-            "문서가 매우 길어 결과가 잘리면, 반환된 안내의 offset 값으로 다시 호출해 이어읽으세요."
+            "문서는 모델이 한 번에 처리할 수 있는 만큼 실어 반환합니다. 문서가 그보다 커서 "
+            "결과가 잘리면, 반복 호출하지 말고 필요한 내용은 search_attachment 로 검색하세요."
         ),
         "inputSchema": {
             "json": {
@@ -224,6 +225,7 @@ def execute_tool(
     tool_input: dict[str, Any],
     smry_id: str,
     emp_no: str = "",
+    max_read_tokens: int | None = None,
 ) -> dict:
     """LLM 이 호출한 도구를 실제 실행하고 결과를 반환
 
@@ -239,7 +241,7 @@ def execute_tool(
         if tool_name == "search_attachment":
             return _run_search_attachment(tool_input, smry_id)
         if tool_name == "read_attachment":
-            return _run_read_attachment(tool_input, smry_id)
+            return _run_read_attachment(tool_input, smry_id, max_read_tokens)
         if tool_name == "kb_search":
             return _run_kb_search(tool_input, emp_no)
         log.warning("알 수 없는 tool 호출: %s", tool_name)
@@ -314,8 +316,15 @@ def _run_search_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
     }
 
 
-def _run_read_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
-    """read_attachment 실행 — 첨부 문서 전체 텍스트 반환(예산 내), 초과 시 잘림+이어읽기 안내."""
+def _run_read_attachment(
+    tool_input: dict[str, Any], smry_id: str, max_read_tokens: int | None = None
+) -> dict:
+    """read_attachment 실행 — 첨부 문서 전체 텍스트 반환.
+
+    max_read_tokens(모델 윈도우 기반 예산)만큼 한 번에 싣는다. 문서가 예산을 넘으면
+    앞부분만 반환하고, offset 이어읽기(누적으로 컨텍스트 초과 유발) 대신 특정 내용은
+    search_attachment 로 검색하도록 유도한다.
+    """
     raw_file_ids = tool_input.get("file_ids") or []
     file_ids: list[int] | None = None
     if isinstance(raw_file_ids, list):
@@ -358,14 +367,13 @@ def _run_read_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
     total_chars = len(full)
     body = full[offset:] if offset < total_chars else ""
 
+    cap = max_read_tokens if (max_read_tokens and max_read_tokens > 0) else READ_ATTACHMENT_MAX_TOKENS
     truncated = False
-    next_offset = 0
-    if estimate_tokens(body) > READ_ATTACHMENT_MAX_TOKENS:
+    if estimate_tokens(body) > cap:
         density = estimate_tokens(body) / max(1, len(body))  # 토큰/문자
-        keep = max(1, int(READ_ATTACHMENT_MAX_TOKENS / density))
+        keep = max(1, int(cap / density))
         body = body[:keep]
         truncated = True
-        next_offset = offset + keep
 
     header = [
         f"첨부 문서 {len(files)}개, 전체 {total_chars:,}자 중 "
@@ -378,8 +386,9 @@ def _run_read_attachment(tool_input: dict[str, Any], smry_id: str) -> dict:
     text = "\n".join(header) + "\n\n" + body
     if truncated:
         text += (
-            f"\n\n…(문서가 길어 여기까지만 표시했습니다. 이어읽으려면 "
-            f"offset={next_offset} 로 read_attachment 를 다시 호출하세요.)"
+            "\n\n…(문서가 모델이 한 번에 처리할 수 있는 한도보다 커서 앞부분만 표시했습니다. "
+            "나머지에서 특정 내용이 필요하면 search_attachment 로 검색하세요. "
+            "문서 전체를 이어서 읽어야 하면 컨텍스트가 더 큰 모델로 다시 시도하도록 사용자에게 안내하세요.)"
         )
 
     log.info(
