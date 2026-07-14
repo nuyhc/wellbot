@@ -2029,9 +2029,9 @@ class ChatState(rx.State):
                     input_tokens += int(chunk.get("inputTokens", 0) or 0)
                     output_tokens += int(chunk.get("outputTokens", 0) or 0)
 
-        except Exception:
+        except Exception as exc:
             log.exception("chat streaming 실패 model=%s conv_id=%s", model_name, conv_id)
-            content = "오류가 발생했습니다."
+            content = response_filter.classify_stream_error(exc) or "오류가 발생했습니다."
 
         finally:
             # Nova 등 확장 사고 미지원 모델이 <thinking> 블록을 출력하는 경우 제거
