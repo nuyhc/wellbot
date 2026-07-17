@@ -1,4 +1,4 @@
-"""구조 제안 + 게이트/근거검증
+"""구조 제안 + 정보 게이트/근거 검증.
 
 legacy chat_state.py 의 프롬프트 조립 로직을 원문 보존하여 이식.
 LLM 호출부만 Converse 헬퍼(bedrock)로 치환(invoke_compat/call_json). print->log.
@@ -6,25 +6,14 @@ LLM 호출부만 Converse 헬퍼(bedrock)로 치환(invoke_compat/call_json). pr
 
 from __future__ import annotations
 
-import json  # noqa: F401
 import logging
-import re  # noqa: F401
 
 from wellbot.services.report_maker import bedrock
-from wellbot.services.report_maker.parsing import (
-    extract_questions,
-    has_table_data,
-    normalize_md_tables,
-    strip_code_fences,
-    strip_question_block,
-)
+from wellbot.services.report_maker.config import get_config
+from wellbot.services.report_maker.parsing import fmt_pages
 from wellbot.services.report_maker.prompts import (
-    OUTLINE_GENERATION_RULES,
     PAGE_STRUCTURE_GUIDE,
-    REPORT_STRUCTURES,
     STRUCTURE_HEADING_RULES,
-    TABLE_READING_RULES,
-    structures_block,
 )
 
 log = logging.getLogger(__name__)
@@ -228,7 +217,7 @@ def propose_structure(topic, analysis, type_name, pages, mode="deep", page_plan=
             "2. 전국 오픈 일정 - 언제 전국 적용 예정인지\n\n"
             "위 형식으로 0.5장 구조를 작성하세요. 좌측/우측으로 나누지 말고 단일 영역으로만 작성하세요.\n"
         )
-        resp = bedrock.invoke_compat(prompt, 30000)
+        resp = bedrock.invoke_compat(prompt, get_config().max_tokens_analysis)
         text = resp["content"][0]["text"].strip()
         return {"structure": text, "questions": []}
 
@@ -314,7 +303,7 @@ def propose_structure(topic, analysis, type_name, pages, mode="deep", page_plan=
             f"위 형식으로 {pages}장 서머리 구조를 작성하세요"
             + (f" (1장 전체 서머리 + 2~{int(float(pages))}장 심층 과제)." if pages and float(pages) >= 2 else ".") + "\n"
         )
-        resp = bedrock.invoke_compat(prompt, 30000)
+        resp = bedrock.invoke_compat(prompt, get_config().max_tokens_analysis)
         text = resp["content"][0]["text"].strip()
         return {"structure": text, "questions": []}
         
@@ -436,7 +425,7 @@ def propose_structure(topic, analysis, type_name, pages, mode="deep", page_plan=
         f"위 예시 형식으로 {pages}페이지 구조를 작성하세요.\n"
         "two_col(좌우 2단) 페이지의 좌측/우측은 각각 한 줄로만 작성하고, single(단일 영역) 페이지는 좌측/우측으로 나누지 않습니다.\n"
     )
-    resp = bedrock.invoke_compat(prompt, 30000)
+    resp = bedrock.invoke_compat(prompt, get_config().max_tokens_analysis)
     text = resp["content"][0]["text"].strip()
     return {"structure": text, "questions": []}
 

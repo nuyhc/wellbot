@@ -1,4 +1,4 @@
-"""주제 분석
+"""주제 분석 — 입력을 구조화 분석(JSON)으로 변환.
 
 legacy chat_state.py 의 프롬프트 조립 로직을 원문 보존하여 이식.
 LLM 호출부만 Converse 헬퍼(bedrock)로 치환(invoke_compat/call_json). print->log.
@@ -6,28 +6,19 @@ LLM 호출부만 Converse 헬퍼(bedrock)로 치환(invoke_compat/call_json). pr
 
 from __future__ import annotations
 
-import json  # noqa: F401
 import logging
-import re  # noqa: F401
 
 from wellbot.services.report_maker import bedrock
-from wellbot.services.report_maker.parsing import (
-    extract_questions,
-    has_table_data,
-    normalize_md_tables,
-    strip_code_fences,
-    strip_question_block,
-)
+from wellbot.services.report_maker.config import get_config
+from wellbot.services.report_maker.parsing import has_table_data
 from wellbot.services.report_maker.prompts import (
-    OUTLINE_GENERATION_RULES,
-    PAGE_STRUCTURE_GUIDE,
-    REPORT_STRUCTURES,
     STRUCTURE_HEADING_RULES,
-    TABLE_READING_RULES,
     structures_block,
 )
 
 log = logging.getLogger(__name__)
+
+new_line = chr(10)  # "\n" — legacy chat_state 모듈 전역, 프롬프트 f-string 에서 사용
 
 
 def analyze_topic(topic: str, loaded_style="", is_report=False) -> dict:
@@ -132,4 +123,4 @@ def analyze_topic(topic: str, loaded_style="", is_report=False) -> dict:
         '{"pages":3,"label":"3장 보고서 - 1페이지(전체 과제 요약) / 2페이지(심층: 강조 과제A) / 3페이지(심층: 강조 과제B)"}'
         '] }'
     )
-    return bedrock.call_json(prompt, 30000)
+    return bedrock.call_json(prompt, get_config().max_tokens_analysis)
