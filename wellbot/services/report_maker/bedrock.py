@@ -42,27 +42,21 @@ def _client(region: str, read_timeout: int) -> Any:
     )
 
 
-def _build_kwargs(prompt: str, max_tokens: int, system: str) -> dict[str, Any]:
+def _converse_content(content: list[dict], max_tokens: int, system: str = "") -> tuple[str, str]:
+    """Converse 단일 턴 호출(임의 content 블록) → (텍스트, stopReason). 실패 시 ("", "error").
+
+    ThrottlingException 지수 백오프 재시도 + max_tokens 잘림 경고를 한곳에 모은다.
+    텍스트/이미지 호출이 모두 이 코어를 거쳐 동일한 에러 처리를 공유한다(예외를 올리지 않음).
+    """
     cfg = get_config()
+    client = _client(cfg.region, cfg.read_timeout_sec)
     kwargs: dict[str, Any] = {
         "modelId": cfg.model_id,
-        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "messages": [{"role": "user", "content": content}],
         "inferenceConfig": {"maxTokens": max_tokens},
     }
     if system:
         kwargs["system"] = [{"text": system}]
-    return kwargs
-
-
-def _converse_raw(prompt: str, max_tokens: int, system: str = "") -> tuple[str, str]:
-    """Converse 단일 턴 호출 → (텍스트, stopReason). 실패 시 ("", "error").
-
-    max_tokens 잘림은 상위 파싱 실패로 이어질 수 있어 경고만 남기고 부분 텍스트를
-    반환한다(legacy 는 조용히 ""를 반환했음 → 여기서는 로그로 드러낸다).
-    """
-    cfg = get_config()
-    client = _client(cfg.region, cfg.read_timeout_sec)
-    kwargs = _build_kwargs(prompt, max_tokens, system)
 
     for attempt in range(cfg.max_retries + 1):
         try:
@@ -86,9 +80,26 @@ def _converse_raw(prompt: str, max_tokens: int, system: str = "") -> tuple[str, 
     return "", "error"
 
 
+def _converse_raw(prompt: str, max_tokens: int, system: str = "") -> tuple[str, str]:
+    """텍스트 단일 턴 → (텍스트, stopReason)."""
+    return _converse_content([{"text": prompt}], max_tokens, system)
+
+
 def call_model(prompt: str, max_tokens: int, system: str = "") -> str:
     """Converse 단일 턴 호출 → 응답 텍스트. 실패 시 빈 문자열."""
     return _converse_raw(prompt, max_tokens, system)[0]
+
+
+def call_vision(image_bytes: bytes, image_format: str, prompt: str, max_tokens: int) -> str:
+    """이미지 + 지시 프롬프트 → 추출 텍스트. 실패 시 빈 문자열(재시도·에러처리 공유).
+
+    image_format: "jpeg" | "png" | "gif" | "webp" (Converse image block format).
+    """
+    content = [
+        {"image": {"format": image_format, "source": {"bytes": image_bytes}}},
+        {"text": prompt},
+    ]
+    return _converse_content(content, max_tokens)[0]
 
 
 def invoke_compat(prompt: str, max_tokens: int, system: str = "") -> dict:
@@ -129,7 +140,13 @@ def stream_text(prompt: str, max_tokens: int, system: str = "") -> Iterator[str]
     """
     cfg = get_config()
     client = _client(cfg.region, cfg.read_timeout_sec)
-    kwargs = _build_kwargs(prompt, max_tokens, system)
+    kwargs: dict[str, Any] = {
+        "modelId": cfg.model_id,
+        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "inferenceConfig": {"maxTokens": max_tokens},
+    }
+    if system:
+        kwargs["system"] = [{"text": system}]
 
     resp = client.converse_stream(**kwargs)
     for event in resp.get("stream", []):
