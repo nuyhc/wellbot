@@ -56,6 +56,15 @@ def save_style_doc(emp_no: str, template: str, filename: str, data: bytes) -> st
     return key
 
 
+def save_topic_file(emp_no: str, template: str, filename: str, data: bytes) -> str:
+    """주제 첨부(이미지/문서)를 S3 에 저장하고 key 반환."""
+    ts = datetime.now(tz=KST).strftime("%y%m%d%H%M%S")
+    key = f"{template_prefix(emp_no, template)}input/{ts}_{_safe_name(filename)}"
+    storage_service.upload_bytes(data, key, content_type="application/octet-stream")
+    log.info("주제 첨부 저장 emp_no=%s key=%s", emp_no, key)
+    return key
+
+
 def list_style_docs(emp_no: str, template: str) -> list[str]:
     """스타일 학습 문서 key 목록 (최근순)."""
     prefix = f"{template_prefix(emp_no, template)}{_STYLE_DOCS}/"
