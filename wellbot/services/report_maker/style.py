@@ -321,6 +321,34 @@ def _extract_pdf(pdf_path: str) -> dict:
     }
 
 
+def extract_plain_text(file_path: str) -> str:
+    """주제 첨부(PDF/PPTX)에서 평문 텍스트만 추출(스타일 분석과 별개, LLM 입력용)."""
+    ext = Path(file_path).suffix.lower()
+    lines: list[str] = []
+    if ext == ".pdf":
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            for i, page in enumerate(pdf.pages, 1):
+                text = page.extract_text()
+                if text and text.strip():
+                    lines.append(f"[페이지 {i}]")
+                    lines.append(text.strip())
+    elif ext == ".pptx":
+        prs = Presentation(file_path)
+        for i, slide in enumerate(prs.slides, 1):
+            slide_texts = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        t = para.text.strip()
+                        if t:
+                            slide_texts.append(t)
+            if slide_texts:
+                lines.append(f"[슬라이드 {i}]")
+                lines.extend(slide_texts)
+    return "\n".join(lines)
+
+
 def extract_doc_style(file_path: str) -> dict:
     ext = Path(file_path).suffix.lower()
     if ext == ".pdf":
