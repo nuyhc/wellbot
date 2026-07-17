@@ -22,6 +22,7 @@ from pathlib import Path
 
 from wellbot.constants import KST
 from wellbot.services.files import storage_service
+from wellbot.services.report_maker.parsing import to_safe_id
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ def _base_prefix() -> str:
 
 
 def template_prefix(emp_no: str, template: str) -> str:
-    return f"{_base_prefix()}/{emp_no}/{template}/"
+    # template 을 안전 ID 로 정규화 — 슬래시·한글·빈값으로 인한 malformed/중첩 key 방지
+    # (memory.actor_id_for 의 to_safe_id 와 일관). emp_no 는 항상 서버 도출값.
+    return f"{_base_prefix()}/{emp_no}/{to_safe_id(template)}/"
 
 
 def _safe_name(filename: str) -> str:
