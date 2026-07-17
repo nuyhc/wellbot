@@ -16,7 +16,6 @@ max_tokens_outline: 50000       # 아웃라인 생성/수정
 max_tokens_analysis: 30000      # 주제 분석·게이트 판정
 max_tokens_style: 10000         # 문서 스타일 분석
 max_tokens_vision: 2000         # 이미지 텍스트 추출
-max_tokens_merge: 4000          # 스타일 병합
 
 # AgentCore 메모리 (스타일 프로파일) — 환경변수 REPORT_MAKER_MEMORY_ID 우선
 memory_id: ""

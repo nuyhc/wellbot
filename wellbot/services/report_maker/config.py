@@ -45,7 +45,6 @@ class ReportMakerConfig:
     max_tokens_analysis: int = 30000
     max_tokens_style: int = 10000
     max_tokens_vision: int = 2000
-    max_tokens_merge: int = 4000
 
     memory_id: str = ""
 
@@ -87,7 +86,6 @@ def _load() -> ReportMakerConfig:
         max_tokens_analysis=int(raw.get("max_tokens_analysis", ReportMakerConfig.max_tokens_analysis)),
         max_tokens_style=int(raw.get("max_tokens_style", ReportMakerConfig.max_tokens_style)),
         max_tokens_vision=int(raw.get("max_tokens_vision", ReportMakerConfig.max_tokens_vision)),
-        max_tokens_merge=int(raw.get("max_tokens_merge", ReportMakerConfig.max_tokens_merge)),
         memory_id=memory_id,
         max_templates=int(raw.get("max_templates", ReportMakerConfig.max_templates)),
         max_upload_mb=int(raw.get("max_upload_mb", ReportMakerConfig.max_upload_mb)),
