@@ -13,10 +13,10 @@
 ai_services:
   - id: report-generator
     name: 보고서 문구 지원
-    description: 보고서 작성에 필요한 문구를 AI가 추천하고 다듬어 주는 외부 시스템으로 이동합니다.
+    description: 사용자 문체를 학습해 보고서 초안(아웃라인)을 AI가 작성·다듬어 줍니다.
     icon: library
-    route: "${REPORT_GENERATOR_URL}"
-    external: true
+    route: "/ai-services/report-generator"
+    external: false
     enabled: true
 
   - id: report-checker
