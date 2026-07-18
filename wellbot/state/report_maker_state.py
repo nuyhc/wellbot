@@ -15,6 +15,7 @@ legacy ChatState 의 flow_stage 흐름을 동일 UX 로 재현하되:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -387,6 +388,42 @@ class ReportMakerState(rx.State):
             log.exception("주제 첨부 처리 실패 key=%s", key)
         self.is_streaming = False
         yield
+
+    @rx.event
+    def pick_and_upload_style(self):
+        """참고 문서 선택 → 업로드(JS) → 콜백에서 스타일 학습 트리거."""
+        if not self.template_id:
+            return rx.toast.error("먼저 보고서 유형을 선택하세요.")
+        return rx.call_script(
+            f"reportMakerPickAndUpload({json.dumps(self.template_id)}, 'style')",
+            callback=ReportMakerState.on_style_result,
+        )
+
+    @rx.event
+    def on_style_result(self, result: dict):
+        if not result or not result.get("key"):
+            if result and result.get("error"):
+                return rx.toast.error(result["error"])
+            return
+        return ReportMakerState.on_style_uploaded(result["key"])
+
+    @rx.event
+    def pick_and_upload_topic(self):
+        """주제 첨부 선택 → 업로드(JS) → 콜백에서 텍스트 추출 트리거."""
+        if not self.template_id:
+            return rx.toast.error("먼저 보고서 유형을 선택하세요.")
+        return rx.call_script(
+            f"reportMakerPickAndUpload({json.dumps(self.template_id)}, 'topic')",
+            callback=ReportMakerState.on_topic_result,
+        )
+
+    @rx.event
+    def on_topic_result(self, result: dict):
+        if not result or not result.get("key"):
+            if result and result.get("error"):
+                return rx.toast.error(result["error"])
+            return
+        return ReportMakerState.on_topic_uploaded(result["key"])
 
     # ══════════════════════════════════════════════════════════
     # 스타일 편집
