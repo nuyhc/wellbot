@@ -5,8 +5,7 @@
 # - name        : 카드 제목
 # - description : 카드 설명
 # - icon        : lucide 아이콘 이름 (https://lucide.dev/icons)
-# - route       : 클릭 시 이동할 라우트. 비우면 '준비 중'으로 표시.
-#                 ${REPORT_GENERATOR_URL} 같은 변수 치환 지원 (환경별 외부 URL 주입).
+# - route       : 클릭 시 이동할 라우트(내부 경로). 비우면 '준비 중'으로 표시.
 # - external    : true 면 route 를 외부 URL 로 보고 새 창/사이트로 이동
 # - enabled     : false 면 비활성(준비 중)으로 표시
 
