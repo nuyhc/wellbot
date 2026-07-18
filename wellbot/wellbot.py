@@ -25,8 +25,10 @@ from wellbot.pages import (
     login_page,
     register_page,
     report_checker_page,
+    report_maker_page,
 )
 from wellbot.state import AdminState, AuthState, ChatState
+from wellbot.state.report_maker_state import ReportMakerState
 from wellbot.styles import GLOBAL_STYLE, THEME
 
 app = rx.App(
@@ -40,3 +42,4 @@ app.add_page(register_page, route="/register", title="WellBot - 회원가입", o
 app.add_page(admin_page, route="/admin", title="WellBot - 관리", on_load=AdminState.on_admin_load)
 app.add_page(ai_services_page, route="/ai-services", title="WellBot - AI 서비스", on_load=AuthState.check_auth)
 app.add_page(report_checker_page, route="/ai-services/report-checker", title="WellBot - 보고서 오류 검출", on_load=AuthState.check_auth)
+app.add_page(report_maker_page, route="/ai-services/report-generator", title="WellBot - 보고서 문구 지원", on_load=[AuthState.check_auth, ReportMakerState.on_load])
