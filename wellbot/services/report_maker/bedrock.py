@@ -4,7 +4,6 @@ legacy 는 invoke_model(Anthropic 네이티브 body)을 5곳 이상에서 제각
 예외 처리가 제각각이었다. 여기서 Converse API 기반 단일 헬퍼로 통합한다:
     - call_model : 단일 턴 텍스트
     - call_json  : 텍스트에서 JSON 객체 추출(구조화 응답)
-    - stream_text: 토큰 스트리밍 제너레이터(아웃라인 생성용)
 ThrottlingException 지수 백오프 재시도 + max_tokens 잘림 경고 포함.
 """
 
@@ -16,7 +15,7 @@ import os
 import re
 import time
 from functools import lru_cache
-from typing import Any, Iterator
+from typing import Any
 
 import boto3
 from botocore.config import Config
@@ -130,30 +129,3 @@ def _extract_json_object(text: str) -> dict:
 def call_json(prompt: str, max_tokens: int, system: str = "") -> dict:
     """call_model 후 JSON 객체로 파싱. 실패 시 빈 dict."""
     return _extract_json_object(call_model(prompt, max_tokens, system))
-
-
-def stream_text(prompt: str, max_tokens: int, system: str = "") -> Iterator[str]:
-    """Converse 스트리밍 → 텍스트 청크 제너레이터.
-
-    호출부(State)가 토큰을 받아 UI 에 흘려보낸다. 오류 시 조용히 종료하지 않고
-    예외를 올려 상위에서 사용자 메시지로 처리하게 한다.
-    """
-    cfg = get_config()
-    client = _client(cfg.region, cfg.read_timeout_sec)
-    kwargs: dict[str, Any] = {
-        "modelId": cfg.model_id,
-        "messages": [{"role": "user", "content": [{"text": prompt}]}],
-        "inferenceConfig": {"maxTokens": max_tokens},
-    }
-    if system:
-        kwargs["system"] = [{"text": system}]
-
-    resp = client.converse_stream(**kwargs)
-    for event in resp.get("stream", []):
-        if "contentBlockDelta" in event:
-            delta = event["contentBlockDelta"].get("delta", {})
-            if "text" in delta:
-                yield delta["text"]
-        elif "messageStop" in event:
-            if event["messageStop"].get("stopReason") == "max_tokens":
-                log.warning("report_maker 스트림 잘림(max_tokens) model=%s", cfg.model_id)

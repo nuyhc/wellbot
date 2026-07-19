@@ -10,7 +10,6 @@ import logging
 
 from wellbot.services.report_maker import bedrock
 from wellbot.services.report_maker.config import get_config
-from wellbot.services.report_maker.models import OutlineRequest
 from wellbot.services.report_maker.parsing import (
     has_table_data,
     normalize_md_tables,
@@ -303,12 +302,3 @@ def edit_outline(outline: str, instruction: str, mode: str = "deep", page_count:
     except Exception as e:
         log.debug(f"️ 수정 실패: {e}")
         return ""
-
-
-
-def build_outline_from_request(req: OutlineRequest) -> str:
-    """OutlineRequest 로 build_outline 호출(상태 계층 편의 어댑터)."""
-    return build_outline(
-        req.topic, req.loaded_style, req.extra, req.report_type, req.report_type_name,
-        req.page_count, req.mode, req.storyline, req.storyline_blocks, req.unanswered, req.is_report,
-    )
