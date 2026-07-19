@@ -225,9 +225,9 @@ def build_outline(topic, loaded_style, extra="", report_type="", report_type_nam
         result = normalize_md_tables(result)
         if body.get("stop_reason") == "max_tokens":
             return ""
-        return result 
-    except Exception as e:
-        log.debug(f" 실패: {e}")
+        return result
+    except Exception:
+        log.exception("아웃라인 생성 실패")
         return ""
 
 # ──────────────────────────────────────────────────────────────
@@ -299,6 +299,6 @@ def edit_outline(outline: str, instruction: str, mode: str = "deep", page_count:
         log.debug("아웃라인 수정 완료")
         return result 
         
-    except Exception as e:
-        log.debug(f"️ 수정 실패: {e}")
+    except Exception:
+        log.exception("아웃라인 수정 실패")
         return ""
