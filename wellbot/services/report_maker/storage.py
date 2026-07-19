@@ -47,6 +47,18 @@ def _safe_name(filename: str) -> str:
     return os.path.basename(filename or "").strip() or "file"
 
 
+def owns_key(key: str, emp_no: str, template: str) -> bool:
+    """S3 key 가 (emp_no, template) 스코프에 속하는지 검증.
+
+    업로드 API 가 클라이언트에 돌려준 key 를 재소비(다운로드)하기 전에 호출한다.
+    key 는 클라이언트가 조작할 수 있으므로 항상 서버 도출 emp_no/template 로
+    스코프를 재검증해야 한다(읽기 경로 IDOR 방지). emp_no/template 이 비면 거부.
+    """
+    if not key or not emp_no or not template:
+        return False
+    return key.startswith(template_prefix(emp_no, template))
+
+
 # ──────────────────────────────────────────────────────────────
 # 입력 파일
 # ──────────────────────────────────────────────────────────────

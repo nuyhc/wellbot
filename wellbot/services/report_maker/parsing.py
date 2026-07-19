@@ -12,6 +12,33 @@ import hashlib
 import re
 
 # ──────────────────────────────────────────────────────────────
+# 업로드 파일 시그니처(매직바이트) 검증 — 확장자만 믿지 않고 실제 내용 재검증
+# .pptx 는 ZIP 컨테이너(PK), 이미지/문서는 고유 시그니처. WEBP 는 RIFF....WEBP.
+# ──────────────────────────────────────────────────────────────
+MAGIC_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    ".pdf": (b"%PDF",),
+    ".pptx": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".webp": (b"RIFF",),  # 오프셋 8~11 의 'WEBP' 는 아래에서 별도 확인
+}
+
+
+def magic_bytes_ok(ext: str, data: bytes) -> bool:
+    """파일 앞부분이 확장자에 맞는 시그니처인지 검증. 미정의 확장자는 통과."""
+    sigs = MAGIC_SIGNATURES.get(ext)
+    if not sigs:
+        return True
+    if not any(data.startswith(s) for s in sigs):
+        return False
+    if ext == ".webp":
+        return len(data) >= 12 and data[8:12] == b"WEBP"
+    return True
+
+
+# ──────────────────────────────────────────────────────────────
 # 페이지 수 파싱
 # ──────────────────────────────────────────────────────────────
 _KOREAN_NUMBERS: dict[str, float] = {

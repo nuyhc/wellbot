@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, status
 
@@ -23,6 +24,7 @@ from wellbot.logger import log_context
 from wellbot.services.auth import auth_service
 from wellbot.services.report_maker import storage
 from wellbot.services.report_maker.config import get_config
+from wellbot.services.report_maker.parsing import magic_bytes_ok
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def _require_emp_no(wellbot_auth: str | None) -> str:
 async def upload_file(
     file: UploadFile = File(...),
     template: str = Form(...),
-    kind: str = Form("style"),
+    kind: Literal["style", "topic"] = Form("style"),
     wellbot_auth: str | None = Cookie(default=None),
 ):
     """스타일 문서/주제 첨부를 S3 에 적재하고 key 반환."""
@@ -75,15 +77,23 @@ async def upload_file(
     if not data:
         return {"key": "", "filename": file.filename, "error": "빈 파일입니다."}
 
+    # 매직바이트 검증 — 확장자 위조/형식 불일치 차단
+    if not magic_bytes_ok(ext, data):
+        return {
+            "key": "",
+            "filename": file.filename,
+            "error": "파일 내용이 확장자와 일치하지 않습니다.",
+        }
+
     # S3 저장 (kind 에 따라 폴더 분리)
     try:
         if kind == "topic":
             key = storage.save_topic_file(emp_no, template, file.filename or "file", data)
         else:
             key = storage.save_style_doc(emp_no, template, file.filename or "file", data)
-    except Exception as e:
+    except Exception:
         log.exception("report_maker 업로드 저장 실패")
-        return {"key": "", "filename": file.filename, "error": str(e)}
+        return {"key": "", "filename": file.filename, "error": "파일 저장에 실패했습니다."}
 
     log.info("report_maker 업로드 완료 kind=%s key=%s", kind, key)
     return {"key": key, "filename": file.filename, "error": None}
