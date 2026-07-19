@@ -331,6 +331,11 @@ class ReportMakerState(rx.State):
         """API 업로드가 반환한 S3 key 를 받아 문서 스타일을 학습한다."""
         async with self:
             emp_no, template = self._emp_no, self.template_id
+            if not storage.owns_key(key, emp_no, template):
+                log.warning("스타일 업로드 key 소유권 불일치 emp_no=%s key=%s", emp_no, key)
+                self.style_upload_status = "잘못된 파일 참조입니다."
+                self.is_streaming = False
+                return
             self.style_upload_status = "스타일 분석 중..."
             self.is_streaming = True
 
@@ -366,6 +371,10 @@ class ReportMakerState(rx.State):
     @rx.event
     async def on_topic_uploaded(self, key: str):
         """주제 첨부 파일의 텍스트를 추출해 다음 입력에 합친다."""
+        if not storage.owns_key(key, self._emp_no, self.template_id):
+            log.warning("주제 첨부 key 소유권 불일치 emp_no=%s key=%s", self._emp_no, key)
+            yield rx.toast.error("잘못된 파일 참조입니다.")
+            return
         self.is_streaming = True
         yield
 
@@ -493,6 +502,13 @@ class ReportMakerState(rx.State):
         try:
             async for _ in self._route(text):
                 yield
+        except Exception:
+            log.exception("메시지 처리 실패")
+            self.is_streaming = False
+            self.messages.append(
+                ReportMessage(content="처리 중 오류가 발생했습니다. 다시 시도해주세요.")
+            )
+            yield
         finally:
             await self._persist_turn()
             yield
@@ -612,6 +628,14 @@ class ReportMakerState(rx.State):
             self.page_count = rec if rec is not None else 1
         else:
             self.page_count = parse_page_count(user_input)
+
+        # 페이지 수 답변에 흐름/순서 조정 지시가 섞여 있으면 스토리라인·분석에 반영
+        # (legacy _handle_page_count 동작 보존 — 이 단계의 흐름 지시가 유실되지 않도록).
+        if len(_u) > 8 and any(
+            k in _u for k in ("흐름", "순서", "스토리", "먼저", "강조", "빼", "추가", "바꿔")
+        ):
+            self.report_storyline = (self.report_storyline + f"\n[사용자 흐름 조정] {_u}").strip()
+            self.flow_analysis = self.flow_analysis + f"\n[사용자 흐름 조정] {_u}"
 
         chosen_label = self._chosen_label()
 

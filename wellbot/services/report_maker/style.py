@@ -176,7 +176,7 @@ def _extract_pptx(pptx_path: str) -> dict:
                         sd["paragraphs"].append(text)
                     sd["content_items"].append({"zone": zone, "text": text})
         slides_info.append(sd)
-        print(f"[제목확인] 슬라이드{i}: title='{sd['title']}' | 본문 {len(sd['content_items'])}개")
+        log.debug("슬라이드%d 파싱: 본문 %d개", i, len(sd["content_items"]))
  
     bullet_cnt = sum(len(s["bullets"])    for s in slides_info)
     para_cnt   = sum(len(s["paragraphs"]) for s in slides_info)
