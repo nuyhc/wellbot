@@ -317,17 +317,24 @@ def _chat_view() -> rx.Component:
 
 
 def report_maker_page() -> rx.Component:
-    """보고서 문구 작성 지원 페이지."""
-    return chat_layout(
-        rx.box(
-            rx.script(REPORT_MAKER_SCRIPT),
-            rx.cond(
-                ReportMakerState.session_ready,
-                _chat_view(),
-                _setup_view(),
-            ),
-            width="100%",
-            height="100%",
-            padding="1.5em 2em",
-        )
+    """보고서 문구 작성 지원 페이지.
+
+    rx.script 는 페이지 fragment 루트에 두어야(레이아웃 내부 깊숙이 X) mount 타이밍
+    이슈 없이 window 전역 함수(reportMakerPickAndUpload)가 클릭 전에 정의된다.
+    (report_checker.py 와 동일 패턴)
+    """
+    return rx.fragment(
+        rx.script(REPORT_MAKER_SCRIPT),
+        chat_layout(
+            rx.box(
+                rx.cond(
+                    ReportMakerState.session_ready,
+                    _chat_view(),
+                    _setup_view(),
+                ),
+                width="100%",
+                height="100%",
+                padding="1.5em 2em",
+            )
+        ),
     )
