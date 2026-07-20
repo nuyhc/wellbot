@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from wellbot.constants import STREAM_FLUSH_INTERVAL_SEC
 from wellbot.services.ai.bedrock.converse import adrain_generator
+from wellbot.services.chat import chat_service
 from wellbot.services.files import attachment_service
 from wellbot.state.chat_helpers.download_script import build_download_script
 from wellbot.services.report_maker import (
@@ -50,6 +51,7 @@ from wellbot.services.report_maker.parsing import (
     to_safe_id,
 )
 from wellbot.state.auth_state import AuthState
+from wellbot.state.chat_state import ChatState
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +78,9 @@ class ReportMessage(BaseModel):
     file_name: str = ""
     file_no: int = 0        # 첨부 파일 번호(atch_file_m). 0 이면 첨부 없음
     msg_id: str = ""        # chtb_tlk_id — 첨부(ChatMessageAttachment) 매핑·영속에 사용
+    model_name: str = ""    # 생성 모델 ID(스트리밍 응답에만). 영속 시 chtb_mdl_nm 로 저장
+    input_tokens: int = 0   # 스트리밍 응답의 입력 토큰(metadata usage). 영속 시 기록
+    output_tokens: int = 0  # 스트리밍 응답의 출력 토큰(metadata usage). 영속 시 기록
 
 
 class ConvSummary(BaseModel):
@@ -137,6 +142,10 @@ class ReportMakerState(rx.State):
     _pending_msg_id: str = ""         # 첨부-메시지 매핑용 사전발급 msg_id(전송 시 메시지에 부여)
     style_docs: list[str] = []        # 스타일 추출에 올린 문서 파일명 목록
 
+    # 채팅에서 넘어온 보고서 seed(대화 메시지 본문). _reset_conversation 에서 지우지 않고
+    # 세션 시작 시점(_start_session)에 _uploaded_topic_text 로 적용한다.
+    _pending_seed: str = ""
+
     # ── 영속 커서 (백엔드) ──
     _persisted_count: int = 0
 
@@ -165,9 +174,42 @@ class ReportMakerState(rx.State):
         if not self._emp_no:
             return rx.redirect("/login")
         await self._load_templates()
+        await self._consume_report_seed()
 
     async def _load_templates(self):
         self.templates = await asyncio.to_thread(db.list_templates, self._emp_no)
+
+    async def _consume_report_seed(self):
+        """채팅에서 넘어온 보고서 seed 참조를 cross-state 로 읽어 소비한다.
+
+        본문은 URL 이 아니라 ChatState backend 필드에 담겨 넘어온다. 소유권은 여기서
+        self._emp_no 로 재검증(get_message_content)하므로 남의 대화는 걸러진다.
+        세션이 이미 열려 있으면 즉시 적용하고, 아니면 유형 선택 시 _start_session 이 적용한다.
+        """
+        chat = await self.get_state(ChatState)
+        smry = chat._report_seed_smry
+        if not smry:
+            return
+        seq = chat._report_seed_seq
+        chat._report_seed_smry = ""   # 중복 소비 방지
+        chat._report_seed_seq = 0
+        content = await asyncio.to_thread(
+            chat_service.get_message_content, smry, self._emp_no, seq
+        )
+        if not content:
+            return
+        self._pending_seed = content
+        if self.session_ready:
+            self._apply_pending_seed()
+
+    def _apply_pending_seed(self):
+        """보류 중인 seed 를 주제 첨부 슬롯에 적용(칩 재사용). 세션 리셋 이후에만 호출."""
+        if not self._pending_seed:
+            return
+        self._uploaded_topic_text = self._pending_seed
+        self.pending_topic_file = "대화에서 가져온 내용"
+        self.pending_topic_file_no = 0
+        self._pending_seed = ""
 
     # ══════════════════════════════════════════════════════════
     # 템플릿(보고서 유형)
@@ -233,6 +275,7 @@ class ReportMakerState(rx.State):
         )
         self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
         self._reset_conversation()
+        self._apply_pending_seed()   # 채팅에서 넘어온 seed 는 리셋 이후에 적용
         self.session_id = uuid.uuid4().hex[:50]
         self.session_ready = True
         await self._load_conversation_list()
@@ -343,6 +386,9 @@ class ReportMakerState(rx.State):
             # 첨부가 있는 사용자 메시지는 사전발급 msg_id 로 저장 → ChatMessageAttachment 매핑 연결
             await asyncio.to_thread(
                 db.append_message, self.session_id, role, m.content, self._emp_no,
+                model_name=m.model_name,
+                input_tokens=m.input_tokens,
+                output_tokens=m.output_tokens,
                 msg_id=(m.msg_id or None),
             )
         self._persisted_count = len(self.messages)
@@ -974,7 +1020,7 @@ class ReportMakerState(rx.State):
             yield
 
     # ── 청크 스트리밍 헬퍼 ──
-    async def _stream_into(self, idx: int, prompt: str, max_tokens: int, display):
+    async def _stream_into(self, idx: int, prompt: str, max_tokens: int, display, usage_out=None):
         """stream_model 을 시간 배치(STREAM_FLUSH_INTERVAL_SEC)로 messages[idx] 에 반영.
 
         토큰마다가 아니라 ~80ms 간격으로 묶어 flush 한다(락·네트워크 폭주 방지, WellBot
@@ -985,7 +1031,7 @@ class ReportMakerState(rx.State):
         raw = ""
         last_flush = time.monotonic()
         async for delta in adrain_generator(
-            lambda: bedrock.stream_model(prompt, max_tokens)
+            lambda: bedrock.stream_model(prompt, max_tokens, usage_out=usage_out)
         ):
             raw += delta
             now = time.monotonic()
@@ -1010,8 +1056,9 @@ class ReportMakerState(rx.State):
         )
         idx = len(self.messages) - 1
         raw = ""
+        usage: dict = {}
         async for raw in self._stream_into(
-            idx, prompt, get_config().max_tokens_outline, md_linebreaks
+            idx, prompt, get_config().max_tokens_outline, md_linebreaks, usage_out=usage
         ):
             yield
         if not raw.strip():
@@ -1027,6 +1074,9 @@ class ReportMakerState(rx.State):
             content=md_linebreaks(final)
             + "\n\n---\n수정 요청사항을 입력하거나, 현재 스타일을 저장하세요.",
             is_outline=True,
+            model_name=get_config().model_id,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
         )
         self.is_streaming = False
         yield
@@ -1043,8 +1093,9 @@ class ReportMakerState(rx.State):
         )
         idx = len(self.messages) - 1
         raw = ""
+        usage: dict = {}
         async for raw in self._stream_into(
-            idx, prompt, get_config().max_tokens_outline, md_linebreaks
+            idx, prompt, get_config().max_tokens_outline, md_linebreaks, usage_out=usage
         ):
             yield
         if not raw.strip():
@@ -1058,6 +1109,9 @@ class ReportMakerState(rx.State):
         self.messages[idx] = ReportMessage(
             content=md_linebreaks(final) + f"\n\n수정 완료 (#{self.iteration})",
             is_outline=True,
+            model_name=get_config().model_id,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
         )
         self.is_streaming = False
         yield
@@ -1100,9 +1154,15 @@ class ReportMakerState(rx.State):
         )
         idx = len(self.messages) - 1
         raw = ""
-        async for raw in self._stream_into(idx, prompt, 5000, lambda t: t):
+        usage: dict = {}
+        async for raw in self._stream_into(idx, prompt, 5000, lambda t: t, usage_out=usage):
             yield
-        self.messages[idx] = ReportMessage(content=raw.strip() or "답변을 생성하지 못했습니다.")
+        self.messages[idx] = ReportMessage(
+            content=raw.strip() or "답변을 생성하지 못했습니다.",
+            model_name=get_config().model_id,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+        )
         self.is_streaming = False
         yield
 
