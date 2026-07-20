@@ -4,7 +4,7 @@
 #   REPORT_MAKER_MODEL_ID, REPORT_MAKER_MEMORY_ID, AWS_REGION
 # S3 버킷/prefix 는 앱 storage_service(환경변수 S3_KEY_PREFIX)를 재사용
 
-agent_id: report-maker          # chtb_msg_d.AGNT_ID 태그 (메인 채팅과 분리)
+agent_id: "RPT_DRFT_GEN"
 
 # LLM
 model_id: "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
