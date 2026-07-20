@@ -1,8 +1,9 @@
 """report_maker DB CRUD (MySQL).
 
 대화/메시지는 기존 채팅 테이블(chtb_smry_d / chtb_msg_d)을 재사용하되 메시지에
-AGNT_ID='report-maker' 를 태깅해 메인 채팅과 분리한다(메인 사이드바는 agnt_id 태깅
-대화를 제외하므로 자동 분리됨). 보고서 유형(템플릿)은 agnt_mmry_use_n 을 재사용한다.
+AGNT_ID(=get_config().agent_id, 기본 RPT_DRFT_GEN)를 태깅해 메인 채팅과 분리한다
+(메인 사이드바는 agnt_id 태깅 대화를 제외하므로 자동 분리됨). 보고서 유형(템플릿)은
+agnt_mmry_use_n 을 재사용한다.
 
 신원(emp_no)은 항상 서버가 세션에서 도출한 값이어야 한다(클라이언트 문자열 신뢰 금지).
 """
@@ -23,9 +24,14 @@ from wellbot.models.agent_memory import AgentMemory
 from wellbot.models.chat_message import ChatMessage
 from wellbot.models.chat_summary import ChatSummary
 from wellbot.services.core.database import get_session
-from wellbot.services.report_maker.config import AGNT_ID, get_config
+from wellbot.services.report_maker.config import get_config
 
 log = logging.getLogger(__name__)
+
+
+def _agnt_id() -> str:
+    """DB 태깅·조회에 쓰는 에이전트 식별자 (yaml agent_id, 미설정 시 기본값 RPT_DRFT_GEN)."""
+    return get_config().agent_id
 
 
 # ══════════════════════════════════════════════════════════════
@@ -44,7 +50,7 @@ def list_conversations(emp_no: str) -> list[dict]:
     with get_session() as session:
         smry_ids = (
             session.query(ChatMessage.chtb_tlk_smry_id)
-            .filter(ChatMessage.agnt_id == AGNT_ID)
+            .filter(ChatMessage.agnt_id == _agnt_id())
             .distinct()
         )
         rows = (
@@ -76,7 +82,7 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
             session.query(ChatMessage)
             .filter(
                 ChatMessage.chtb_tlk_smry_id == smry_id,
-                ChatMessage.agnt_id == AGNT_ID,
+                ChatMessage.agnt_id == _agnt_id(),
             )
             .order_by(
                 ChatMessage.chtb_tlk_seq.asc(),
@@ -167,7 +173,7 @@ def append_message(
                         chtb_tlk_smry_id=smry_id,
                         chtb_tlk_id=tlk_id,
                         chtb_tlk_seq=seq,
-                        agnt_id=AGNT_ID,
+                        agnt_id=_agnt_id(),
                         msg_role_nm=role,
                         chtb_msg_cntt=content,
                         chtb_mdl_nm=model_name or None,
@@ -196,7 +202,7 @@ def delete_conversation(smry_id: str, emp_no: str) -> None:
             return
         session.query(ChatMessage).filter(
             ChatMessage.chtb_tlk_smry_id == smry_id,
-            ChatMessage.agnt_id == AGNT_ID,
+            ChatMessage.agnt_id == _agnt_id(),
         ).delete()
         session.query(ChatSummary).filter(
             ChatSummary.chtb_tlk_smry_id == smry_id
@@ -228,7 +234,7 @@ def list_templates(emp_no: str) -> list[dict]:
         rows = (
             session.query(AgentMemory)
             .filter(
-                AgentMemory.agnt_id == AGNT_ID,
+                AgentMemory.agnt_id == _agnt_id(),
                 AgentMemory.emp_no == emp_no,
                 AgentMemory.use_yn == "Y",
             )
@@ -253,7 +259,7 @@ def save_template(emp_no: str, template_id: str, display_name: str, actor_id: st
     with get_session() as session:
         rows = (
             session.query(AgentMemory)
-            .filter(AgentMemory.agnt_id == AGNT_ID, AgentMemory.emp_no == emp_no)
+            .filter(AgentMemory.agnt_id == _agnt_id(), AgentMemory.emp_no == emp_no)
             .all()
         )
         # 기존 template_id 매칭 → 업데이트
@@ -274,7 +280,7 @@ def save_template(emp_no: str, template_id: str, display_name: str, actor_id: st
         max_seq = max((int(r.agnt_seq) for r in rows), default=0)
         session.add(
             AgentMemory(
-                agnt_id=AGNT_ID,
+                agnt_id=_agnt_id(),
                 agnt_seq=max_seq + 1,
                 emp_no=emp_no,
                 agnt_mmry_path_addr=actor_id,
@@ -296,7 +302,7 @@ def delete_template(emp_no: str, template_id: str) -> None:
     with get_session() as session:
         rows = (
             session.query(AgentMemory)
-            .filter(AgentMemory.agnt_id == AGNT_ID, AgentMemory.emp_no == emp_no)
+            .filter(AgentMemory.agnt_id == _agnt_id(), AgentMemory.emp_no == emp_no)
             .all()
         )
         for r in rows:

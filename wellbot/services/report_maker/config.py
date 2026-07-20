@@ -23,9 +23,10 @@ log = logging.getLogger(__name__)
 # 설정파일은 모듈과 함께 배치 (자기완결).
 REPORT_MAKER_YAML = Path(__file__).resolve().parent / "report_maker.yaml"
 
-# chtb_msg_d.AGNT_ID 태그. 매칭되는 agnt_m 행이 없어도 fallback 동작한다
-# (report_checker 와 동일 패턴). 표시명이 필요하면 관리자 화면에서 등록한다.
-AGNT_ID = "report-maker"
+# chtb_msg_d / agnt_mmry_use_n 의 AGNT_ID 태그 기본값(yaml agent_id 미설정 시 폴백).
+# 실제 태깅·조회에는 get_config().agent_id (yaml agent_id) 를 사용한다.
+# 매칭되는 agnt_m 행이 없어도 fallback 동작한다. 표시명은 관리자 화면에서 등록한다.
+AGNT_ID = "RPT_DRFT_GEN"
 
 # 문서 파싱 지원 확장자 분류 (스타일 학습 입력)
 IMAGE_EXTS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
