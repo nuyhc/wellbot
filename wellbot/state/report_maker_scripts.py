@@ -30,12 +30,17 @@ window._rmBackendBase = window._rmBackendBase || async function() {
     return '';
 };
 
-// 단일 파일 업로드(공유 헬퍼). 성공/실패 모두 {key, filename, error} 로 반환.
-window._rmUploadOne = window._rmUploadOne || async function(file, template, kind) {
+// 단일 파일 업로드(공유 헬퍼). extra(object)의 필드도 함께 전송. 결과 dict 반환.
+window._rmUploadOne = window._rmUploadOne || async function(file, template, kind, extra) {
     var form = new FormData();
     form.append('file', file);
     form.append('template', template || '');
     form.append('kind', kind || 'style');
+    if (extra) {
+        for (var k in extra) {
+            if (extra[k] != null) form.append(k, extra[k]);
+        }
+    }
     try {
         var base = await window._rmBackendBase();
         var resp = await fetch(base + '/api/report_maker/upload', {
@@ -72,15 +77,17 @@ window._rmPickFiles = window._rmPickFiles || function(accept, multiple, onPick) 
     input.click();
 };
 
-// 단일 파일(주제 첨부). {key, filename, error} 반환(취소 시 {key:'', error:''}).
-window.reportMakerPickAndUpload = function(template, kind) {
+// 단일 파일(주제 첨부). 첨부는 정식 등록되므로 session_id·msg_id 를 함께 보낸다.
+// {file_no, filename, error} 반환(취소 시 {file_no:0, error:''}).
+window.reportMakerPickAndUpload = function(template, kind, sessionId, msgId) {
     var accept = (kind === 'topic')
         ? '.pdf,.pptx,.png,.jpg,.jpeg,.webp,.gif'
         : '.pdf,.pptx';
     return new Promise(function(resolve) {
         window._rmPickFiles(accept, false, async function(files) {
-            if (!files.length) { resolve({key: '', filename: '', error: ''}); return; }
-            resolve(await window._rmUploadOne(files[0], template, kind));
+            if (!files.length) { resolve({file_no: 0, filename: '', error: ''}); return; }
+            resolve(await window._rmUploadOne(files[0], template, kind,
+                {session_id: sessionId, msg_id: msgId}));
         });
     });
 };
