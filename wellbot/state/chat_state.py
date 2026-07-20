@@ -116,6 +116,11 @@ class ChatState(rx.State):
     # 첨부파일-메시지 매핑용 msg_id. trigger_upload 에서 생성 후 send_message 에서 재사용
     _pending_msg_id: str = ""
 
+    # 보고서 만들기 핸드오프용. AI 메시지 1건을 report_maker 로 넘길 때 대화/메시지 참조를
+    # 보관하고, ReportMakerState.on_load 가 cross-state 로 읽어 소비한다.
+    _report_seed_smry: str = ""
+    _report_seed_seq: int = 0
+
     # ── KB (Knowledge Base) ──
     kb_modes: list[str] = []                    # 활성 KB 검색 범위: shared/team/personal
     upload_target: str = "personal"             # 업로드 대상: personal | team
@@ -651,6 +656,19 @@ class ChatState(rx.State):
         self.show_model_settings_panel = not self.show_model_settings_panel
         if self.show_model_settings_panel:
             self.show_style_panel = False
+
+    def start_report_from_message(self, seq: int) -> rx.event.EventSpec:
+        """AI 메시지 1건을 report_maker 로 넘겨 보고서 만들기 시작.
+
+        본문을 URL 에 싣지 않고 대화/메시지 참조만 backend 필드에 보관한 뒤 이동한다.
+        report_maker 진입 시 ReportMakerState.on_load 가 이 참조를 cross-state 로 읽어
+        소유권 재검증 후 소비한다.
+        """
+        if not self.current_conversation_id:
+            return rx.toast.error("대화를 먼저 시작해주세요.")
+        self._report_seed_smry = self.current_conversation_id
+        self._report_seed_seq = seq
+        return rx.redirect("/ai-services/report-generator")
 
     def _set_model_param(self, param: str, value: str) -> None:
         """선택 모델의 파라미터 오버라이드를 LocalStorage(JSON)에 기록."""
