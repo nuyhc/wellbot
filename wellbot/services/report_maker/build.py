@@ -25,7 +25,7 @@ from wellbot.services.report_maker.prompts import (
 log = logging.getLogger(__name__)
 
 
-def build_outline(topic, loaded_style, extra="", report_type="", report_type_name="", page_count=0, mode="deep", storyline="", storyline_blocks="", unanswered=None, is_report=False):
+def build_outline_prompt(topic, loaded_style, extra="", report_type="", report_type_name="", page_count=0, mode="deep", storyline="", storyline_blocks="", unanswered=None, is_report=False) -> str:
     log.debug(f"[BUILD_OUTLINE] mode={mode}, type={report_type_name}, pages={page_count}")
     # ── 유형 가이드 (기존 그대로) ──
     if report_type:
@@ -217,15 +217,22 @@ def build_outline(topic, loaded_style, extra="", report_type="", report_type_nam
           "출력하기 전에 본문의 모든 '(TBD)'를 점검해, 위 [구조 제안 미답 항목]에 없는 (TBD)는 모두 제거하고 해당 내용을 빼라.\n"
     )
 
+    return draft_prompt
+
+
+def finalize_outline(raw: str) -> str:
+    """스트리밍 원문 → 최종 표시용 후처리(코드펜스 제거 + 마크다운 표 정규화)."""
+    return normalize_md_tables(strip_code_fences((raw or "").strip()))
+
+
+def build_outline(*args, **kwargs) -> str:
+    """블로킹 아웃라인 생성(프롬프트 조립 + 단일 호출 + 후처리). 잘림 시 ''."""
+    prompt = build_outline_prompt(*args, **kwargs)
     try:
-        resp = bedrock.invoke_compat(draft_prompt, get_config().max_tokens_outline)
-        body = resp
-        result = body["content"][0]["text"].strip()
-        result = strip_code_fences(result)
-        result = normalize_md_tables(result)
-        if body.get("stop_reason") == "max_tokens":
+        resp = bedrock.invoke_compat(prompt, get_config().max_tokens_outline)
+        if resp.get("stop_reason") == "max_tokens":
             return ""
-        return result
+        return finalize_outline(resp["content"][0]["text"])
     except Exception:
         log.exception("아웃라인 생성 실패")
         return ""
@@ -233,7 +240,7 @@ def build_outline(topic, loaded_style, extra="", report_type="", report_type_nam
 # ──────────────────────────────────────────────────────────────
 # 아웃라인 수정 
 
-def edit_outline(outline: str, instruction: str, mode: str = "deep", page_count: float = 0, prior_instructions=None, unanswered=None) -> str:
+def edit_outline_prompt(outline: str, instruction: str, mode: str = "deep", page_count: float = 0, prior_instructions=None, unanswered=None) -> str:
     mode_note = (
         "[서머리 모드 유지] 활동·진척 그대로, 가치 승격 금지, ·은 새 줄에서 시작(한 줄에 2개 금지), 여러 과제 나열 정상.\n"
         if mode == "summary"
@@ -286,19 +293,23 @@ def edit_outline(outline: str, instruction: str, mode: str = "deep", page_count:
           "시점을 행으로 분해해 표로 낸다. 경과를 시간 순 Bullet로 나열하지 않는다.\n"
         + "수정된 아웃라인 전체를 출력하세요."
     )
+    return prompt
+
+
+def finalize_edit(raw: str) -> str:
+    """수정 스트리밍 원문 → 최종 표시용(표 정규화). 코드펜스 제거는 하지 않음(원본 동작 보존)."""
+    return normalize_md_tables((raw or "").strip())
+
+
+def edit_outline(*args, **kwargs) -> str:
+    """블로킹 아웃라인 수정(프롬프트 조립 + 단일 호출 + 후처리). 잘림 시 ''."""
+    prompt = edit_outline_prompt(*args, **kwargs)
     try:
         resp = bedrock.invoke_compat(prompt, get_config().max_tokens_outline)
-        body = resp
-        result = body["content"][0]["text"].strip()
-        result = normalize_md_tables(result)
-        
-        if body.get("stop_reason") == "max_tokens":
+        if resp.get("stop_reason") == "max_tokens":
             log.debug("수정 실패 (max_tokens)")
             return ""
-        
-        log.debug("아웃라인 수정 완료")
-        return result 
-        
+        return finalize_edit(resp["content"][0]["text"])
     except Exception:
         log.exception("아웃라인 수정 실패")
         return ""
