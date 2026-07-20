@@ -447,6 +447,21 @@ class ReportMakerState(rx.State):
         return rx.redirect("/ai-services/report-generator/style")
 
     @rx.event
+    async def load_style_editor(self):
+        """스타일 편집 페이지 on_load. 직접 진입/새로고침 시에도 현재 가이드를 채운다."""
+        auth = await self.get_state(AuthState)
+        self._emp_no = auth.current_emp_no
+        if not self._emp_no:
+            return rx.redirect("/login")
+        if not self.template_id:
+            # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
+            return rx.redirect("/ai-services/report-generator")
+        self.loaded_style = await asyncio.to_thread(
+            memory.load_style, self._emp_no, self.template_id
+        )
+        self.edited_style = self.loaded_style
+
+    @rx.event
     async def save_edited_style(self, form_data: dict):
         edited = (form_data.get("edited_style") or "").strip()
         if not edited:
