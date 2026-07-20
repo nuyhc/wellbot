@@ -97,7 +97,6 @@ class ReportMakerState(rx.State):
     messages: list[ReportMessage] = []
     conversation_list: list[ConvSummary] = []
     is_streaming: bool = False
-    show_guide: bool = False
 
     # ── 생성 흐름(flow) ──
     outline: str = ""
@@ -438,10 +437,6 @@ class ReportMakerState(rx.State):
     # 스타일 편집
     # ══════════════════════════════════════════════════════════
     @rx.event
-    def set_edited_style(self, value: str):
-        self.edited_style = value
-
-    @rx.event
     def open_style_editor(self):
         self.edited_style = self.loaded_style
         return rx.redirect("/ai-services/report-generator/style")
@@ -478,10 +473,6 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     # UI 토글 / 유틸
     # ══════════════════════════════════════════════════════════
-    @rx.event
-    def toggle_guide(self):
-        self.show_guide = not self.show_guide
-
     @rx.event
     def copy_message(self, idx: int):
         if not (0 <= idx < len(self.messages)):
