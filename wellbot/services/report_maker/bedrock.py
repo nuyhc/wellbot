@@ -89,13 +89,19 @@ def call_model(prompt: str, max_tokens: int, system: str = "") -> str:
     return _converse_raw(prompt, max_tokens, system)[0]
 
 
-def stream_model(prompt: str, max_tokens: int, system: str = ""):
+def stream_model(
+    prompt: str, max_tokens: int, system: str = "", usage_out: dict | None = None
+):
     """Converse 스트리밍(sync generator) — 텍스트 델타를 순차 yield.
 
     소비측(State)이 시간 배치로 flush 하므로 여기서는 델타 문자열만 낸다.
     - 스트림 시작 전 ThrottlingException 은 지수 백오프 재시도(_converse_content 와 동일).
     - 스트림 시작 후 오류는 로그만 남기고 종료(이미 낸 부분 출력은 유지).
     - 응답 잘림(max_tokens)은 경고만 남기고 받은 데까지 낸다(빈 문자열로 버리지 않음).
+
+    usage_out: 전달하면 스트림 말미의 metadata 이벤트에서 토큰 사용량을
+      {"input_tokens": int, "output_tokens": int} 로 채운다(부수효과). 스트림이
+      중단되면 채워지지 않을 수 있다(그 경우 호출측은 0 으로 처리).
     """
     cfg = get_config()
     client = _client(cfg.region, cfg.read_timeout_sec)
@@ -133,6 +139,10 @@ def stream_model(prompt: str, max_tokens: int, system: str = ""):
             elif "messageStop" in event:
                 if event["messageStop"].get("stopReason") == "max_tokens":
                     log.warning("report_maker 스트림 응답 잘림(max_tokens) model=%s", cfg.model_id)
+            elif "metadata" in event and usage_out is not None:
+                usage = event["metadata"].get("usage", {})
+                usage_out["input_tokens"] = int(usage.get("inputTokens", 0) or 0)
+                usage_out["output_tokens"] = int(usage.get("outputTokens", 0) or 0)
     except Exception:
         log.exception("report_maker 스트림 소비 중 오류(부분 출력 유지)")
 
