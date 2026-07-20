@@ -232,6 +232,11 @@ def _chat_view() -> rx.Component:
                 on_click=ReportMakerState.pick_and_upload_style,
                 variant="soft", color_scheme="gray", size="2",
             ),
+            rx.button(
+                rx.icon("pencil-ruler", size=16), "작성 가이드",
+                on_click=ReportMakerState.open_style_editor,
+                variant="soft", color_scheme="gray", size="2",
+            ),
             rx.spacer(),
             rx.cond(
                 ReportMakerState.style_upload_status != "",
@@ -337,4 +342,82 @@ def report_maker_page() -> rx.Component:
                 padding="1.5em 2em",
             )
         ),
+    )
+
+
+def report_maker_style_page() -> rx.Component:
+    """작성 가이드(스타일) 조회/편집 페이지 (/ai-services/report-generator/style)."""
+    return chat_layout(
+        rx.box(
+            rx.vstack(
+                rx.hstack(
+                    rx.link(
+                        rx.icon("arrow-left", size=18, color=COLORS["text_secondary"]),
+                        href="/ai-services/report-generator",
+                    ),
+                    rx.heading("작성 가이드 편집", size="7", color=COLORS["text_primary"]),
+                    rx.cond(
+                        ReportMakerState.template_display != "",
+                        rx.badge(
+                            rx.icon("layout-template", size=14),
+                            ReportMakerState.template_display,
+                            color_scheme="gray", variant="soft", size="2",
+                        ),
+                    ),
+                    align="center",
+                    spacing="3",
+                ),
+                rx.text(
+                    "현재 적용 중인 작성 가이드라인을 직접 확인·편집할 수 있습니다. "
+                    "저장하면 이후 보고서 문구 생성에 즉시 반영됩니다.",
+                    size="2",
+                    color=COLORS["text_secondary"],
+                ),
+                rx.form(
+                    rx.vstack(
+                        rx.text_area(
+                            name="edited_style",
+                            default_value=ReportMakerState.edited_style,
+                            placeholder=(
+                                "아직 학습된 작성 가이드가 없습니다. 참고 문서를 등록하거나 "
+                                "여기에 직접 작성해 저장하세요."
+                            ),
+                            rows="20",
+                            width="100%",
+                            style={"minHeight": "420px", "fontFamily": "monospace",
+                                   "lineHeight": "1.6"},
+                        ),
+                        rx.hstack(
+                            rx.spacer(),
+                            rx.button(
+                                rx.cond(
+                                    ReportMakerState.is_streaming,
+                                    rx.icon("loader-circle", size=16, class_name="animate-spin"),
+                                    rx.icon("save", size=16),
+                                ),
+                                "저장",
+                                type="submit",
+                                disabled=ReportMakerState.is_streaming,
+                                size="3",
+                                style={"background": _ACCENT, "color": "white"},
+                            ),
+                            width="100%",
+                        ),
+                        spacing="3",
+                        width="100%",
+                    ),
+                    on_submit=ReportMakerState.save_edited_style,
+                    reset_on_submit=False,
+                    width="100%",
+                ),
+                spacing="4",
+                width="100%",
+                max_width="900px",
+                margin="0 auto",
+            ),
+            width="100%",
+            height="100%",
+            overflow_y="auto",
+            padding="2.5em 2em",
+        )
     )
