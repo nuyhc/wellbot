@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from wellbot.services.report_maker import storage
+from wellbot.services.report_maker import storage, style
 from wellbot.services.report_maker.config import get_config
 from wellbot.services.report_maker.parsing import to_safe_id
 
@@ -79,21 +79,31 @@ def _create_event(actor_id: str, session_id: str, user_text: str, assistant_text
 # ──────────────────────────────────────────────────────────────
 # 저장
 # ──────────────────────────────────────────────────────────────
-def save_style(emp_no: str, template: str, style_desc: str) -> None:
-    """문서 스타일 기록. AgentCore(/writing) + S3 combined_style 병행 저장.
+def _replace_writing(emp_no: str, template: str, desc: str) -> None:
+    """문서 스타일을 desc 하나로 교체: S3 combined 덮어쓰기 + AgentCore /writing 레코드 교체.
 
     ASSISTANT role 에 스타일 텍스트를 두지 않고 USER 발화로 기록(userPreference
     전략이 USER 발화만 스캔 → semantic 오염 방지, legacy 규약 유지).
     """
     actor = actor_id_for(emp_no, template)
-    session_id = f"style-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
+    storage.save_combined_style(emp_no, template, desc)  # S3 정본(단일) 덮어쓰기
     if _agentcore_ready():
-        ok = _create_event(actor, session_id, f"[문서 스타일 기록]\n{style_desc}", "문서 스타일을 기록했습니다.")
+        _delete_records(f"/writing/{actor}/")  # 기존 문서 스타일 레코드 제거(1개 유지)
+        session_id = f"style-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
+        ok = _create_event(actor, session_id, f"[문서 스타일 기록]\n{desc}", "문서 스타일을 기록했습니다.")
         if ok:
-            log.info("AgentCore writing 저장 actor=%s", actor)
-    # S3 폴백/병행 저장 (AgentCore 미가용 시에도 스타일 유지). 여러 참고 문서를
-    # 학습하면 누적되도록 append (편집기의 전체 덮어쓰기와 구분).
-    storage.append_combined_style(emp_no, template, style_desc)
+            log.info("AgentCore writing 교체 저장 actor=%s", actor)
+
+
+def save_style(emp_no: str, template: str, style_desc: str) -> None:
+    """문서 스타일 학습 — 기존 통합 스타일과 LLM 병합해 '템플릿당 1개'로 유지(legacy 규약).
+
+    여러 참고 문서를 올려도 combined_style 은 항상 하나의 통합 가이드로 정제된다.
+    S3 정본을 병합 기준으로 삼아(즉시성·결정성) AgentCore /writing 도 병합본 1개로 교체.
+    """
+    existing = storage.load_combined_style(emp_no, template)
+    merged = style.merge_style_desc(existing, style_desc) if existing.strip() else style_desc
+    _replace_writing(emp_no, template, merged)
 
 
 def save_preference(emp_no: str, template: str, pref_text: str) -> None:
@@ -174,35 +184,44 @@ def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
     return storage.load_combined_style(emp_no, template)
 
 
+def _delete_records(namespace: str) -> int:
+    """AgentCore namespace 의 모든 memory record 삭제. 삭제 개수 반환."""
+    cfg = get_config()
+    ac = _ac_client()
+    if ac is None or not cfg.memory_id:
+        return 0
+    ids = [r.get("memoryRecordId") for r in _record_summaries(namespace)
+           if r.get("memoryRecordId")]
+    deleted = 0
+    for i in range(0, len(ids), 100):
+        batch = [{"memoryRecordId": rid} for rid in ids[i:i + 100]]
+        try:
+            resp = ac.batch_delete_memory_records(memoryId=cfg.memory_id, records=batch)
+            deleted += len(resp.get("successfulRecords", []) or [])
+        except Exception:
+            log.exception("AgentCore batch_delete_memory_records 실패 ns=%s", namespace)
+    return deleted
+
+
 def clear_style(emp_no: str, template: str) -> int:
     """작성 가이드 초기화 — AgentCore /writing·/preference 레코드 + S3 스타일 파일 삭제.
 
     삭제한 AgentCore 레코드 수를 반환한다(S3 삭제는 storage.delete_style 이 담당).
     """
     actor = actor_id_for(emp_no, template)
-    deleted = 0
-    if _agentcore_ready():
-        cfg = get_config()
-        ac = _ac_client()
-        for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
-            ids = [r.get("memoryRecordId") for r in _record_summaries(namespace)
-                   if r.get("memoryRecordId")]
-            for i in range(0, len(ids), 100):
-                batch = [{"memoryRecordId": rid} for rid in ids[i:i + 100]]
-                try:
-                    resp = ac.batch_delete_memory_records(memoryId=cfg.memory_id, records=batch)
-                    deleted += len(resp.get("successfulRecords", []) or [])
-                except Exception:
-                    log.exception("AgentCore batch_delete_memory_records 실패 ns=%s", namespace)
+    deleted = _delete_records(f"/writing/{actor}/") + _delete_records(f"/preference/{actor}/")
     storage.delete_style(emp_no, template)
     return deleted
 
 
 def replace_style(emp_no: str, template: str, text: str) -> None:
-    """작성 가이드 전체 교체(편집기 저장). 기존 기록 삭제 후 단일 기록으로 저장(멱등).
+    """작성 가이드 전체 교체(편집기 저장). 문서 스타일을 편집 텍스트 하나로 교체(멱등).
 
-    AgentCore 는 비동기 추출이라 교체 직후 목록에 안 보일 수 있으나, S3 정본은 즉시
-    반영되므로 편집기 재진입 시 방금 저장한 내용이 보인다.
+    병합 없이 그대로 교체하며, 학습 문서 목록(style_docs)은 보존한다(초기화와 구분).
+    선호(/preference)는 편집 텍스트가 대체하므로 함께 비운다. AgentCore 는 비동기
+    추출이라 교체 직후 목록에 안 보일 수 있으나, S3 정본은 즉시 반영된다.
     """
-    clear_style(emp_no, template)
-    save_style(emp_no, template, text)
+    actor = actor_id_for(emp_no, template)
+    if _agentcore_ready():
+        _delete_records(f"/preference/{actor}/")
+    _replace_writing(emp_no, template, text)

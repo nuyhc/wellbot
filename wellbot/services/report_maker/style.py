@@ -485,6 +485,32 @@ def build_style_desc(doc_style: dict, analysis: dict) -> str:
         "[출력형식]\n"
         f"* 슬라이드 분량: {fmt.get('슬라이드_분량', 'N/A')}\n"
         f"* 선호 슬라이드 구성: {fmt.get('선호_슬라이드_구성', 'N/A')}\n"
-        f"{layout_hint}" 
+        f"{layout_hint}"
         f"* 표 활용: {fmt.get('표_활용', 'N/A')}"
     )
+
+
+def merge_style_desc(existing: str, new: str) -> str:
+    """기존 통합 스타일 + 신규 스타일을 하나의 통합 가이드로 LLM 병합(legacy 규약).
+
+    '템플릿당 1개 통합 스타일' 유지를 위해 문서를 추가 학습할 때마다 병합한다.
+    병합 실패(빈 응답) 시 유실 방지를 위해 두 스타일을 이어붙여 반환한다.
+    """
+    if not (existing or "").strip():
+        return new or ""
+    if not (new or "").strip():
+        return existing
+    prompt = (
+        "아래 두 문서 스타일을 하나의 통합 스타일 가이드로 병합하세요.\n\n"
+        "병합 원칙:\n"
+        "- 공통된 특징은 하나로 통합\n"
+        "- 서로 다른 특징은 '주로 X, 경우에 따라 Y' 형식으로 표현\n"
+        "- 충돌하는 특징은 더 최근 문서(신규 스타일) 기준으로 결정\n"
+        "- 원본 형식([문서 작성 스타일], [표현규칙], [출력형식] 등 섹션 구조) 유지\n"
+        "- 반드시 모든 섹션을 완성해서 출력할 것. 중간에 끊지 말 것\n\n"
+        f"[기존 스타일]\n{existing}\n\n"
+        f"[신규 스타일]\n{new}\n\n"
+        "통합 스타일만 출력:"
+    )
+    merged = bedrock.call_model(prompt, get_config().max_tokens_style).strip()
+    return merged or (existing.rstrip() + "\n\n---\n\n" + new)
