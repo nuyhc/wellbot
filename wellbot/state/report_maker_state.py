@@ -123,6 +123,8 @@ class ReportMakerState(rx.State):
     # ── 업로드 ──
     style_upload_status: str = ""
     _uploaded_topic_text: str = ""
+    pending_topic_file: str = ""      # 첨부됐지만 아직 전송 안 한 주제 파일명(표시용)
+    style_docs: list[str] = []        # 스타일 추출에 올린 문서 파일명 목록
 
     # ── 영속 커서 (백엔드) ──
     _persisted_count: int = 0
@@ -326,50 +328,61 @@ class ReportMakerState(rx.State):
     # 스타일 학습 (업로드 → 분석 → AgentCore/S3 저장)
     # ══════════════════════════════════════════════════════════
     @rx.event(background=True)
-    async def on_style_uploaded(self, key: str):
-        """API 업로드가 반환한 S3 key 를 받아 문서 스타일을 학습한다."""
+    async def on_styles_uploaded(self, keys: list[str]):
+        """API 업로드가 반환한 S3 key 목록을 받아 각 문서 스타일을 순차 학습한다."""
         async with self:
             emp_no, template = self._emp_no, self.template_id
-            if not storage.owns_key(key, emp_no, template):
-                log.warning("스타일 업로드 key 소유권 불일치 emp_no=%s key=%s", emp_no, key)
+            valid = [k for k in (keys or []) if storage.owns_key(k, emp_no, template)]
+            if not valid:
+                log.warning("스타일 업로드 key 소유권 불일치 emp_no=%s keys=%s", emp_no, keys)
                 self.style_upload_status = "잘못된 파일 참조입니다."
                 self.is_streaming = False
                 return
-            self.style_upload_status = "스타일 분석 중..."
             self.is_streaming = True
 
-        def worker() -> str:
+        def worker(key: str) -> None:
             path = storage.download_to_temp(key)
             try:
                 doc = style.extract_doc_style(path)
                 analyzed = style.analyze_style_with_claude(doc)
                 desc = style.build_style_desc(doc, analyzed)
                 memory.save_style(emp_no, template, desc)
-                return desc
             finally:
                 try:
                     os.remove(path)
                 except OSError:
                     pass
 
-        try:
-            await asyncio.to_thread(worker)
+        total = len(valid)
+        done = 0
+        for i, key in enumerate(valid, 1):
             async with self:
-                self.loaded_style = await asyncio.to_thread(
-                    memory.load_style, self._emp_no, self.template_id
-                )
-                self.user_mode = "report_based"
-                self.style_upload_status = "스타일 학습 완료"
-                self.is_streaming = False
-        except Exception:
-            log.exception("스타일 학습 실패 key=%s", key)
-            async with self:
-                self.style_upload_status = "스타일 학습에 실패했습니다. 다시 시도해주세요."
-                self.is_streaming = False
+                self.style_upload_status = f"스타일 추출 중... ({i}/{total})"
+            try:
+                await asyncio.to_thread(worker, key)
+                done += 1
+            except Exception:
+                log.exception("스타일 학습 실패 key=%s", key)
+
+        async with self:
+            self.loaded_style = await asyncio.to_thread(
+                memory.load_style, self._emp_no, self.template_id
+            )
+            self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+            self.style_docs = await asyncio.to_thread(
+                storage.list_style_doc_names, self._emp_no, self.template_id
+            )
+            if done == total:
+                self.style_upload_status = f"스타일 추출 완료 ({done}개)"
+            elif done > 0:
+                self.style_upload_status = f"{done}/{total}개 추출 완료 (일부 실패)"
+            else:
+                self.style_upload_status = "스타일 추출에 실패했습니다. 다시 시도해주세요."
+            self.is_streaming = False
 
     @rx.event
-    async def on_topic_uploaded(self, key: str):
-        """주제 첨부 파일의 텍스트를 추출해 다음 입력에 합친다."""
+    async def on_topic_uploaded(self, key: str, filename: str = ""):
+        """주제 첨부 파일의 텍스트를 추출해 다음 전송에 합친다(말풍선엔 파일명만 표시)."""
         if not storage.owns_key(key, self._emp_no, self.template_id):
             log.warning("주제 첨부 key 소유권 불일치 emp_no=%s key=%s", self._emp_no, key)
             yield rx.toast.error("잘못된 파일 참조입니다.")
@@ -392,28 +405,34 @@ class ReportMakerState(rx.State):
         try:
             text = await asyncio.to_thread(worker)
             self._uploaded_topic_text = text or ""
+            self.pending_topic_file = filename or "첨부 파일"
+            self.is_streaming = False
+            yield rx.toast.success(f"첨부됨: {self.pending_topic_file}")
         except Exception:
             log.exception("주제 첨부 처리 실패 key=%s", key)
-        self.is_streaming = False
-        yield
+            self.is_streaming = False
+            yield rx.toast.error("첨부 파일 처리에 실패했습니다.")
 
     @rx.event
     def pick_and_upload_style(self):
-        """참고 문서 선택 → 업로드(JS) → 콜백에서 스타일 학습 트리거."""
+        """참고 문서(다중) 선택 → 순차 업로드(JS) → 콜백에서 스타일 학습 트리거."""
         if not self.template_id:
             return rx.toast.error("먼저 보고서 유형을 선택하세요.")
         return rx.call_script(
-            f"reportMakerPickAndUpload({json.dumps(self.template_id)}, 'style')",
+            f"reportMakerPickAndUploadMany({json.dumps(self.template_id)}, 'style')",
             callback=ReportMakerState.on_style_result,
         )
 
     @rx.event
-    def on_style_result(self, result: dict):
-        if not result or not result.get("key"):
-            if result and result.get("error"):
-                return rx.toast.error(result["error"])
+    def on_style_result(self, results: list):
+        """다중 업로드 결과([{key,filename,error}, ...]) → 유효 key 만 모아 학습."""
+        keys = [r["key"] for r in (results or []) if r and r.get("key")]
+        if not keys:
+            errors = [r["error"] for r in (results or []) if r and r.get("error")]
+            if errors:
+                return rx.toast.error(errors[0])
             return
-        return ReportMakerState.on_style_uploaded(result["key"])
+        return ReportMakerState.on_styles_uploaded(keys)
 
     @rx.event
     def pick_and_upload_topic(self):
@@ -431,15 +450,31 @@ class ReportMakerState(rx.State):
             if result and result.get("error"):
                 return rx.toast.error(result["error"])
             return
-        return ReportMakerState.on_topic_uploaded(result["key"])
+        return ReportMakerState.on_topic_uploaded(result["key"], result.get("filename", ""))
+
+    @rx.event
+    def clear_pending_topic(self):
+        """첨부 취소(전송 전)."""
+        self._uploaded_topic_text = ""
+        self.pending_topic_file = ""
 
     # ══════════════════════════════════════════════════════════
     # 스타일 편집
     # ══════════════════════════════════════════════════════════
     @rx.event
+    def set_edited_style(self, value: str):
+        """작성 가이드 편집기(controlled textarea) on_change 핸들러."""
+        self.edited_style = value
+
+    @rx.event
     def open_style_editor(self):
         self.edited_style = self.loaded_style
         return rx.redirect("/ai-services/report-generator/style")
+
+    async def _load_style_docs(self):
+        self.style_docs = await asyncio.to_thread(
+            storage.list_style_doc_names, self._emp_no, self.template_id
+        )
 
     @rx.event
     async def load_style_editor(self):
@@ -455,6 +490,7 @@ class ReportMakerState(rx.State):
             memory.load_style, self._emp_no, self.template_id
         )
         self.edited_style = self.loaded_style
+        await self._load_style_docs()
 
     @rx.event
     async def save_edited_style(self, form_data: dict):
@@ -464,11 +500,24 @@ class ReportMakerState(rx.State):
             return
         self.is_streaming = True
         yield
-        await asyncio.to_thread(storage.save_combined_style, self._emp_no, self.template_id, edited)
-        await asyncio.to_thread(memory.save_preference, self._emp_no, self.template_id, edited)
+        # 전체 교체(멱등) — 기존 AgentCore 기록·S3 삭제 후 단일 기록으로 저장
+        await asyncio.to_thread(memory.replace_style, self._emp_no, self.template_id, edited)
         self.loaded_style = edited
         self.is_streaming = False
-        yield rx.toast.success("스타일 저장 완료")
+        yield rx.toast.success("작성 가이드 저장 완료")
+
+    @rx.event
+    async def reset_style(self):
+        """작성 가이드 초기화 — AgentCore 기록 + S3 스타일 파일 삭제."""
+        self.is_streaming = True
+        yield
+        await asyncio.to_thread(memory.clear_style, self._emp_no, self.template_id)
+        self.loaded_style = ""
+        self.edited_style = ""
+        self.user_mode = "text_based"
+        await self._load_style_docs()
+        self.is_streaming = False
+        yield rx.toast.success("작성 가이드를 초기화했습니다.")
 
     # ══════════════════════════════════════════════════════════
     # UI 토글 / 유틸
@@ -496,17 +545,21 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     @rx.event
     async def send_message(self, form_data: dict):
-        text = (form_data.get("message") or "").strip()
-        if not text or self.is_streaming:
+        typed = (form_data.get("message") or "").strip()
+        if not typed or self.is_streaming:
             return
-        # 주제 첨부 텍스트가 있으면 합침
+        # 첨부 추출 텍스트는 LLM 입력에만 합치고, 말풍선엔 사용자가 친 글 + 파일칩만 표시
+        llm_text = typed
+        file_name = ""
         if self._uploaded_topic_text:
-            text = f"{self._uploaded_topic_text}\n[추가지시]\n{text}"
+            llm_text = f"{self._uploaded_topic_text}\n[추가지시]\n{typed}"
+            file_name = self.pending_topic_file
             self._uploaded_topic_text = ""
-        self.messages.append(ReportMessage(role="user", content=text))
+            self.pending_topic_file = ""
+        self.messages.append(ReportMessage(role="user", content=typed, file_name=file_name))
         yield
         try:
-            async for _ in self._route(text):
+            async for _ in self._route(llm_text):
                 yield
         except Exception:
             log.exception("메시지 처리 실패")
