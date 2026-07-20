@@ -89,6 +89,54 @@ def call_model(prompt: str, max_tokens: int, system: str = "") -> str:
     return _converse_raw(prompt, max_tokens, system)[0]
 
 
+def stream_model(prompt: str, max_tokens: int, system: str = ""):
+    """Converse 스트리밍(sync generator) — 텍스트 델타를 순차 yield.
+
+    소비측(State)이 시간 배치로 flush 하므로 여기서는 델타 문자열만 낸다.
+    - 스트림 시작 전 ThrottlingException 은 지수 백오프 재시도(_converse_content 와 동일).
+    - 스트림 시작 후 오류는 로그만 남기고 종료(이미 낸 부분 출력은 유지).
+    - 응답 잘림(max_tokens)은 경고만 남기고 받은 데까지 낸다(빈 문자열로 버리지 않음).
+    """
+    cfg = get_config()
+    client = _client(cfg.region, cfg.read_timeout_sec)
+    kwargs: dict[str, Any] = {
+        "modelId": cfg.model_id,
+        "messages": [{"role": "user", "content": [{"text": prompt}]}],
+        "inferenceConfig": {"maxTokens": max_tokens},
+    }
+    if system:
+        kwargs["system"] = [{"text": system}]
+
+    resp = None
+    for attempt in range(cfg.max_retries + 1):
+        try:
+            resp = client.converse_stream(**kwargs)
+            break
+        except client.exceptions.ThrottlingException:
+            if attempt < cfg.max_retries:
+                wait = cfg.retry_base_delay_sec * (2 ** attempt)
+                log.warning("report_maker stream throttling → %.1fs 후 재시도", wait)
+                time.sleep(wait)
+            else:
+                log.exception("report_maker stream throttling 재시도 소진")
+                return
+        except Exception:
+            log.exception("report_maker converse_stream 시작 실패")
+            return
+
+    try:
+        for event in resp["stream"]:
+            if "contentBlockDelta" in event:
+                txt = event["contentBlockDelta"].get("delta", {}).get("text")
+                if txt:
+                    yield txt
+            elif "messageStop" in event:
+                if event["messageStop"].get("stopReason") == "max_tokens":
+                    log.warning("report_maker 스트림 응답 잘림(max_tokens) model=%s", cfg.model_id)
+    except Exception:
+        log.exception("report_maker 스트림 소비 중 오류(부분 출력 유지)")
+
+
 def call_vision(image_bytes: bytes, image_format: str, prompt: str, max_tokens: int) -> str:
     """이미지 + 지시 프롬프트 → 추출 텍스트. 실패 시 빈 문자열(재시도·에러처리 공유).
 
