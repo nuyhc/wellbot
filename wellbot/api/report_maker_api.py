@@ -15,6 +15,8 @@ rx.upload 의 크기 제한을 우회하기 위한 FastAPI 엔드포인트(repor
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +24,7 @@ from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, st
 
 from wellbot.logger import log_context
 from wellbot.services.auth import auth_service
+from wellbot.services.files import attachment_service, file_parser
 from wellbot.services.report_maker import storage
 from wellbot.services.report_maker.config import get_config
 from wellbot.services.report_maker.parsing import magic_bytes_ok
@@ -48,6 +51,8 @@ async def upload_file(
     file: UploadFile = File(...),
     template: str = Form(...),
     kind: Literal["style", "topic"] = Form("style"),
+    session_id: str = Form(""),
+    msg_id: str = Form(""),
     wellbot_auth: str | None = Cookie(default=None),
 ):
     """스타일 문서/주제 첨부를 S3 에 적재하고 key 반환."""
@@ -85,15 +90,42 @@ async def upload_file(
             "error": "파일 내용이 확장자와 일치하지 않습니다.",
         }
 
-    # S3 저장 (kind 에 따라 폴더 분리)
+    # 주제 첨부 → 정식 첨부(atch_file_m)로 등록: DB 기록 + 재조회·다운로드 지원.
+    #   메시지(msg_id)에 매핑되어, 전송 시 append_message 가 같은 msg_id 로 저장하면 연결된다.
+    #   RAG 파싱(process_attachment)은 하지 않는다(report_maker 는 텍스트를 인라인 추출).
+    if kind == "topic":
+        if not session_id.strip():
+            return {"file_no": 0, "filename": file.filename, "error": "세션 정보가 필요합니다."}
+        fd, tmp = tempfile.mkstemp(suffix=ext, prefix="rptmk_up_")
+        os.close(fd)
+        try:
+            with open(tmp, "wb") as f:
+                f.write(data)
+            file_no = attachment_service.register_attachment(
+                emp_no=emp_no,
+                smry_id=session_id.strip(),
+                filename=file.filename or "file",
+                content_type=file_parser.guess_mime(file.filename or ""),
+                file_path=Path(tmp),
+                msg_id=msg_id.strip(),
+            )
+        except Exception:
+            log.exception("report_maker 주제 첨부 등록 실패")
+            return {"file_no": 0, "filename": file.filename, "error": "파일 저장에 실패했습니다."}
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        log.info("report_maker 주제 첨부 등록 완료 file_no=%s msg_id=%s", file_no, msg_id)
+        return {"file_no": file_no, "filename": file.filename, "error": None}
+
+    # 스타일 문서 → report_maker 자체 S3 저장(스타일 학습 전용)
     try:
-        if kind == "topic":
-            key = storage.save_topic_file(emp_no, template, file.filename or "file", data)
-        else:
-            key = storage.save_style_doc(emp_no, template, file.filename or "file", data)
+        key = storage.save_style_doc(emp_no, template, file.filename or "file", data)
     except Exception:
-        log.exception("report_maker 업로드 저장 실패")
+        log.exception("report_maker 스타일 업로드 저장 실패")
         return {"key": "", "filename": file.filename, "error": "파일 저장에 실패했습니다."}
 
-    log.info("report_maker 업로드 완료 kind=%s key=%s", kind, key)
+    log.info("report_maker 스타일 업로드 완료 key=%s", key)
     return {"key": key, "filename": file.filename, "error": None}
