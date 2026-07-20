@@ -166,7 +166,12 @@ def _message(m: ReportMessage, idx: int) -> rx.Component:
                     rx.hstack(
                         rx.icon("paperclip", size=12, color=COLORS["text_secondary"]),
                         rx.text(m.file_name, size="1", color=COLORS["text_secondary"]),
-                        align="center", spacing="1",
+                        rx.icon("download", size=12, color=COLORS["text_secondary"]),
+                        align="center",
+                        spacing="1",
+                        cursor="pointer",
+                        title="다운로드",
+                        on_click=ReportMakerState.download_attachment(m.file_no),
                     ),
                 ),
                 rx.text(m.content, white_space="pre-wrap", color=COLORS["text_primary"]),

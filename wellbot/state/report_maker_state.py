@@ -18,11 +18,18 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
+import time
 import uuid
+from pathlib import Path
 
 import reflex as rx
 from pydantic import BaseModel
 
+from wellbot.constants import STREAM_FLUSH_INTERVAL_SEC
+from wellbot.services.ai.bedrock.converse import adrain_generator
+from wellbot.services.files import attachment_service
+from wellbot.state.chat_helpers.download_script import build_download_script
 from wellbot.services.report_maker import (
     analysis,
     bedrock,
@@ -67,6 +74,8 @@ class ReportMessage(BaseModel):
     is_flow: bool = False
     style_saved: bool = False
     file_name: str = ""
+    file_no: int = 0        # 첨부 파일 번호(atch_file_m). 0 이면 첨부 없음
+    msg_id: str = ""        # chtb_tlk_id — 첨부(ChatMessageAttachment) 매핑·영속에 사용
 
 
 class ConvSummary(BaseModel):
@@ -124,6 +133,8 @@ class ReportMakerState(rx.State):
     style_upload_status: str = ""
     _uploaded_topic_text: str = ""
     pending_topic_file: str = ""      # 첨부됐지만 아직 전송 안 한 주제 파일명(표시용)
+    pending_topic_file_no: int = 0    # 대기 중 첨부의 atch_file_m 번호
+    _pending_msg_id: str = ""         # 첨부-메시지 매핑용 사전발급 msg_id(전송 시 메시지에 부여)
     style_docs: list[str] = []        # 스타일 추출에 올린 문서 파일명 목록
 
     # ── 영속 커서 (백엔드) ──
@@ -285,7 +296,18 @@ class ReportMakerState(rx.State):
         for r in rows:
             is_outline = r["role"] == "outline"
             role = "assistant" if is_outline else r["role"]
-            msgs.append(ReportMessage(role=role, content=r["content"], is_outline=is_outline))
+            msg = ReportMessage(
+                role=role, content=r["content"], is_outline=is_outline, msg_id=r.get("msg_id", ""),
+            )
+            # 첨부 복원 — 사용자 메시지에 매핑된 첨부(파일명·다운로드) 표시
+            if role == "user" and r.get("msg_id"):
+                atts = await asyncio.to_thread(
+                    attachment_service.get_attachments_by_msg_id, r["msg_id"]
+                )
+                if atts:
+                    msg.file_name = atts[0].file_name
+                    msg.file_no = atts[0].file_no
+            msgs.append(msg)
             if is_outline:
                 last_outline = r["content"]
         self.messages = msgs
@@ -318,8 +340,10 @@ class ReportMakerState(rx.State):
         new = self.messages[self._persisted_count:]
         for m in new:
             role = "outline" if m.is_outline else m.role
+            # 첨부가 있는 사용자 메시지는 사전발급 msg_id 로 저장 → ChatMessageAttachment 매핑 연결
             await asyncio.to_thread(
-                db.append_message, self.session_id, role, m.content, self._emp_no
+                db.append_message, self.session_id, role, m.content, self._emp_no,
+                msg_id=(m.msg_id or None),
             )
         self._persisted_count = len(self.messages)
         await self._load_conversation_list()
@@ -381,18 +405,28 @@ class ReportMakerState(rx.State):
             self.is_streaming = False
 
     @rx.event
-    async def on_topic_uploaded(self, key: str, filename: str = ""):
-        """주제 첨부 파일의 텍스트를 추출해 다음 전송에 합친다(말풍선엔 파일명만 표시)."""
-        if not storage.owns_key(key, self._emp_no, self.template_id):
-            log.warning("주제 첨부 key 소유권 불일치 emp_no=%s key=%s", self._emp_no, key)
+    async def on_topic_uploaded(self, file_no: int, filename: str = ""):
+        """정식 등록된 주제 첨부(file_no)의 원본을 받아 텍스트를 추출해 다음 전송에 합친다.
+
+        파일 자체는 이미 DB(atch_file_m)에 기록되어 재조회·다운로드 가능하다.
+        말풍선엔 파일명만 표시하고 추출 텍스트는 LLM 입력에만 쓴다.
+        """
+        if not attachment_service.verify_ownership(file_no, self._emp_no):
+            log.warning("주제 첨부 소유권 불일치 emp_no=%s file_no=%s", self._emp_no, file_no)
             yield rx.toast.error("잘못된 파일 참조입니다.")
             return
         self.is_streaming = True
         yield
 
         def worker() -> str:
-            path = storage.download_to_temp(key)
+            data = attachment_service.download_original_bytes(file_no)
+            if not data:
+                return ""
+            fd, path = tempfile.mkstemp(suffix=Path(filename).suffix.lower(), prefix="rptmk_topic_")
+            os.close(fd)
             try:
+                with open(path, "wb") as f:
+                    f.write(data)
                 if style.is_image_file(path):
                     return style.extract_text_from_image(path)
                 return style.extract_plain_text(path)
@@ -406,10 +440,11 @@ class ReportMakerState(rx.State):
             text = await asyncio.to_thread(worker)
             self._uploaded_topic_text = text or ""
             self.pending_topic_file = filename or "첨부 파일"
+            self.pending_topic_file_no = file_no
             self.is_streaming = False
             yield rx.toast.success(f"첨부됨: {self.pending_topic_file}")
         except Exception:
-            log.exception("주제 첨부 처리 실패 key=%s", key)
+            log.exception("주제 첨부 처리 실패 file_no=%s", file_no)
             self.is_streaming = False
             yield rx.toast.error("첨부 파일 처리에 실패했습니다.")
 
@@ -436,27 +471,48 @@ class ReportMakerState(rx.State):
 
     @rx.event
     def pick_and_upload_topic(self):
-        """주제 첨부 선택 → 업로드(JS) → 콜백에서 텍스트 추출 트리거."""
+        """주제 첨부 선택 → 정식 등록(JS→API) → 콜백에서 추출 트리거.
+
+        첨부-메시지 매핑을 위해 msg_id 를 미리 발급해 업로드 시 함께 보낸다.
+        전송 시 이 msg_id 로 사용자 메시지를 저장하면 첨부가 연결된다.
+        """
         if not self.template_id:
             return rx.toast.error("먼저 보고서 유형을 선택하세요.")
+        self._pending_msg_id = uuid.uuid4().hex[:50]
         return rx.call_script(
-            f"reportMakerPickAndUpload({json.dumps(self.template_id)}, 'topic')",
+            f"reportMakerPickAndUpload({json.dumps(self.template_id)}, 'topic', "
+            f"{json.dumps(self.session_id)}, {json.dumps(self._pending_msg_id)})",
             callback=ReportMakerState.on_topic_result,
         )
 
     @rx.event
     def on_topic_result(self, result: dict):
-        if not result or not result.get("key"):
+        if not result or not result.get("file_no"):
             if result and result.get("error"):
                 return rx.toast.error(result["error"])
             return
-        return ReportMakerState.on_topic_uploaded(result["key"], result.get("filename", ""))
+        return ReportMakerState.on_topic_uploaded(
+            int(result["file_no"]), result.get("filename", "")
+        )
 
     @rx.event
-    def clear_pending_topic(self):
-        """첨부 취소(전송 전)."""
+    async def clear_pending_topic(self):
+        """첨부 취소(전송 전) — 등록된 첨부(고아)도 함께 삭제."""
+        if self.pending_topic_file_no:
+            await asyncio.to_thread(
+                attachment_service.delete_attachment, self.pending_topic_file_no, self._emp_no
+            )
         self._uploaded_topic_text = ""
         self.pending_topic_file = ""
+        self.pending_topic_file_no = 0
+        self._pending_msg_id = ""
+
+    @rx.event
+    def download_attachment(self, file_no: int):
+        """말풍선 첨부 다운로드(공용 /api/download/{file_no} 프록시 경유)."""
+        if not file_no:
+            return
+        return rx.call_script(build_download_script(file_no))
 
     # ══════════════════════════════════════════════════════════
     # 스타일 편집
@@ -548,15 +604,24 @@ class ReportMakerState(rx.State):
         typed = (form_data.get("message") or "").strip()
         if not typed or self.is_streaming:
             return
-        # 첨부 추출 텍스트는 LLM 입력에만 합치고, 말풍선엔 사용자가 친 글 + 파일칩만 표시
+        # 첨부 추출 텍스트는 LLM 입력에만 합치고, 말풍선엔 사용자가 친 글 + 파일칩만 표시.
+        # 첨부가 있으면 사전발급 msg_id 를 메시지에 부여해 첨부(ChatMessageAttachment)와 연결.
         llm_text = typed
         file_name = ""
-        if self._uploaded_topic_text:
-            llm_text = f"{self._uploaded_topic_text}\n[추가지시]\n{typed}"
+        file_no = 0
+        msg_id = ""
+        if self._uploaded_topic_text or self.pending_topic_file_no:
+            llm_text = f"{self._uploaded_topic_text}\n[추가지시]\n{typed}" if self._uploaded_topic_text else typed
             file_name = self.pending_topic_file
+            file_no = self.pending_topic_file_no
+            msg_id = self._pending_msg_id
             self._uploaded_topic_text = ""
             self.pending_topic_file = ""
-        self.messages.append(ReportMessage(role="user", content=typed, file_name=file_name))
+            self.pending_topic_file_no = 0
+            self._pending_msg_id = ""
+        self.messages.append(ReportMessage(
+            role="user", content=typed, file_name=file_name, file_no=file_no, msg_id=msg_id,
+        ))
         yield
         try:
             async for _ in self._route(llm_text):
@@ -908,52 +973,90 @@ class ReportMakerState(rx.State):
         async for _ in self._run_build():
             yield
 
-    # ── STEP 4: 아웃라인 빌드 ──
+    # ── 청크 스트리밍 헬퍼 ──
+    async def _stream_into(self, idx: int, prompt: str, max_tokens: int, display):
+        """stream_model 을 시간 배치(STREAM_FLUSH_INTERVAL_SEC)로 messages[idx] 에 반영.
+
+        토큰마다가 아니라 ~80ms 간격으로 묶어 flush 한다(락·네트워크 폭주 방지, WellBot
+        메인 챗과 동일 패턴). display(raw) 로 표시 문자열을 만들고, 각 flush 마다 누적
+        원문을 yield 하므로 호출측은 `async for raw in self._stream_into(...): yield` 로
+        UI push 를 전파하고, 루프 종료 후 raw(최종 원문)로 후처리한다.
+        """
+        raw = ""
+        last_flush = time.monotonic()
+        async for delta in adrain_generator(
+            lambda: bedrock.stream_model(prompt, max_tokens)
+        ):
+            raw += delta
+            now = time.monotonic()
+            if now - last_flush >= STREAM_FLUSH_INTERVAL_SEC:
+                self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
+                last_flush = now
+                yield raw
+        # 마지막 잔여 flush (경계 이후 남은 텍스트 반영)
+        self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
+        yield raw
+
+    # ── STEP 4: 아웃라인 빌드 (스트리밍) ──
     async def _run_build(self):
         self.messages.append(ReportMessage(content="초안 생성 중..."))
         yield
-        outline = await asyncio.to_thread(
-            build.build_outline, self.pending_topic, self.loaded_style,
+        prompt = build.build_outline_prompt(
+            self.pending_topic, self.loaded_style,
             strip_question_block(self.proposed_structure), self.report_type,
             self.report_type_name, self.page_count, self.report_mode,
             self.report_storyline, self.report_storyline_blocks,
             self.pending_questions, self.user_mode == "report_based",
         )
-        if not outline:
-            self.messages[-1] = ReportMessage(content="생성에 실패했습니다. 다시 시도해주세요.")
+        idx = len(self.messages) - 1
+        raw = ""
+        async for raw in self._stream_into(
+            idx, prompt, get_config().max_tokens_outline, md_linebreaks
+        ):
+            yield
+        if not raw.strip():
+            self.messages[idx] = ReportMessage(content="생성에 실패했습니다. 다시 시도해주세요.")
             self.is_streaming = False
             yield
             return
-        self.outline = outline
+        final = build.finalize_outline(raw)
+        self.outline = final
         self.iteration = 0
         self.edit_instructions = []
-        self.messages[-1] = ReportMessage(
-            content=md_linebreaks(outline)
+        self.messages[idx] = ReportMessage(
+            content=md_linebreaks(final)
             + "\n\n---\n수정 요청사항을 입력하거나, 현재 스타일을 저장하세요.",
             is_outline=True,
         )
         self.is_streaming = False
         yield
 
-    # ── 편집 루프 ──
+    # ── 편집 루프 (스트리밍) ──
     async def _edit_outline(self, feedback: str):
         self.is_streaming = True
         self.messages.append(ReportMessage(content="아웃라인 수정 중..."))
         yield
         self.edit_instructions = self.edit_instructions + [feedback.strip()]
-        outline = await asyncio.to_thread(
-            build.edit_outline, self.outline, feedback, self.report_mode,
+        prompt = build.edit_outline_prompt(
+            self.outline, feedback, self.report_mode,
             self.page_count, self.edit_instructions, self.pending_questions,
         )
-        if not outline:
-            self.messages[-1] = ReportMessage(content="수정에 실패했습니다. 다시 시도해주세요.")
+        idx = len(self.messages) - 1
+        raw = ""
+        async for raw in self._stream_into(
+            idx, prompt, get_config().max_tokens_outline, md_linebreaks
+        ):
+            yield
+        if not raw.strip():
+            self.messages[idx] = ReportMessage(content="수정에 실패했습니다. 다시 시도해주세요.")
             self.is_streaming = False
             yield
             return
-        self.outline = outline
+        final = build.finalize_edit(raw)
+        self.outline = final
         self.iteration += 1
-        self.messages[-1] = ReportMessage(
-            content=md_linebreaks(outline) + f"\n\n수정 완료 (#{self.iteration})",
+        self.messages[idx] = ReportMessage(
+            content=md_linebreaks(final) + f"\n\n수정 완료 (#{self.iteration})",
             is_outline=True,
         )
         self.is_streaming = False
@@ -980,6 +1083,7 @@ class ReportMakerState(rx.State):
         return "outline"
 
     async def _handle_general_chat(self, user_input: str):
+        self.is_streaming = True
         self.messages.append(ReportMessage(content="답변 생성 중..."))
         yield
         context = ""
@@ -994,8 +1098,11 @@ class ReportMakerState(rx.State):
             "사용자의 질문에 친절하고 자연스럽게 답변하세요. 아웃라인 내용의 출처를 물으면 "
             "[원본 내용]과 대조해 정직하게 답하세요(입력에 있으면 '입력하신 내용', 없으면 보고서 구성을 위해 작성한 부분).\n"
         )
-        answer = await asyncio.to_thread(bedrock.call_model, prompt, 5000)
-        self.messages[-1] = ReportMessage(content=answer or "답변을 생성하지 못했습니다.")
+        idx = len(self.messages) - 1
+        raw = ""
+        async for raw in self._stream_into(idx, prompt, 5000, lambda t: t):
+            yield
+        self.messages[idx] = ReportMessage(content=raw.strip() or "답변을 생성하지 못했습니다.")
         self.is_streaming = False
         yield
 
