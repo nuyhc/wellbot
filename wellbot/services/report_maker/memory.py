@@ -33,24 +33,13 @@ def _sanitize(text: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _mem_client():
-    """AgentCore MemoryClient (지연 로드). 미가용 시 None."""
-    cfg = get_config()
-    try:
-        from bedrock_agentcore.memory import MemoryClient  # type: ignore
-    except Exception:
-        log.warning("bedrock_agentcore 미설치 — AgentCore 스타일 메모리 비활성(S3 폴백)")
-        return None
-    try:
-        return MemoryClient(region_name=cfg.region or None)
-    except Exception:
-        log.exception("MemoryClient 초기화 실패 — S3 폴백")
-        return None
-
-
-@lru_cache(maxsize=1)
 def _ac_client():
-    """bedrock-agentcore 클라이언트 (지연 로드). 미가용 시 None."""
+    """bedrock-agentcore 데이터플레인 클라이언트(저수준 boto3, 지연 로드). 미가용 시 None.
+
+    고수준 MemoryClient 는 버전에 따라 list/delete 레코드 API 가 없다(1.18.x 에서 제거).
+    list_memory_records / batch_delete_memory_records / create_event 를 모두 제공하는
+    저수준 boto3 클라이언트를 단일 진입점으로 쓴다(legacy 는 1.6.2 고수준 API 였음).
+    """
     import boto3
     cfg = get_config()
     try:
@@ -61,7 +50,7 @@ def _ac_client():
 
 
 def _agentcore_ready() -> bool:
-    return bool(get_config().memory_id) and _mem_client() is not None
+    return bool(get_config().memory_id) and _ac_client() is not None
 
 
 def _create_event(actor_id: str, session_id: str, user_text: str, assistant_text: str) -> bool:
@@ -102,12 +91,13 @@ def save_style(emp_no: str, template: str, style_desc: str) -> None:
         ok = _create_event(actor, session_id, f"[문서 스타일 기록]\n{style_desc}", "문서 스타일을 기록했습니다.")
         if ok:
             log.info("AgentCore writing 저장 actor=%s", actor)
-    # S3 폴백/병행 저장 (AgentCore 미가용 시에도 스타일 유지)
-    storage.save_combined_style(emp_no, template, style_desc)
+    # S3 폴백/병행 저장 (AgentCore 미가용 시에도 스타일 유지). 여러 참고 문서를
+    # 학습하면 누적되도록 append (편집기의 전체 덮어쓰기와 구분).
+    storage.append_combined_style(emp_no, template, style_desc)
 
 
 def save_preference(emp_no: str, template: str, pref_text: str) -> None:
-    """사용자 선호/피드백 기록 (AgentCore /preference)."""
+    """사용자 선호/피드백 기록 (AgentCore /preference). 미가용 시 S3 폴백 누적."""
     actor = actor_id_for(emp_no, template)
     session_id = f"pref-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
     if _agentcore_ready():
@@ -118,45 +108,101 @@ def save_preference(emp_no: str, template: str, pref_text: str) -> None:
         )
         if ok:
             log.info("AgentCore preference 저장 actor=%s", actor)
+    else:
+        # AgentCore 미가용 시에도 유실되지 않도록 S3 정본에 누적(무동작 방지).
+        storage.append_combined_style(emp_no, template, pref_text)
 
 
 # ──────────────────────────────────────────────────────────────
 # 로드
 # ──────────────────────────────────────────────────────────────
-def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
-    """스타일 프로파일 로드. AgentCore(/writing·/preference) → 없으면 S3 폴백."""
+def _record_summaries(namespace: str) -> list[dict]:
+    """AgentCore namespace 의 memory record 요약 전체(페이지네이션). 미가용/실패 시 []."""
     cfg = get_config()
-    actor = actor_id_for(emp_no, template)
-    mem = _mem_client()
+    ac = _ac_client()
+    if ac is None or not cfg.memory_id:
+        return []
+    out: list[dict] = []
+    token = None
+    try:
+        while True:
+            kw = {"memoryId": cfg.memory_id, "namespace": namespace, "maxResults": 100}
+            if token:
+                kw["nextToken"] = token
+            resp = ac.list_memory_records(**kw)
+            out.extend(resp.get("memoryRecordSummaries", []) or [])
+            token = resp.get("nextToken")
+            if not token:
+                break
+    except Exception:
+        log.exception("AgentCore list_memory_records 실패 ns=%s", namespace)
+    return out
 
-    if mem is not None and cfg.memory_id:
-        parts: list[str] = []
-        for namespace, label in [
-            (f"/writing/{actor}/", "문서 스타일"),
-            (f"/preference/{actor}/", "선호/피드백"),
-        ]:
-            try:
-                resp = mem.list_memory_records(memory_id=cfg.memory_id, namespace=namespace)
-                records = resp if isinstance(resp, list) else resp.get("memoryRecordSummaries", [])
-                if not records:
-                    continue
-                records = sorted(
-                    records,
-                    key=lambda r: (r.get("createdAt", "") if isinstance(r, dict) else ""),
-                    reverse=True,
-                )[:top_k]
-                lines = []
-                for r in records:
-                    content = r.get("content", "") if isinstance(r, dict) else str(r)
-                    text = content.get("text", "") if isinstance(content, dict) else str(content)
-                    if text:
-                        lines.append(text)
-                if lines:
-                    parts.append(f"[{label}]\n" + "\n---\n".join(lines))
-            except Exception:
-                log.exception("AgentCore %s 로드 실패", label)
-        if parts:
-            return "\n\n".join(parts)
+
+def _record_text(r: dict) -> str:
+    content = r.get("content") or {}
+    return content.get("text", "") if isinstance(content, dict) else str(content)
+
+
+def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
+    """스타일 프로파일 로드. AgentCore(/writing·/preference) 우선 → 없으면 S3 폴백.
+
+    legacy 와 동일한 AgentCore-primary 구조. 단 고수준 MemoryClient 대신 저수준 boto3
+    클라이언트의 list_memory_records 를 쓴다(1.18.x 호환). AgentCore 레코드는 전략이
+    비동기 추출하므로 방금 기록한 내용이 즉시 안 보일 수 있어, 편집·즉시성이 필요한
+    경로는 S3 정본(load_combined_style)을 병행한다.
+    """
+    actor = actor_id_for(emp_no, template)
+    if _agentcore_ready():
+        texts: list[str] = []
+        for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
+            recs = _record_summaries(namespace)
+            if not recs:
+                continue
+            recs.sort(
+                key=lambda r: r.get("createdAt") or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+            for r in recs[:top_k]:
+                text = _record_text(r)
+                if text:
+                    texts.append(text)
+        if texts:
+            return "\n\n---\n\n".join(texts)
 
     # S3 combined_style.json 폴백
     return storage.load_combined_style(emp_no, template)
+
+
+def clear_style(emp_no: str, template: str) -> int:
+    """작성 가이드 초기화 — AgentCore /writing·/preference 레코드 + S3 스타일 파일 삭제.
+
+    삭제한 AgentCore 레코드 수를 반환한다(S3 삭제는 storage.delete_style 이 담당).
+    """
+    actor = actor_id_for(emp_no, template)
+    deleted = 0
+    if _agentcore_ready():
+        cfg = get_config()
+        ac = _ac_client()
+        for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
+            ids = [r.get("memoryRecordId") for r in _record_summaries(namespace)
+                   if r.get("memoryRecordId")]
+            for i in range(0, len(ids), 100):
+                batch = [{"memoryRecordId": rid} for rid in ids[i:i + 100]]
+                try:
+                    resp = ac.batch_delete_memory_records(memoryId=cfg.memory_id, records=batch)
+                    deleted += len(resp.get("successfulRecords", []) or [])
+                except Exception:
+                    log.exception("AgentCore batch_delete_memory_records 실패 ns=%s", namespace)
+    storage.delete_style(emp_no, template)
+    return deleted
+
+
+def replace_style(emp_no: str, template: str, text: str) -> None:
+    """작성 가이드 전체 교체(편집기 저장). 기존 기록 삭제 후 단일 기록으로 저장(멱등).
+
+    AgentCore 는 비동기 추출이라 교체 직후 목록에 안 보일 수 있으나, S3 정본은 즉시
+    반영되므로 편집기 재진입 시 방금 저장한 내용이 보인다.
+    """
+    clear_style(emp_no, template)
+    save_style(emp_no, template, text)

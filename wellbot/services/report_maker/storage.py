@@ -88,6 +88,34 @@ def list_style_docs(emp_no: str, template: str) -> list[str]:
     return [o["key"] for o in metas]
 
 
+def style_doc_name(key: str) -> str:
+    """스타일 문서 key 에서 원본 파일명 복원 ('{ts}_{name}' → name)."""
+    base = os.path.basename(key)
+    # save_style_doc 규약: '{yymmddHHMMSS}_{원본파일명}'. 앞의 타임스탬프만 제거.
+    parts = base.split("_", 1)
+    return parts[1] if len(parts) == 2 and parts[0].isdigit() else base
+
+
+def list_style_doc_names(emp_no: str, template: str) -> list[str]:
+    """스타일 학습에 올린 원본 파일명 목록(최근순)."""
+    return [style_doc_name(k) for k in list_style_docs(emp_no, template)]
+
+
+def delete_style(emp_no: str, template: str) -> int:
+    """작성 가이드 관련 S3 파일만 삭제(대화·주제 첨부는 보존). 삭제 객체 수 반환.
+
+    삭제: input/style_docs/*, meta/combined_style.json, meta/analyzed.json
+    """
+    prefix = template_prefix(emp_no, template)
+    count = storage_service.delete_prefix(f"{prefix}{_STYLE_DOCS}/")
+    for meta in (_META_COMBINED, _META_ANALYZED):
+        key = f"{prefix}{meta}"
+        if storage_service.object_exists(key):
+            storage_service.delete_object(key)
+            count += 1
+    return count
+
+
 def download_to_temp(s3_key: str) -> str:
     """S3 객체를 임시 파일로 내려받아 로컬 경로 반환 (파싱용).
 
@@ -117,10 +145,22 @@ def load_combined_style(emp_no: str, template: str) -> str:
 
 
 def save_combined_style(emp_no: str, template: str, style_desc: str) -> None:
+    """combined_style.json 전체 덮어쓰기(스타일 편집기 저장 경로)."""
     key = f"{template_prefix(emp_no, template)}{_META_COMBINED}"
     body = json.dumps({"style_desc": style_desc}, ensure_ascii=False).encode("utf-8")
     storage_service.upload_bytes(body, key, content_type="application/json; charset=utf-8")
     log.info("combined_style 저장 emp_no=%s template=%s", emp_no, template)
+
+
+def append_combined_style(emp_no: str, template: str, style_desc: str) -> None:
+    """combined_style.json 에 스타일 서술을 누적(여러 참고 문서 학습 시).
+
+    AgentCore 미가용(S3 폴백) 시에도 문서를 여러 개 학습하면 누적되도록,
+    기존 내용 뒤에 구분자로 이어붙인다. (편집기의 전체 덮어쓰기와 구분)
+    """
+    existing = load_combined_style(emp_no, template)
+    combined = (existing.rstrip() + "\n\n---\n\n" + style_desc) if existing else style_desc
+    save_combined_style(emp_no, template, combined)
 
 
 # ──────────────────────────────────────────────────────────────
