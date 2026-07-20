@@ -160,7 +160,20 @@ def _message(m: ReportMessage, idx: int) -> rx.Component:
     return rx.cond(
         m.role == "user",
         rx.box(
-            rx.text(m.content, white_space="pre-wrap", color=COLORS["text_primary"]),
+            rx.vstack(
+                rx.cond(
+                    m.file_name != "",
+                    rx.hstack(
+                        rx.icon("paperclip", size=12, color=COLORS["text_secondary"]),
+                        rx.text(m.file_name, size="1", color=COLORS["text_secondary"]),
+                        align="center", spacing="1",
+                    ),
+                ),
+                rx.text(m.content, white_space="pre-wrap", color=COLORS["text_primary"]),
+                spacing="1",
+                align="start",
+                width="100%",
+            ),
             align_self="flex-end",
             max_width="80%",
             padding="0.7em 1em",
@@ -228,7 +241,7 @@ def _chat_view() -> rx.Component:
                 ),
             ),
             rx.button(
-                rx.icon("upload", size=16), "참고 문서 등록",
+                rx.icon("scan-text", size=16), "스타일 추출",
                 on_click=ReportMakerState.pick_and_upload_style,
                 variant="soft", color_scheme="gray", size="2",
             ),
@@ -279,35 +292,56 @@ def _chat_view() -> rx.Component:
         ),
         # 입력 바
         rx.form(
-            rx.hstack(
-                rx.button(
-                    rx.icon("paperclip", size=18),
-                    on_click=ReportMakerState.pick_and_upload_topic,
-                    type="button",
-                    variant="soft", color_scheme="gray", size="3",
-                ),
-                rx.text_area(
-                    name="message",
-                    placeholder="보고할 내용을 입력하세요...",
-                    disabled=ReportMakerState.is_streaming,
-                    flex="1",
-                    resize="none",
-                    rows="2",
-                    enter_key_submit=True,
-                ),
-                rx.button(
-                    rx.cond(
-                        ReportMakerState.is_streaming,
-                        rx.icon("loader-circle", size=18, class_name="animate-spin"),
-                        rx.icon("arrow-up", size=18),
+            rx.vstack(
+                # 대기 중 첨부 칩(전송 전) — 첨부됐음을 명확히 표시
+                rx.cond(
+                    ReportMakerState.pending_topic_file != "",
+                    rx.hstack(
+                        rx.icon("paperclip", size=13, color=COLORS["text_secondary"]),
+                        rx.text(ReportMakerState.pending_topic_file, size="1",
+                                color=COLORS["text_primary"]),
+                        rx.icon("x", size=13, color=COLORS["text_secondary"],
+                                cursor="pointer",
+                                on_click=ReportMakerState.clear_pending_topic),
+                        align="center",
+                        spacing="1",
+                        padding="0.25em 0.6em",
+                        bg=COLORS["sidebar_hover"],
+                        border_radius=SPACING["border_radius_sm"],
                     ),
-                    type="submit",
-                    disabled=ReportMakerState.is_streaming,
-                    size="3",
-                    style={"background": _ACCENT, "color": "white"},
+                ),
+                rx.hstack(
+                    rx.button(
+                        rx.icon("paperclip", size=18),
+                        on_click=ReportMakerState.pick_and_upload_topic,
+                        type="button",
+                        variant="soft", color_scheme="gray", size="3",
+                    ),
+                    rx.text_area(
+                        name="message",
+                        placeholder="보고할 내용을 입력하세요...",
+                        disabled=ReportMakerState.is_streaming,
+                        flex="1",
+                        resize="none",
+                        rows="2",
+                        enter_key_submit=True,
+                    ),
+                    rx.button(
+                        rx.cond(
+                            ReportMakerState.is_streaming,
+                            rx.icon("loader-circle", size=18, class_name="animate-spin"),
+                            rx.icon("arrow-up", size=18),
+                        ),
+                        type="submit",
+                        disabled=ReportMakerState.is_streaming,
+                        size="3",
+                        style={"background": _ACCENT, "color": "white"},
+                    ),
+                    width="100%",
+                    align="center",
                 ),
                 width="100%",
-                align="center",
+                spacing="1",
             ),
             on_submit=ReportMakerState.send_message,
             reset_on_submit=True,
@@ -373,13 +407,74 @@ def report_maker_style_page() -> rx.Component:
                     size="2",
                     color=COLORS["text_secondary"],
                 ),
+                # 추출된 문서 목록 + 초기화
+                rx.box(
+                    rx.hstack(
+                        rx.icon("files", size=16, color=COLORS["text_secondary"]),
+                        rx.text("추출된 문서", size="2", weight="medium",
+                                color=COLORS["text_primary"]),
+                        rx.badge(ReportMakerState.style_docs.length(),
+                                 color_scheme="gray", variant="soft", size="1"),
+                        rx.spacer(),
+                        rx.alert_dialog.root(
+                            rx.alert_dialog.trigger(
+                                rx.button(
+                                    rx.icon("trash-2", size=14), "작성 가이드 초기화",
+                                    variant="soft", color_scheme="red", size="1",
+                                    disabled=ReportMakerState.is_streaming,
+                                ),
+                            ),
+                            rx.alert_dialog.content(
+                                rx.alert_dialog.title("작성 가이드 초기화"),
+                                rx.alert_dialog.description(
+                                    "학습된 스타일 기록과 추출 문서가 모두 삭제됩니다. "
+                                    "이 작업은 되돌릴 수 없습니다.",
+                                ),
+                                rx.hstack(
+                                    rx.alert_dialog.cancel(
+                                        rx.button("취소", variant="soft", color_scheme="gray"),
+                                    ),
+                                    rx.alert_dialog.action(
+                                        rx.button("초기화", color_scheme="red",
+                                                  on_click=ReportMakerState.reset_style),
+                                    ),
+                                    spacing="3", justify="end", margin_top="1em",
+                                ),
+                            ),
+                        ),
+                        width="100%", align="center", spacing="2",
+                    ),
+                    rx.cond(
+                        ReportMakerState.style_docs.length() > 0,
+                        rx.vstack(
+                            rx.foreach(
+                                ReportMakerState.style_docs,
+                                lambda name: rx.hstack(
+                                    rx.icon("file-text", size=13,
+                                            color=COLORS["text_secondary"]),
+                                    rx.text(name, size="1", color=COLORS["text_primary"]),
+                                    align="center", spacing="1",
+                                ),
+                            ),
+                            spacing="1", align="start", margin_top="0.5em", width="100%",
+                        ),
+                        rx.text("아직 추출한 문서가 없습니다.", size="1",
+                                color=COLORS["text_secondary"], margin_top="0.4em"),
+                    ),
+                    width="100%",
+                    padding="0.8em 1em",
+                    border=f"1px solid {COLORS['border']}",
+                    border_radius=SPACING["border_radius_md"],
+                    bg=COLORS["sidebar_bg"],
+                ),
                 rx.form(
                     rx.vstack(
                         rx.text_area(
                             name="edited_style",
-                            default_value=ReportMakerState.edited_style,
+                            value=ReportMakerState.edited_style,
+                            on_change=ReportMakerState.set_edited_style,
                             placeholder=(
-                                "아직 학습된 작성 가이드가 없습니다. 참고 문서를 등록하거나 "
+                                "아직 학습된 작성 가이드가 없습니다. '스타일 추출'로 문서를 올리거나 "
                                 "여기에 직접 작성해 저장하세요."
                             ),
                             rows="20",
