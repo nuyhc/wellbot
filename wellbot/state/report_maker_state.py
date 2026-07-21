@@ -588,7 +588,7 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     @rx.event
     def set_edited_style(self, value: str):
-        """작성 가이드 편집기(controlled textarea) on_change 핸들러."""
+        """작성 스타일 편집기(controlled textarea) on_change 핸들러."""
         self.edited_style = value
 
     @rx.event
@@ -631,11 +631,11 @@ class ReportMakerState(rx.State):
         # 스타일을 저장했으므로 이번 세션도 즉시 report_based 로 취급(reset 의 text_based 와 대칭).
         self.user_mode = "report_based"
         self.is_streaming = False
-        yield rx.toast.success("작성 가이드 저장 완료")
+        yield rx.toast.success("작성 스타일 저장 완료")
 
     @rx.event
     async def reset_style(self):
-        """작성 가이드 초기화 — AgentCore 기록 + S3 스타일 파일 삭제."""
+        """작성 스타일 초기화 — AgentCore 기록 + S3 스타일 파일 삭제."""
         self.is_streaming = True
         yield
         await asyncio.to_thread(memory.clear_style, self._emp_no, self.template_id)
@@ -645,8 +645,7 @@ class ReportMakerState(rx.State):
         await self._load_style_docs()
         self.is_streaming = False
         # 초기화는 그 자체로 영속 완료 — 별도 '저장'이 필요 없음을 알려 흐름 혼선을 없앤다.
-        yield rx.toast.success("작성 가이드를 초기화했습니다.")
-        yield rx.toast.success("작성 가이드를 초기화했습니다.")
+        yield rx.toast.success("작성 스타일을 초기화했습니다.")
 
     # ══════════════════════════════════════════════════════════
     # UI 토글 / 유틸
@@ -666,12 +665,27 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def save_outline_style(self, idx: int):
-        """생성된 아웃라인을 이 템플릿의 선호 스타일로 저장."""
+        """생성된 아웃라인의 스타일을 학습해 이 템플릿의 작성 스타일로 저장(+세션 즉시 반영).
+
+        legacy 규약: 아웃라인을 style_desc 로 변환해 선호(preference)로 저장하고,
+        self.loaded_style·user_mode 를 즉시 갱신한다(저장 후 편집기·후속 생성에 동기화).
+        (기존 구현은 원문 아웃라인만 저장하고 세션 상태를 갱신하지 않아 동기화가 안 됐음.)
+        """
         if not (0 <= idx < len(self.messages)):
             return
         content = self.messages[idx].content
-        await asyncio.to_thread(memory.save_preference, self._emp_no, self.template_id, content)
+        self.is_streaming = True
+        yield
+        style_desc = await asyncio.to_thread(style.style_desc_from_outline, content)
+        if not style_desc.strip():
+            self.is_streaming = False
+            yield rx.toast.error("스타일 저장에 실패했습니다. 다시 시도해주세요.")
+            return
+        await asyncio.to_thread(memory.save_preference, self._emp_no, self.template_id, style_desc)
+        self.loaded_style = style_desc
+        self.user_mode = "report_based"
         self.messages[idx] = self.messages[idx].copy(update={"style_saved": True})
+        self.is_streaming = False
         yield rx.toast.success("현재 스타일을 저장했습니다.")
 
     # ══════════════════════════════════════════════════════════

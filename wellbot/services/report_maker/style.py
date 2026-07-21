@@ -490,6 +490,29 @@ def build_style_desc(doc_style: dict, analysis: dict) -> str:
     )
 
 
+def style_desc_from_outline(outline: str) -> str:
+    """생성된 아웃라인 1건을 문서 작성 스타일 서술로 변환(legacy save_outline_style 규약).
+
+    아웃라인 전체를 단일 슬라이드 content 로 감싼 synthetic doc_style 을 만들어
+    analyze_style_with_claude → build_style_desc 로 스타일 서술을 뽑는다. 실패 시 "".
+    """
+    if not (outline or "").strip():
+        return ""
+    doc_style = {
+        "toc": [],
+        "slide_count": 1,
+        "slide_details": [
+            {"slide_num": 1, "title": "생성된 아웃라인", "content": [outline], "tables": []}
+        ],
+    }
+    try:
+        analysis = analyze_style_with_claude(doc_style)
+        return build_style_desc(doc_style, analysis)
+    except Exception:
+        log.exception("아웃라인 스타일 서술 변환 실패")
+        return ""
+
+
 def merge_style_desc(existing: str, new: str) -> str:
     """기존 통합 스타일 + 신규 스타일을 하나의 통합 가이드로 LLM 병합(legacy 규약).
 
