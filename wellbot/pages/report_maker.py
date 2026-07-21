@@ -7,9 +7,12 @@ chat_layout 으로 래핑(표준 wellbot 사이드바 유지)하고, 메인 영�
 import reflex as rx
 
 from wellbot.components.layout import chat_layout
-from wellbot.state.report_maker_scripts import REPORT_MAKER_SCRIPT
+from wellbot.state.report_maker_scripts import (
+    REPORT_MAKER_AUTOSCROLL_SCRIPT,
+    REPORT_MAKER_SCRIPT,
+)
 from wellbot.state.report_maker_state import ReportMakerState, ReportMessage
-from wellbot.styles import COLORS, SPACING
+from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 
 _ACCENT = "#E97055"
 
@@ -156,60 +159,78 @@ def _setup_view() -> rx.Component:
 
 
 def _message(m: ReportMessage, idx: int) -> rx.Component:
-    """단일 메시지 렌더 (user 버블 / assistant 마크다운 / 아웃라인)."""
+    """단일 메시지 렌더 — 메인 챗과 동일 시각 언어(user 우측 버블 / assistant 좌측 마크다운)."""
     return rx.cond(
         m.role == "user",
-        rx.box(
-            rx.vstack(
-                rx.cond(
-                    m.file_name != "",
-                    rx.hstack(
-                        rx.icon("paperclip", size=12, color=COLORS["text_secondary"]),
-                        rx.text(m.file_name, size="1", color=COLORS["text_secondary"]),
-                        rx.icon("download", size=12, color=COLORS["text_secondary"]),
-                        align="center",
-                        spacing="1",
-                        cursor="pointer",
-                        title="다운로드",
-                        on_click=ReportMakerState.download_attachment(m.file_no),
+        # 사용자: 우측 정렬 버블 (chat user_message 규격)
+        rx.hstack(
+            rx.box(
+                rx.vstack(
+                    rx.cond(
+                        m.file_name != "",
+                        rx.hstack(
+                            rx.icon("paperclip", size=12, color=COLORS["text_secondary"]),
+                            rx.text(m.file_name, size="1", color=COLORS["text_secondary"]),
+                            rx.icon("download", size=12, color=COLORS["text_secondary"]),
+                            align="center",
+                            spacing="1",
+                            cursor="pointer",
+                            title="다운로드",
+                            on_click=ReportMakerState.download_attachment(m.file_no),
+                        ),
                     ),
+                    rx.text(m.content, size="3", white_space="pre-wrap",
+                            word_break="break-word", color=COLORS["text_primary"]),
+                    spacing="1",
+                    align="start",
+                    width="100%",
                 ),
-                rx.text(m.content, white_space="pre-wrap", color=COLORS["text_primary"]),
-                spacing="1",
-                align="start",
-                width="100%",
+                bg=COLORS["user_bubble"],
+                padding="0.75em 1.25em",
+                border_radius=SPACING["border_radius"],
+                max_width="70%",
             ),
-            align_self="flex-end",
-            max_width="80%",
-            padding="0.7em 1em",
-            bg=COLORS["user_bubble"],
-            border_radius=SPACING["border_radius_md"],
-            margin_y="0.4em",
-        ),
-        rx.box(
-            rx.markdown(m.content),
-            rx.cond(
-                m.is_outline,
-                rx.hstack(
-                    rx.button(
-                        rx.icon("copy", size=14), "복사",
-                        on_click=ReportMakerState.copy_message(idx),
-                        variant="soft", color_scheme="gray", size="1",
-                    ),
-                    rx.button(
-                        rx.icon("bookmark", size=14), "스타일 저장",
-                        on_click=ReportMakerState.save_outline_style(idx),
-                        variant="soft", color_scheme="gray", size="1",
-                    ),
-                    spacing="2",
-                    margin_top="0.5em",
-                ),
-            ),
-            align_self="flex-start",
-            max_width="100%",
+            class_name="chat-msg",
             width="100%",
-            padding="0.4em 0.2em",
-            margin_y="0.4em",
+            justify="end",
+            padding_x="1em",
+        ),
+        # AI: 대기 중이면 스피너+문구 인디케이터(챗 loading_indicator 통일), 아니면 마크다운
+        rx.cond(
+            m.is_loading,
+            rx.hstack(
+                rx.spinner(size="2"),
+                rx.text(m.content, size="2", color=COLORS["text_secondary"]),
+                spacing="2",
+                align="center",
+                class_name="chat-msg",
+                width="100%",
+                padding_x="1em",
+            ),
+            rx.box(
+                rx.markdown(m.content, component_map=MARKDOWN_COMPONENT_MAP),
+                rx.cond(
+                    m.is_outline,
+                    rx.hstack(
+                        rx.button(
+                            rx.icon("copy", size=14), "복사",
+                            on_click=ReportMakerState.copy_message(idx),
+                            variant="soft", color_scheme="gray", size="1",
+                        ),
+                        rx.button(
+                            rx.icon("bookmark", size=14), "스타일 저장",
+                            on_click=ReportMakerState.save_outline_style(idx),
+                            variant="soft", color_scheme="gray", size="1",
+                        ),
+                        spacing="2",
+                        margin_top="0.5em",
+                    ),
+                ),
+                class_name="chat-msg",
+                width="100%",
+                color=COLORS["text_primary"],
+                padding_x="1em",
+            ),
         ),
     )
 
@@ -273,7 +294,10 @@ def _chat_view() -> rx.Component:
                 rx.vstack(
                     rx.foreach(ReportMakerState.messages, _message),
                     width="100%",
-                    spacing="1",
+                    max_width=SPACING["message_max_width"],
+                    margin_x="auto",
+                    spacing="4",
+                    padding_y="1.5em",
                 ),  # foreach 는 (item, index) 를 콜백에 전달 → _message(m, idx)
                 rx.center(
                     rx.vstack(
@@ -332,62 +356,99 @@ def _chat_view() -> rx.Component:
             overflow_y="auto",
             padding_y="1em",
         ),
-        # 입력 바
-        rx.form(
-            rx.vstack(
-                # 대기 중 첨부 칩(전송 전) — 첨부됐음을 명확히 표시
-                rx.cond(
-                    ReportMakerState.pending_topic_file != "",
-                    rx.hstack(
-                        rx.icon("paperclip", size=13, color=COLORS["text_secondary"]),
-                        rx.text(ReportMakerState.pending_topic_file, size="1",
-                                color=COLORS["text_primary"]),
-                        rx.icon("x", size=13, color=COLORS["text_secondary"],
-                                cursor="pointer",
-                                on_click=ReportMakerState.clear_pending_topic),
-                        align="center",
-                        spacing="1",
-                        padding="0.25em 0.6em",
-                        bg=COLORS["sidebar_hover"],
-                        border_radius=SPACING["border_radius_sm"],
+        # 입력 바 — 메인 챗 input_bar 룩 통일(둥근 박스 + 하단 파일첨부/전송). 파일 첨부만 유지.
+        rx.box(
+            rx.form(
+                rx.vstack(
+                    # 대기 중 첨부 칩(전송 전) — 첨부됐음을 명확히 표시
+                    rx.cond(
+                        ReportMakerState.pending_topic_file != "",
+                        rx.hstack(
+                            rx.icon("paperclip", size=13, color=COLORS["text_secondary"]),
+                            rx.text(ReportMakerState.pending_topic_file, size="1",
+                                    color=COLORS["text_primary"]),
+                            rx.icon("x", size=13, color=COLORS["text_secondary"],
+                                    cursor="pointer",
+                                    on_click=ReportMakerState.clear_pending_topic),
+                            align="center",
+                            spacing="1",
+                            padding="0.25em 0.6em",
+                            bg=COLORS["sidebar_hover"],
+                            border_radius=SPACING["border_radius_sm"],
+                        ),
                     ),
-                ),
-                rx.hstack(
-                    rx.button(
-                        rx.icon("paperclip", size=18),
-                        on_click=ReportMakerState.pick_and_upload_topic,
-                        type="button",
-                        variant="soft", color_scheme="gray", size="3",
-                    ),
+                    # 텍스트 입력 (투명 배경, 자동 높이)
                     rx.text_area(
                         name="message",
                         placeholder="보고할 내용을 입력하세요...",
-                        disabled=ReportMakerState.is_streaming,
-                        flex="1",
-                        resize="none",
-                        rows="2",
                         enter_key_submit=True,
+                        auto_height=True,
+                        variant="soft",
+                        style={
+                            "width": "100%",
+                            "background": "transparent",
+                            "box_shadow": "none",
+                            "color": COLORS["text_primary"],
+                            "font_size": "0.9375rem",
+                            "line_height": "1.5",
+                            "outline": "none",
+                            "resize": "none",
+                            "min_height": "24px",
+                            "max_height": "150px",
+                            "overflow_y": "auto",
+                            "padding": "0",
+                            "& textarea::placeholder": {"color": COLORS["text_secondary"]},
+                        },
                     ),
-                    rx.button(
+                    # 하단: 파일 첨부(좌) + 전송(우)
+                    rx.hstack(
+                        rx.icon_button(
+                            rx.icon("paperclip", size=16),
+                            on_click=ReportMakerState.pick_and_upload_topic,
+                            type="button",
+                            variant="ghost",
+                            size="2",
+                            cursor="pointer",
+                            color=COLORS["text_secondary"],
+                            _hover={"color": COLORS["text_primary"],
+                                    "bg": COLORS["tool_btn_hover"]},
+                            border_radius="50%",
+                        ),
+                        rx.spacer(),
                         rx.cond(
                             ReportMakerState.is_streaming,
-                            rx.icon("loader-circle", size=18, class_name="animate-spin"),
-                            rx.icon("arrow-up", size=18),
+                            rx.icon_button(
+                                rx.spinner(size="2"),
+                                size="2", variant="solid", type="button", disabled=True,
+                                border_radius="50%",
+                                bg=COLORS["tool_btn_bg"], color=COLORS["text_secondary"],
+                            ),
+                            rx.icon_button(
+                                rx.icon("arrow-up", size=16),
+                                size="2", variant="solid", type="submit",
+                                cursor="pointer", border_radius="50%",
+                                bg=COLORS["text_primary"], color=COLORS["main_bg"],
+                                _hover={"bg": COLORS["accent_hover"]},
+                            ),
                         ),
-                        type="submit",
-                        disabled=ReportMakerState.is_streaming,
-                        size="3",
-                        style={"background": _ACCENT, "color": "white"},
+                        width="100%",
+                        align="center",
+                        spacing="2",
                     ),
-                    width="100%",
-                    align="center",
+                    spacing="2",
+                    padding="0.75em 1em",
                 ),
+                on_submit=ReportMakerState.send_message,
+                reset_on_submit=True,
                 width="100%",
-                spacing="1",
             ),
-            on_submit=ReportMakerState.send_message,
-            reset_on_submit=True,
+            bg=COLORS["input_bg"],
+            border_radius=SPACING["border_radius"],
+            border=f"1px solid {COLORS['input_border']}",
             width="100%",
+            max_width=SPACING["message_max_width"],
+            margin_x="auto",
+            _focus_within={"border_color": COLORS["accent_hover"]},
         ),
         width="100%",
         height="100%",
@@ -406,6 +467,7 @@ def report_maker_page() -> rx.Component:
     """
     return rx.fragment(
         rx.script(REPORT_MAKER_SCRIPT),
+        rx.script(REPORT_MAKER_AUTOSCROLL_SCRIPT),
         chat_layout(
             rx.box(
                 rx.cond(
@@ -529,7 +591,7 @@ def report_maker_style_page() -> rx.Component:
                             rx.button(
                                 rx.cond(
                                     ReportMakerState.is_streaming,
-                                    rx.icon("loader-circle", size=16, class_name="animate-spin"),
+                                    rx.spinner(size="2"),
                                     rx.icon("save", size=16),
                                 ),
                                 "저장",
