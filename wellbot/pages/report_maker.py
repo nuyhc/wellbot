@@ -272,7 +272,7 @@ def _chat_view() -> rx.Component:
                 variant="soft", color_scheme="gray", size="2",
             ),
             rx.button(
-                rx.icon("pencil-ruler", size=16), "작성 가이드",
+                rx.icon("pencil-ruler", size=16), "작성 스타일",
                 on_click=ReportMakerState.open_style_editor,
                 variant="soft", color_scheme="gray", size="2",
             ),
@@ -484,7 +484,7 @@ def report_maker_page() -> rx.Component:
 
 
 def report_maker_style_page() -> rx.Component:
-    """작성 가이드(스타일) 조회/편집 페이지 (/ai-services/report-generator/style)."""
+    """작성 스타일 조회/편집 페이지 (/ai-services/report-generator/style)."""
     return chat_layout(
         rx.box(
             rx.vstack(
@@ -493,7 +493,7 @@ def report_maker_style_page() -> rx.Component:
                         rx.icon("arrow-left", size=18, color=COLORS["text_secondary"]),
                         href="/ai-services/report-generator",
                     ),
-                    rx.heading("작성 가이드 편집", size="7", color=COLORS["text_primary"]),
+                    rx.heading("작성 스타일 편집", size="7", color=COLORS["text_primary"]),
                     rx.cond(
                         ReportMakerState.template_display != "",
                         rx.badge(
@@ -506,7 +506,7 @@ def report_maker_style_page() -> rx.Component:
                     spacing="3",
                 ),
                 rx.text(
-                    "현재 적용 중인 작성 가이드라인을 직접 확인·편집할 수 있습니다. "
+                    "현재 적용 중인 작성 스타일을 직접 확인·편집할 수 있습니다. "
                     "저장하면 이후 보고서 문구 생성에 즉시 반영됩니다.",
                     size="2",
                     color=COLORS["text_secondary"],
@@ -523,13 +523,13 @@ def report_maker_style_page() -> rx.Component:
                         rx.alert_dialog.root(
                             rx.alert_dialog.trigger(
                                 rx.button(
-                                    rx.icon("trash-2", size=14), "작성 가이드 초기화",
+                                    rx.icon("trash-2", size=14), "작성 스타일 초기화",
                                     variant="soft", color_scheme="red", size="1",
                                     disabled=ReportMakerState.is_streaming,
                                 ),
                             ),
                             rx.alert_dialog.content(
-                                rx.alert_dialog.title("작성 가이드 초기화"),
+                                rx.alert_dialog.title("작성 스타일 초기화"),
                                 rx.alert_dialog.description(
                                     "학습된 스타일 기록과 추출 문서가 모두 삭제됩니다. "
                                     "이 작업은 되돌릴 수 없습니다.",
@@ -578,7 +578,7 @@ def report_maker_style_page() -> rx.Component:
                             value=ReportMakerState.edited_style,
                             on_change=ReportMakerState.set_edited_style,
                             placeholder=(
-                                "아직 학습된 작성 가이드가 없습니다. '스타일 추출'로 문서를 올리거나 "
+                                "아직 학습된 작성 스타일이 없습니다. '스타일 추출'로 문서를 올리거나 "
                                 "여기에 직접 작성해 저장하세요."
                             ),
                             rows="20",
