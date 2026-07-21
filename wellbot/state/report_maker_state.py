@@ -4,7 +4,9 @@ legacy ChatState 의 flow_stage 흐름을 동일 UX 로 재현하되:
 - 신원은 사번 입력이 아니라 AuthState 세션의 emp_no (서버 도출)
 - 서비스 로직은 report_maker 서비스 계층(analysis/structure/build/style)
 - 영속은 db(대화·템플릿) / memory(AgentCore 스타일) / storage(S3 파일)
-- 진행 상황은 async-generator + yield 로 UI 에 점진 반영
+- 진행 상황은 background task(@rx.event(background=True)) + async with self 경계에서
+  점진 반영 (메인 챗과 동일 스트리밍 패턴; foreground 핸들러는 응답 완료까지 락을 잡아
+  스트리밍 delta 가 화면에 반영되지 않으므로 background 로 처리)
 
 흐름:
   템플릿 선택/생성 → start_session(스타일 로드) → 주제 입력
@@ -373,26 +375,46 @@ class ReportMakerState(rx.State):
         await self._load_conversation_list()
 
     async def _persist_turn(self):
-        """이번 턴에서 확정된 새 메시지를 DB 에 append (flow_state 는 저장 안 함)."""
-        if not self.messages:
-            return
-        title = next(
-            (m.content[:30] for m in self.messages if m.role == "user"), "새 대화"
-        )
-        await asyncio.to_thread(db.save_conversation, self._emp_no, self.session_id, title)
-        new = self.messages[self._persisted_count:]
-        for m in new:
-            role = "outline" if m.is_outline else m.role
-            # 첨부가 있는 사용자 메시지는 사전발급 msg_id 로 저장 → ChatMessageAttachment 매핑 연결
-            await asyncio.to_thread(
-                db.append_message, self.session_id, role, m.content, self._emp_no,
-                model_name=m.model_name,
-                input_tokens=m.input_tokens,
-                output_tokens=m.output_tokens,
-                msg_id=(m.msg_id or None),
+        """이번 턴에서 확정된 새 메시지를 DB 에 append (flow_state 는 저장 안 함).
+
+        background task(send_message)에서 호출되므로 state 접근은 async with self
+        안에서만 하고, blocking DB 호출은 락 밖에서 실행한다. 대화 목록 갱신은
+        foreground 전용 _load_conversation_list(중첩 락 위험) 대신 여기서 직접 반영한다.
+        """
+        async with self:
+            if not self.messages:
+                return
+            emp_no = self._emp_no
+            session_id = self.session_id
+            title = next(
+                (m.content[:30] for m in self.messages if m.role == "user"), "새 대화"
             )
-        self._persisted_count = len(self.messages)
-        await self._load_conversation_list()
+            # 첨부가 있는 사용자 메시지는 사전발급 msg_id 로 저장 → ChatMessageAttachment 매핑 연결
+            pending = [
+                (
+                    "outline" if m.is_outline else m.role,
+                    m.content, m.model_name, m.input_tokens, m.output_tokens,
+                    (m.msg_id or None),
+                )
+                for m in self.messages[self._persisted_count:]
+            ]
+            total = len(self.messages)
+
+        await asyncio.to_thread(db.save_conversation, emp_no, session_id, title)
+        for role, content, model_name, in_tok, out_tok, msg_id in pending:
+            await asyncio.to_thread(
+                db.append_message, session_id, role, content, emp_no,
+                model_name=model_name,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                msg_id=msg_id,
+            )
+        rows = await asyncio.to_thread(db.list_conversations, emp_no)
+        async with self:
+            self._persisted_count = total
+            self.conversation_list = [
+                ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"]) for r in rows
+            ]
 
     # ══════════════════════════════════════════════════════════
     # 스타일 학습 (업로드 → 분석 → AgentCore/S3 저장)
@@ -645,96 +667,85 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     # 메인 입력 처리
     # ══════════════════════════════════════════════════════════
-    @rx.event
+    @rx.event(background=True)
     async def send_message(self, form_data: dict):
-        typed = (form_data.get("message") or "").strip()
-        if not typed or self.is_streaming:
-            return
-        # 첨부 추출 텍스트는 LLM 입력에만 합치고, 말풍선엔 사용자가 친 글 + 파일칩만 표시.
-        # 첨부가 있으면 사전발급 msg_id 를 메시지에 부여해 첨부(ChatMessageAttachment)와 연결.
-        llm_text = typed
-        file_name = ""
-        file_no = 0
-        msg_id = ""
-        if self._uploaded_topic_text or self.pending_topic_file_no:
-            llm_text = f"{self._uploaded_topic_text}\n[추가지시]\n{typed}" if self._uploaded_topic_text else typed
-            file_name = self.pending_topic_file
-            file_no = self.pending_topic_file_no
-            msg_id = self._pending_msg_id
-            self._uploaded_topic_text = ""
-            self.pending_topic_file = ""
-            self.pending_topic_file_no = 0
-            self._pending_msg_id = ""
-        self.messages.append(ReportMessage(
-            role="user", content=typed, file_name=file_name, file_no=file_no, msg_id=msg_id,
-        ))
-        yield
+        # 메인 챗과 동일 패턴: background task 로 실행해 스트리밍 flush 마다
+        # (async with self 경계에서) 프론트로 delta 를 push 한다. foreground 핸들러는
+        # 응답이 끝날 때까지 락을 잡아 중간 갱신이 화면에 반영되지 않는다.
+        async with self:
+            typed = (form_data.get("message") or "").strip()
+            if not typed or self.is_streaming:
+                return
+            # 첨부 추출 텍스트는 LLM 입력에만 합치고, 말풍선엔 사용자가 친 글 + 파일칩만 표시.
+            # 첨부가 있으면 사전발급 msg_id 를 메시지에 부여해 첨부(ChatMessageAttachment)와 연결.
+            llm_text = typed
+            file_name = ""
+            file_no = 0
+            msg_id = ""
+            if self._uploaded_topic_text or self.pending_topic_file_no:
+                llm_text = f"{self._uploaded_topic_text}\n[추가지시]\n{typed}" if self._uploaded_topic_text else typed
+                file_name = self.pending_topic_file
+                file_no = self.pending_topic_file_no
+                msg_id = self._pending_msg_id
+                self._uploaded_topic_text = ""
+                self.pending_topic_file = ""
+                self.pending_topic_file_no = 0
+                self._pending_msg_id = ""
+            self.messages.append(ReportMessage(
+                role="user", content=typed, file_name=file_name, file_no=file_no, msg_id=msg_id,
+            ))
         try:
-            async for _ in self._route(llm_text):
-                yield
+            await self._route(llm_text)
         except Exception:
             log.exception("메시지 처리 실패")
-            self.is_streaming = False
-            self.messages.append(
-                ReportMessage(content="처리 중 오류가 발생했습니다. 다시 시도해주세요.")
-            )
-            yield
+            async with self:
+                self.is_streaming = False
+                self.messages.append(
+                    ReportMessage(content="처리 중 오류가 발생했습니다. 다시 시도해주세요.")
+                )
         finally:
             await self._persist_turn()
-            yield
 
     async def _route(self, user_input: str):
-        stage = self.flow_stage
+        async with self:
+            stage = self.flow_stage
+            has_outline = bool(self.outline)
         if stage == "await_page_count":
-            async for _ in self._handle_page_count(user_input):
-                yield
+            await self._handle_page_count(user_input)
         elif stage == "await_clarify":
-            async for _ in self._handle_flow_clarify(user_input):
-                yield
+            await self._handle_flow_clarify(user_input)
         elif stage == "await_deep_info":
-            async for _ in self._handle_deep_info(user_input):
-                yield
+            await self._handle_deep_info(user_input)
         elif stage == "await_struct_info":
-            async for _ in self._handle_struct_info(user_input):
-                yield
+            await self._handle_struct_info(user_input)
         elif stage == "await_outline_info":
-            async for _ in self._handle_outline_info(user_input):
-                yield
+            await self._handle_outline_info(user_input)
         else:
-            intent = await asyncio.to_thread(self._classify_intent, user_input)
-            if intent == "edit" and self.outline:
-                async for _ in self._edit_outline(user_input):
-                    yield
+            intent = await asyncio.to_thread(self._classify_intent, user_input, has_outline)
+            if intent == "edit" and has_outline:
+                await self._edit_outline(user_input)
             elif intent == "outline":
-                self.outline = ""
-                self.iteration = 0
-                async for _ in self._start_flow(user_input):
-                    yield
+                async with self:
+                    self.outline = ""
+                    self.iteration = 0
+                await self._start_flow(user_input)
             else:
-                async for _ in self._handle_general_chat(user_input):
-                    yield
+                await self._handle_general_chat(user_input)
 
     # ── STEP 1: 주제 분석 ──
     async def _start_flow(self, topic: str):
-        self.is_streaming = True
-        self.messages.append(ReportMessage(content="분석 중..."))
-        yield
+        async with self:
+            self.is_streaming = True
+            self.messages.append(ReportMessage(content="분석 중..."))
+            loaded_style = self.loaded_style
+            report_based = self.user_mode == "report_based"
 
-        a = await asyncio.to_thread(
-            analysis.analyze_topic, topic, self.loaded_style, self.user_mode == "report_based"
-        )
+        a = await asyncio.to_thread(analysis.analyze_topic, topic, loaded_style, report_based)
         if not a:
-            self.messages[-1] = ReportMessage(content="분석에 실패했습니다. 다시 시도해주세요.")
-            self.is_streaming = False
-            yield
+            async with self:
+                self.messages[-1] = ReportMessage(content="분석에 실패했습니다. 다시 시도해주세요.")
+                self.is_streaming = False
             return
-
-        self.pending_topic = topic
-        self.report_type = a.get("report_type", "")
-        self.report_type_name = a.get("report_type_name", "")
-        _mode = a.get("mode", "")
-        self.report_mode = _mode if _mode in ("summary", "deep") else "deep"
-        self.report_storyline = a.get("storyline", "")
 
         blocks = a.get("storyline_blocks", []) or []
         block_lines = []
@@ -743,20 +754,28 @@ class ReportMakerState(rx.State):
             dt = (b.get("detail", "") if isinstance(b, dict) else "").strip()
             block_lines.append(f"  {i}. {nm}" + (f" — {dt}" if dt else ""))
         blocks_text = "\n".join(block_lines)
-        self.report_storyline_blocks = blocks_text
 
-        self.flow_analysis = (
-            f"목적: {a.get('purpose','')}\n현재 상태: {a.get('current_state','')}\n"
-            f"핵심 메시지: {a.get('key_message','')}\n논리 흐름: {a.get('storyline','')}"
-            + (f"\n논리 블록:\n{blocks_text}" if blocks_text else "")
-        )
-        self.page_options = a.get("page_options", [])
-        self.recommended_pages = a.get("recommended_pages", 0)
-        opts = "\n".join(f"* {o.get('label','')}" for o in self.page_options)
-        mode_label = "서머리" if self.report_mode == "summary" else "심층 보고"
+        async with self:
+            self.pending_topic = topic
+            self.report_type = a.get("report_type", "")
+            self.report_type_name = a.get("report_type_name", "")
+            _mode = a.get("mode", "")
+            self.report_mode = _mode if _mode in ("summary", "deep") else "deep"
+            self.report_storyline = a.get("storyline", "")
+            self.report_storyline_blocks = blocks_text
 
-        self.flow_stage = "await_page_count"
-        self.messages[-1] = ReportMessage(
+            self.flow_analysis = (
+                f"목적: {a.get('purpose','')}\n현재 상태: {a.get('current_state','')}\n"
+                f"핵심 메시지: {a.get('key_message','')}\n논리 흐름: {a.get('storyline','')}"
+                + (f"\n논리 블록:\n{blocks_text}" if blocks_text else "")
+            )
+            self.page_options = a.get("page_options", [])
+            self.recommended_pages = a.get("recommended_pages", 0)
+            opts = "\n".join(f"* {o.get('label','')}" for o in self.page_options)
+            mode_label = "서머리" if self.report_mode == "summary" else "심층 보고"
+
+            self.flow_stage = "await_page_count"
+            self.messages[-1] = ReportMessage(
             content=(
                 "## **파악한 내용**\n"
                 f"- 목적: {a.get('purpose','')}\n- 현재 상태: {a.get('current_state','')}\n"
@@ -771,121 +790,139 @@ class ReportMakerState(rx.State):
                 + md_linebreaks(MODE_INTRO)
             ),
             is_flow=True,
-        )
-        self.is_streaming = False
-        yield
+            )
+            self.is_streaming = False
 
     # ── STEP 2: 페이지 수 → 정보 게이트 → 구조 제안 ──
     async def _handle_page_count(self, user_input: str):
-        self.is_streaming = True
-        yield
         _u = user_input.strip()
         used_recommend = False
 
-        if any(k in _u for k in ("추천", "알아서", "정해줘", "적당", "골라")):
-            used_recommend = True
-            pages_list = [float(o.get("pages", 0)) for o in self.page_options if o.get("pages") is not None]
-            rec = None
-            try:
-                cand_rec = float(self.recommended_pages)
-                if cand_rec in pages_list:
-                    rec = cand_rec
-            except (TypeError, ValueError):
+        async with self:
+            self.is_streaming = True
+            if any(k in _u for k in ("추천", "알아서", "정해줘", "적당", "골라")):
+                used_recommend = True
+                pages_list = [float(o.get("pages", 0)) for o in self.page_options if o.get("pages") is not None]
                 rec = None
-            if rec is None:
-                cand = sorted(p for p in pages_list if p >= 1) or sorted(pages_list)
-                rec = cand[0] if cand else None
-            self.page_count = rec if rec is not None else 1
-        else:
-            self.page_count = parse_page_count(user_input)
+                try:
+                    cand_rec = float(self.recommended_pages)
+                    if cand_rec in pages_list:
+                        rec = cand_rec
+                except (TypeError, ValueError):
+                    rec = None
+                if rec is None:
+                    cand = sorted(p for p in pages_list if p >= 1) or sorted(pages_list)
+                    rec = cand[0] if cand else None
+                self.page_count = rec if rec is not None else 1
+            else:
+                self.page_count = parse_page_count(user_input)
 
-        # 페이지 수 답변에 흐름/순서 조정 지시가 섞여 있으면 스토리라인·분석에 반영
-        # (legacy _handle_page_count 동작 보존 — 이 단계의 흐름 지시가 유실되지 않도록).
-        if len(_u) > 8 and any(
-            k in _u for k in ("흐름", "순서", "스토리", "먼저", "강조", "빼", "추가", "바꿔")
-        ):
-            self.report_storyline = (self.report_storyline + f"\n[사용자 흐름 조정] {_u}").strip()
-            self.flow_analysis = self.flow_analysis + f"\n[사용자 흐름 조정] {_u}"
+            # 페이지 수 답변에 흐름/순서 조정 지시가 섞여 있으면 스토리라인·분석에 반영
+            # (legacy _handle_page_count 동작 보존 — 이 단계의 흐름 지시가 유실되지 않도록).
+            if len(_u) > 8 and any(
+                k in _u for k in ("흐름", "순서", "스토리", "먼저", "강조", "빼", "추가", "바꿔")
+            ):
+                self.report_storyline = (self.report_storyline + f"\n[사용자 흐름 조정] {_u}").strip()
+                self.flow_analysis = self.flow_analysis + f"\n[사용자 흐름 조정] {_u}"
 
-        chosen_label = self._chosen_label()
+            chosen_label = self._chosen_label()
+            # 락 밖 blocking 호출용 스냅샷
+            pending_topic = self.pending_topic
+            flow_analysis = self.flow_analysis
+            report_type_name = self.report_type_name
+            page_count = self.page_count
+            report_mode = self.report_mode
+            loaded_style = self.loaded_style
+            report_based = self.user_mode == "report_based"
+            report_storyline = self.report_storyline
+            report_storyline_blocks = self.report_storyline_blocks
+            try:
+                rec = float(self.recommended_pages)
+            except (TypeError, ValueError):
+                rec = 0
 
         # 정보 충실도 게이트 (심층 · 3장 이상 · 추천보다 많이 고른 경우)
-        try:
-            rec = float(self.recommended_pages)
-        except (TypeError, ValueError):
-            rec = 0
-        if (self.report_mode == "deep" and float(self.page_count) >= 3
-                and (rec <= 0 or float(self.page_count) > rec)):
+        if (report_mode == "deep" and float(page_count) >= 3
+                and (rec <= 0 or float(page_count) > rec)):
             check = await asyncio.to_thread(
-                structure.check_page_info, self.pending_topic, self.flow_analysis, self.page_count, rec
+                structure.check_page_info, pending_topic, flow_analysis, page_count, rec
             )
             questions = (check or {}).get("questions", [])
             if not (check or {}).get("sufficient", True) and questions:
-                self.pending_questions = questions
-                self.struct_gate_total = len(questions)
-                self.gate_asked_questions = list(questions)
-                self.outline_reasked = False
-                q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
-                rec_phrase = f"적정 분량은 {int(rec)}장 내외이며, " if rec > 0 else ""
-                self.messages.append(ReportMessage(content=(
-                    f"{rec_phrase}{int(float(self.page_count))}장을 채우려면 아래 정보가 더 필요합니다.\n\n"
-                    f"{q_text}\n\n---\n답을 입력해 주세요. 모르는 항목은 'TBD', 지금 정보로 진행하려면 '진행'."
-                )))
-                self.flow_stage = "await_struct_info"
-                self.is_streaming = False
-                yield
+                async with self:
+                    self.pending_questions = questions
+                    self.struct_gate_total = len(questions)
+                    self.gate_asked_questions = list(questions)
+                    self.outline_reasked = False
+                    q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
+                    rec_phrase = f"적정 분량은 {int(rec)}장 내외이며, " if rec > 0 else ""
+                    self.messages.append(ReportMessage(content=(
+                        f"{rec_phrase}{int(float(self.page_count))}장을 채우려면 아래 정보가 더 필요합니다.\n\n"
+                        f"{q_text}\n\n---\n답을 입력해 주세요. 모르는 항목은 'TBD', 지금 정보로 진행하려면 '진행'."
+                    )))
+                    self.flow_stage = "await_struct_info"
+                    self.is_streaming = False
                 return
 
         proposal = await asyncio.to_thread(
-            structure.propose_structure, self.pending_topic, self.flow_analysis,
-            self.report_type_name, self.page_count, self.report_mode, chosen_label,
-            self.loaded_style, self.user_mode == "report_based",
-            self.report_storyline, self.report_storyline_blocks,
+            structure.propose_structure, pending_topic, flow_analysis,
+            report_type_name, page_count, report_mode, chosen_label,
+            loaded_style, report_based, report_storyline, report_storyline_blocks,
         )
-        self.proposed_structure = proposal["structure"]
+        proposed_structure = proposal["structure"]
 
         # 서머리 다장: 심층 정보 게이트 블록
-        if self.report_mode == "summary" and float(self.page_count) >= 2 and not self.deepdive_targets:
-            check = await asyncio.to_thread(
-                structure.check_deepdive_info, self.pending_topic, self.flow_analysis,
-                self.proposed_structure, self.page_count, chosen_label,
-            )
-            self.deepdive_targets = ", ".join(check.get("deep_targets", [])) if check else "done"
-            deep_qs = (check or {}).get("questions", []) if not (check or {}).get("sufficient", True) else []
-            if deep_qs:
-                block = ("\n\n**!!  심층 보고 작성을 위해 추가 정보가 필요합니다 (반드시 입력)**\n"
-                         + "\n".join(f"{i}. {q}" for i, q in enumerate(deep_qs, 1)))
-                self.proposed_structure = self.proposed_structure + block
+        if report_mode == "summary" and float(page_count) >= 2:
+            async with self:
+                need_deep = not self.deepdive_targets
+            if need_deep:
+                check = await asyncio.to_thread(
+                    structure.check_deepdive_info, pending_topic, flow_analysis,
+                    proposed_structure, page_count, chosen_label,
+                )
+                async with self:
+                    self.deepdive_targets = ", ".join(check.get("deep_targets", [])) if check else "done"
+                deep_qs = (check or {}).get("questions", []) if not (check or {}).get("sufficient", True) else []
+                if deep_qs:
+                    block = ("\n\n**!!  심층 보고 작성을 위해 추가 정보가 필요합니다 (반드시 입력)**\n"
+                             + "\n".join(f"{i}. {q}" for i, q in enumerate(deep_qs, 1)))
+                    proposed_structure = proposed_structure + block
 
-        self.pending_questions = extract_questions(self.proposed_structure)
+        async with self:
+            self.proposed_structure = proposed_structure
+            self.pending_questions = extract_questions(self.proposed_structure)
         await self._apply_grounding()
-        self.outline_reasked = False
-
-        rec_note = (f"적정 분량으로 **{fmt_pages(self.page_count)}장**을 추천드립니다. 다른 분량을 원하시면 알려주세요.\n\n"
-                    if used_recommend else "")
-        self.messages.append(ReportMessage(content=(
-            rec_note + md_linebreaks(self.proposed_structure)
-            + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
-        )))
-        self.flow_stage = "await_clarify"
-        self.is_streaming = False
-        yield
+        async with self:
+            self.outline_reasked = False
+            rec_note = (f"적정 분량으로 **{fmt_pages(self.page_count)}장**을 추천드립니다. 다른 분량을 원하시면 알려주세요.\n\n"
+                        if used_recommend else "")
+            self.messages.append(ReportMessage(content=(
+                rec_note + md_linebreaks(self.proposed_structure)
+                + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
+            )))
+            self.flow_stage = "await_clarify"
+            self.is_streaming = False
 
     async def _apply_grounding(self):
         """근거 검증 패스: 구조가 요구하나 입력에 근거 없는 항목을 질문으로 추가."""
-        try:
+        async with self:
             asked = list(self.pending_questions or []) + list(self.gate_asked_questions or [])
+            pending_topic = self.pending_topic
+            flow_analysis = self.flow_analysis
+            proposed_structure = self.proposed_structure
+        try:
             ground_qs = await asyncio.to_thread(
-                structure.check_grounding, self.pending_topic, self.flow_analysis,
-                self.proposed_structure, asked,
+                structure.check_grounding, pending_topic, flow_analysis,
+                proposed_structure, asked,
             )
         except Exception:
             log.exception("[근거검증] 실패(무시)")
             ground_qs = []
-        ground_qs = [q for q in (ground_qs or []) if q and q not in (self.pending_questions or [])]
-        if ground_qs:
-            self.pending_questions = list(self.pending_questions or []) + ground_qs
-            self.proposed_structure = structure.merge_ground_questions(self.proposed_structure, ground_qs)
+        async with self:
+            ground_qs = [q for q in (ground_qs or []) if q and q not in (self.pending_questions or [])]
+            if ground_qs:
+                self.pending_questions = list(self.pending_questions or []) + ground_qs
+                self.proposed_structure = structure.merge_ground_questions(self.proposed_structure, ground_qs)
 
     def _chosen_label(self) -> str:
         for o in self.page_options:
@@ -898,24 +935,31 @@ class ReportMakerState(rx.State):
 
     # ── STEP 3: 구조 확인/수정 ──
     async def _handle_flow_clarify(self, user_input: str):
-        self.is_streaming = True
-        yield
-        _u = user_input.strip()
-
         import re
+        _u = user_input.strip()
         page_change = re.fullmatch(
             r"\s*(\d+(?:\.\d+)?)\s*(?:장|페이지|쪽)(?:으로|로)?\s*(?:바꿔|바꿔줘|해줘|변경|줄여|늘려|해)?\s*", _u
         )
-        if page_change:
-            new_pc = float(page_change.group(1))
-            if new_pc != float(self.page_count):
-                self.page_count = new_pc
-                proposal = await asyncio.to_thread(
-                    structure.propose_structure, self.pending_topic, self.flow_analysis,
-                    self.report_type_name, self.page_count, self.report_mode, self._chosen_label(),
+
+        async with self:
+            self.is_streaming = True
+            do_repropose = False
+            if page_change:
+                new_pc = float(page_change.group(1))
+                if new_pc != float(self.page_count):
+                    self.page_count = new_pc
+                    do_repropose = True
+            if do_repropose:
+                snap = (
+                    self.pending_topic, self.flow_analysis, self.report_type_name,
+                    self.page_count, self.report_mode, self._chosen_label(),
                     self.loaded_style, self.user_mode == "report_based",
                     self.report_storyline, self.report_storyline_blocks,
                 )
+
+        if do_repropose:
+            proposal = await asyncio.to_thread(structure.propose_structure, *snap)
+            async with self:
                 self.proposed_structure = proposal["structure"]
                 self.messages.append(ReportMessage(content=(
                     f"**{fmt_pages(self.page_count)}장** 구조로 다시 제안드립니다.\n\n"
@@ -924,109 +968,125 @@ class ReportMakerState(rx.State):
                 )))
                 self.flow_stage = "await_clarify"
                 self.is_streaming = False
-                yield
-                return
-
-        self.proposed_structure += f"\n[추가 요청] {user_input}"
-        self.pending_topic += f"\n[추가 정보] {user_input}"
-        if self.pending_questions and _u not in _SKIP_WORDS:
-            self.pending_questions = await asyncio.to_thread(
-                structure.remaining_questions, self.pending_questions, user_input
-            )
-
-        if (not self.outline_reasked) and self.pending_questions:
-            q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(self.pending_questions, 1))
-            self.messages.append(ReportMessage(content=(
-                "아웃라인 작성 전 마지막으로 확인합니다. 정보를 입력하시면 반영하고, "
-                "'진행'이라고 하시면 해당 항목은 (TBD)로 두고 작성합니다.\n\n" + q_text
-            )))
-            self.outline_reasked = True
-            self.flow_stage = "await_outline_info"
-            self.is_streaming = False
-            yield
             return
 
-        self.flow_stage = ""
-        async for _ in self._run_build():
-            yield
+        async with self:
+            self.proposed_structure += f"\n[추가 요청] {user_input}"
+            self.pending_topic += f"\n[추가 정보] {user_input}"
+            need_remaining = bool(self.pending_questions) and _u not in _SKIP_WORDS
+            pending_questions = list(self.pending_questions)
+        if need_remaining:
+            pending_questions = await asyncio.to_thread(
+                structure.remaining_questions, pending_questions, user_input
+            )
+            async with self:
+                self.pending_questions = pending_questions
+
+        async with self:
+            if (not self.outline_reasked) and self.pending_questions:
+                q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(self.pending_questions, 1))
+                self.messages.append(ReportMessage(content=(
+                    "아웃라인 작성 전 마지막으로 확인합니다. 정보를 입력하시면 반영하고, "
+                    "'진행'이라고 하시면 해당 항목은 (TBD)로 두고 작성합니다.\n\n" + q_text
+                )))
+                self.outline_reasked = True
+                self.flow_stage = "await_outline_info"
+                self.is_streaming = False
+                reask = True
+            else:
+                self.flow_stage = ""
+                reask = False
+        if reask:
+            return
+        await self._run_build()
 
     async def _handle_deep_info(self, user_input: str):
-        self.is_streaming = True
-        yield
-        self.proposed_structure += f"\n[심층 과제 추가정보] {user_input}"
-        self.pending_topic += f"\n[심층 과제 추가정보] {user_input}"
-        self.flow_stage = ""
-        async for _ in self._run_build():
-            yield
+        async with self:
+            self.is_streaming = True
+            self.proposed_structure += f"\n[심층 과제 추가정보] {user_input}"
+            self.pending_topic += f"\n[심층 과제 추가정보] {user_input}"
+            self.flow_stage = ""
+        await self._run_build()
 
     async def _handle_struct_info(self, user_input: str):
-        self.is_streaming = True
-        yield
         _u = user_input.strip()
         skip = _u in _SKIP_WORDS
-        if not skip:
-            self.pending_topic += f"\n[추가 정보] {_u}"
-            self.flow_analysis += f"\n[추가 정보] {_u}"
-            if self.pending_questions:
-                self.pending_questions = await asyncio.to_thread(
-                    structure.remaining_questions, self.pending_questions, _u
-                )
+        async with self:
+            self.is_streaming = True
+            if not skip:
+                self.pending_topic += f"\n[추가 정보] {_u}"
+                self.flow_analysis += f"\n[추가 정보] {_u}"
+            need_remaining = (not skip) and bool(self.pending_questions)
+            pending_questions = list(self.pending_questions)
+        if need_remaining:
+            pending_questions = await asyncio.to_thread(
+                structure.remaining_questions, pending_questions, _u
+            )
+            async with self:
+                self.pending_questions = pending_questions
 
-        total = self.struct_gate_total or 0
-        remaining = len(self.pending_questions)
-        answered_ratio = 0.0 if (skip or total <= 0) else (total - remaining) / total
-        try:
-            rec = float(self.recommended_pages)
-        except (TypeError, ValueError):
-            rec = 0
-        if answered_ratio < 0.5 and rec > 0 and rec < float(self.page_count):
-            self.page_count = rec
-            self.messages.append(ReportMessage(content=(
-                f"입력하신 정보가 요청하신 분량을 채우기에 부족하여, 적정 분량인 "
-                f"**{fmt_pages(rec)}장**으로 구조를 제안드립니다."
-            )))
+        async with self:
+            total = self.struct_gate_total or 0
+            remaining = len(self.pending_questions)
+            answered_ratio = 0.0 if (skip or total <= 0) else (total - remaining) / total
+            try:
+                rec = float(self.recommended_pages)
+            except (TypeError, ValueError):
+                rec = 0
+            if answered_ratio < 0.5 and rec > 0 and rec < float(self.page_count):
+                self.page_count = rec
+                self.messages.append(ReportMessage(content=(
+                    f"입력하신 정보가 요청하신 분량을 채우기에 부족하여, 적정 분량인 "
+                    f"**{fmt_pages(rec)}장**으로 구조를 제안드립니다."
+                )))
+            snap = (
+                self.pending_topic, self.flow_analysis, self.report_type_name,
+                self.page_count, self.report_mode, self._chosen_label(),
+                self.loaded_style, self.user_mode == "report_based",
+                self.report_storyline, self.report_storyline_blocks,
+            )
 
-        proposal = await asyncio.to_thread(
-            structure.propose_structure, self.pending_topic, self.flow_analysis,
-            self.report_type_name, self.page_count, self.report_mode, self._chosen_label(),
-            self.loaded_style, self.user_mode == "report_based",
-            self.report_storyline, self.report_storyline_blocks,
-        )
-        self.proposed_structure = proposal["structure"]
-        self.pending_questions = extract_questions(self.proposed_structure)
+        proposal = await asyncio.to_thread(structure.propose_structure, *snap)
+        async with self:
+            self.proposed_structure = proposal["structure"]
+            self.pending_questions = extract_questions(self.proposed_structure)
         await self._apply_grounding()
-        self.outline_reasked = False
-        self.messages.append(ReportMessage(content=(
-            md_linebreaks(proposal["structure"])
-            + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
-        )))
-        self.flow_stage = "await_clarify"
-        self.is_streaming = False
-        yield
+        async with self:
+            self.outline_reasked = False
+            self.messages.append(ReportMessage(content=(
+                md_linebreaks(proposal["structure"])
+                + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
+            )))
+            self.flow_stage = "await_clarify"
+            self.is_streaming = False
 
     async def _handle_outline_info(self, user_input: str):
-        self.is_streaming = True
-        yield
         _u = user_input.strip()
-        if _u not in _SKIP_WORDS:
-            self.pending_topic += f"\n[추가 정보] {_u}"
-            self.flow_analysis += f"\n[추가 정보] {_u}"
-            if self.pending_questions:
-                self.pending_questions = await asyncio.to_thread(
-                    structure.remaining_questions, self.pending_questions, _u
-                )
-        self.flow_stage = ""
-        async for _ in self._run_build():
-            yield
+        async with self:
+            self.is_streaming = True
+            need_remaining = _u not in _SKIP_WORDS and bool(self.pending_questions)
+            if _u not in _SKIP_WORDS:
+                self.pending_topic += f"\n[추가 정보] {_u}"
+                self.flow_analysis += f"\n[추가 정보] {_u}"
+            pending_questions = list(self.pending_questions)
+        if need_remaining:
+            pending_questions = await asyncio.to_thread(
+                structure.remaining_questions, pending_questions, _u
+            )
+            async with self:
+                self.pending_questions = pending_questions
+        async with self:
+            self.flow_stage = ""
+        await self._run_build()
 
     # ── 청크 스트리밍 헬퍼 ──
-    async def _stream_into(self, idx: int, prompt: str, max_tokens: int, display, usage_out=None):
+    async def _stream_into(self, idx: int, prompt: str, max_tokens: int, display, usage_out=None) -> str:
         """stream_model 을 시간 배치(STREAM_FLUSH_INTERVAL_SEC)로 messages[idx] 에 반영.
 
         토큰마다가 아니라 ~80ms 간격으로 묶어 flush 한다(락·네트워크 폭주 방지, WellBot
-        메인 챗과 동일 패턴). display(raw) 로 표시 문자열을 만들고, 각 flush 마다 누적
-        원문을 yield 하므로 호출측은 `async for raw in self._stream_into(...): yield` 로
-        UI push 를 전파하고, 루프 종료 후 raw(최종 원문)로 후처리한다.
+        메인 챗과 동일 패턴). background task 에서 호출되므로 flush 마다 `async with self`
+        경계에서 프론트로 delta 를 push 하고, blocking 스트림 소비는 락 밖에서 한다.
+        누적 원문(raw)을 반환하므로 호출측은 그 값으로 후처리한다.
         """
         raw = ""
         last_flush = time.monotonic()
@@ -1036,89 +1096,88 @@ class ReportMakerState(rx.State):
             raw += delta
             now = time.monotonic()
             if now - last_flush >= STREAM_FLUSH_INTERVAL_SEC:
-                self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
+                async with self:
+                    self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
                 last_flush = now
-                yield raw
         # 마지막 잔여 flush (경계 이후 남은 텍스트 반영)
-        self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
-        yield raw
+        async with self:
+            self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
+        return raw
 
     # ── STEP 4: 아웃라인 빌드 (스트리밍) ──
     async def _run_build(self):
-        self.messages.append(ReportMessage(content="초안 생성 중..."))
-        yield
-        prompt = build.build_outline_prompt(
-            self.pending_topic, self.loaded_style,
-            strip_question_block(self.proposed_structure), self.report_type,
-            self.report_type_name, self.page_count, self.report_mode,
-            self.report_storyline, self.report_storyline_blocks,
-            self.pending_questions, self.user_mode == "report_based",
-        )
-        idx = len(self.messages) - 1
-        raw = ""
+        async with self:
+            self.is_streaming = True
+            self.messages.append(ReportMessage(content="초안 생성 중..."))
+            prompt = build.build_outline_prompt(
+                self.pending_topic, self.loaded_style,
+                strip_question_block(self.proposed_structure), self.report_type,
+                self.report_type_name, self.page_count, self.report_mode,
+                self.report_storyline, self.report_storyline_blocks,
+                self.pending_questions, self.user_mode == "report_based",
+            )
+            idx = len(self.messages) - 1
         usage: dict = {}
-        async for raw in self._stream_into(
+        raw = await self._stream_into(
             idx, prompt, get_config().max_tokens_outline, md_linebreaks, usage_out=usage
-        ):
-            yield
+        )
         if not raw.strip():
-            self.messages[idx] = ReportMessage(content="생성에 실패했습니다. 다시 시도해주세요.")
-            self.is_streaming = False
-            yield
+            async with self:
+                self.messages[idx] = ReportMessage(content="생성에 실패했습니다. 다시 시도해주세요.")
+                self.is_streaming = False
             return
         final = build.finalize_outline(raw)
-        self.outline = final
-        self.iteration = 0
-        self.edit_instructions = []
-        self.messages[idx] = ReportMessage(
-            content=md_linebreaks(final)
-            + "\n\n---\n수정 요청사항을 입력하거나, 현재 스타일을 저장하세요.",
-            is_outline=True,
-            model_name=get_config().model_id,
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-        )
-        self.is_streaming = False
-        yield
+        async with self:
+            self.outline = final
+            self.iteration = 0
+            self.edit_instructions = []
+            self.messages[idx] = ReportMessage(
+                content=md_linebreaks(final)
+                + "\n\n---\n수정 요청사항을 입력하거나, 현재 스타일을 저장하세요.",
+                is_outline=True,
+                model_name=get_config().model_id,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+            )
+            self.is_streaming = False
 
     # ── 편집 루프 (스트리밍) ──
     async def _edit_outline(self, feedback: str):
-        self.is_streaming = True
-        self.messages.append(ReportMessage(content="아웃라인 수정 중..."))
-        yield
-        self.edit_instructions = self.edit_instructions + [feedback.strip()]
-        prompt = build.edit_outline_prompt(
-            self.outline, feedback, self.report_mode,
-            self.page_count, self.edit_instructions, self.pending_questions,
-        )
-        idx = len(self.messages) - 1
-        raw = ""
+        async with self:
+            self.is_streaming = True
+            self.messages.append(ReportMessage(content="아웃라인 수정 중..."))
+            self.edit_instructions = self.edit_instructions + [feedback.strip()]
+            prompt = build.edit_outline_prompt(
+                self.outline, feedback, self.report_mode,
+                self.page_count, self.edit_instructions, self.pending_questions,
+            )
+            idx = len(self.messages) - 1
         usage: dict = {}
-        async for raw in self._stream_into(
+        raw = await self._stream_into(
             idx, prompt, get_config().max_tokens_outline, md_linebreaks, usage_out=usage
-        ):
-            yield
+        )
         if not raw.strip():
-            self.messages[idx] = ReportMessage(content="수정에 실패했습니다. 다시 시도해주세요.")
-            self.is_streaming = False
-            yield
+            async with self:
+                self.messages[idx] = ReportMessage(content="수정에 실패했습니다. 다시 시도해주세요.")
+                self.is_streaming = False
             return
         final = build.finalize_edit(raw)
-        self.outline = final
-        self.iteration += 1
-        self.messages[idx] = ReportMessage(
-            content=md_linebreaks(final) + f"\n\n수정 완료 (#{self.iteration})",
-            is_outline=True,
-            model_name=get_config().model_id,
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-        )
-        self.is_streaming = False
-        yield
+        async with self:
+            self.outline = final
+            self.iteration += 1
+            self.messages[idx] = ReportMessage(
+                content=md_linebreaks(final) + f"\n\n수정 완료 (#{self.iteration})",
+                is_outline=True,
+                model_name=get_config().model_id,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+            )
+            self.is_streaming = False
 
     # ── 의도 분류 (동기, to_thread 로 호출) ──
-    def _classify_intent(self, user_input: str) -> str:
-        has_outline = bool(self.outline)
+    # background task 의 워커 스레드에서 실행되므로 self.outline 을 직접 읽지 않고
+    # 호출측(_route)이 락 안에서 스냅샷한 has_outline 을 인자로 받는다.
+    def _classify_intent(self, user_input: str, has_outline: bool) -> str:
         prompt = (
             "사용자 입력을 분류하세요.\n\n"
             f"[현재 상태] 아웃라인 {'보유 중' if has_outline else '없음'}\n\n"
@@ -1137,34 +1196,32 @@ class ReportMakerState(rx.State):
         return "outline"
 
     async def _handle_general_chat(self, user_input: str):
-        self.is_streaming = True
-        self.messages.append(ReportMessage(content="답변 생성 중..."))
-        yield
-        context = ""
-        if self.loaded_style:
-            context += "[사용자 문서 스타일]\n" + self.loaded_style + "\n\n"
-        if self.pending_topic:
-            context += "[사용자가 입력한 원본 내용]\n" + self.pending_topic + "\n\n"
-        if self.outline:
-            context += "[현재 아웃라인]\n" + self.outline + "\n\n"
-        prompt = (
-            context + "[사용자 질문]\n" + user_input + "\n\n"
-            "사용자의 질문에 친절하고 자연스럽게 답변하세요. 아웃라인 내용의 출처를 물으면 "
-            "[원본 내용]과 대조해 정직하게 답하세요(입력에 있으면 '입력하신 내용', 없으면 보고서 구성을 위해 작성한 부분).\n"
-        )
-        idx = len(self.messages) - 1
-        raw = ""
+        async with self:
+            self.is_streaming = True
+            self.messages.append(ReportMessage(content="답변 생성 중..."))
+            context = ""
+            if self.loaded_style:
+                context += "[사용자 문서 스타일]\n" + self.loaded_style + "\n\n"
+            if self.pending_topic:
+                context += "[사용자가 입력한 원본 내용]\n" + self.pending_topic + "\n\n"
+            if self.outline:
+                context += "[현재 아웃라인]\n" + self.outline + "\n\n"
+            prompt = (
+                context + "[사용자 질문]\n" + user_input + "\n\n"
+                "사용자의 질문에 친절하고 자연스럽게 답변하세요. 아웃라인 내용의 출처를 물으면 "
+                "[원본 내용]과 대조해 정직하게 답하세요(입력에 있으면 '입력하신 내용', 없으면 보고서 구성을 위해 작성한 부분).\n"
+            )
+            idx = len(self.messages) - 1
         usage: dict = {}
-        async for raw in self._stream_into(idx, prompt, 5000, lambda t: t, usage_out=usage):
-            yield
-        self.messages[idx] = ReportMessage(
-            content=raw.strip() or "답변을 생성하지 못했습니다.",
-            model_name=get_config().model_id,
-            input_tokens=usage.get("input_tokens", 0),
-            output_tokens=usage.get("output_tokens", 0),
-        )
-        self.is_streaming = False
-        yield
+        raw = await self._stream_into(idx, prompt, 5000, lambda t: t, usage_out=usage)
+        async with self:
+            self.messages[idx] = ReportMessage(
+                content=raw.strip() or "답변을 생성하지 못했습니다.",
+                model_name=get_config().model_id,
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+            )
+            self.is_streaming = False
 
     # ══════════════════════════════════════════════════════════
     # 로그아웃
