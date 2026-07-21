@@ -75,6 +75,7 @@ class ReportMessage(BaseModel):
     content: str = ""
     is_outline: bool = False
     is_flow: bool = False
+    is_loading: bool = False  # 대기 자리표시자(분석/생성 중) — UI 에서 스피너+문구로 렌더
     style_saved: bool = False
     file_name: str = ""
     file_no: int = 0        # 첨부 파일 번호(atch_file_m). 0 이면 첨부 없음
@@ -745,7 +746,7 @@ class ReportMakerState(rx.State):
     async def _start_flow(self, topic: str):
         async with self:
             self.is_streaming = True
-            self.messages.append(ReportMessage(content="분석 중..."))
+            self.messages.append(ReportMessage(content="분석 중...", is_loading=True))
             loaded_style = self.loaded_style
             report_based = self.user_mode == "report_based"
 
@@ -1106,7 +1107,7 @@ class ReportMakerState(rx.State):
             now = time.monotonic()
             if now - last_flush >= STREAM_FLUSH_INTERVAL_SEC:
                 async with self:
-                    self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
+                    self.messages[idx] = self.messages[idx].copy(update={"content": display(raw), "is_loading": False})
                 last_flush = now
         # 마지막 잔여 flush (경계 이후 남은 텍스트 반영)
         async with self:
@@ -1117,7 +1118,7 @@ class ReportMakerState(rx.State):
     async def _run_build(self):
         async with self:
             self.is_streaming = True
-            self.messages.append(ReportMessage(content="초안 생성 중..."))
+            self.messages.append(ReportMessage(content="초안 생성 중...", is_loading=True))
             prompt = build.build_outline_prompt(
                 self.pending_topic, self.loaded_style,
                 strip_question_block(self.proposed_structure), self.report_type,
@@ -1154,7 +1155,7 @@ class ReportMakerState(rx.State):
     async def _edit_outline(self, feedback: str):
         async with self:
             self.is_streaming = True
-            self.messages.append(ReportMessage(content="아웃라인 수정 중..."))
+            self.messages.append(ReportMessage(content="아웃라인 수정 중...", is_loading=True))
             self.edit_instructions = self.edit_instructions + [feedback.strip()]
             prompt = build.edit_outline_prompt(
                 self.outline, feedback, self.report_mode,
@@ -1207,7 +1208,7 @@ class ReportMakerState(rx.State):
     async def _handle_general_chat(self, user_input: str):
         async with self:
             self.is_streaming = True
-            self.messages.append(ReportMessage(content="답변 생성 중..."))
+            self.messages.append(ReportMessage(content="답변 생성 중...", is_loading=True))
             context = ""
             if self.loaded_style:
                 context += "[사용자 문서 스타일]\n" + self.loaded_style + "\n\n"
