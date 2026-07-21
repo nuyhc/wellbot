@@ -195,6 +195,10 @@ class ReportMakerState(rx.State):
         (seq 참조 + DB 재조회 방식은 스트리밍 직후 메시지의 in-memory seq 가 0 이라
         get_message_content 가 못 찾아 seed 가 유실됐음.)
         세션이 이미 열려 있으면 즉시 적용하고, 아니면 유형 선택 시 _start_session 이 적용한다.
+
+        '보고서 만들기'는 새 보고서 작성 의도이므로, 진행 중 세션(이력)이 남아 있으면
+        기존 flow_stage/outline/messages 에 seed 를 얹지 않고 새 대화로 분리한 뒤 적용한다
+        (이어쓰기 방지). seed 없는 일반 페이지 이동은 초기화하지 않아 이력이 유지된다.
         """
         chat = await self.get_state(ChatState)
         content = chat._report_seed_content
@@ -203,6 +207,10 @@ class ReportMakerState(rx.State):
         chat._report_seed_content = ""   # 중복 소비 방지
         self._pending_seed = content
         if self.session_ready:
+            if self.messages:            # 진행 이력이 있으면 새 대화로 분리 후 적용
+                self._reset_conversation()
+                self.session_id = uuid.uuid4().hex[:50]
+                await self._load_conversation_list()
             self._apply_pending_seed()
 
     def _apply_pending_seed(self):
