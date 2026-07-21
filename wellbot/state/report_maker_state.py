@@ -112,6 +112,7 @@ class ReportMakerState(rx.State):
     messages: list[ReportMessage] = []
     conversation_list: list[ConvSummary] = []
     is_streaming: bool = False
+    show_guide: bool = False   # 시작 화면의 '상세 작성 가이드' 토글(입력 항목 1~6 안내)
 
     # ── 생성 흐름(flow) ──
     outline: str = ""
@@ -649,6 +650,11 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     # UI 토글 / 유틸
     # ══════════════════════════════════════════════════════════
+    @rx.event
+    def toggle_guide(self):
+        """시작 화면 '상세 작성 가이드' 펼치기/접기."""
+        self.show_guide = not self.show_guide
+
     @rx.event
     def copy_message(self, idx: int):
         if not (0 <= idx < len(self.messages)):
