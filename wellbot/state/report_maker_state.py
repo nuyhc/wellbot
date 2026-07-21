@@ -58,6 +58,12 @@ log = logging.getLogger(__name__)
 
 _SKIP_WORDS = ("진행", "그냥", "그대로", "없음", "TBD", "tbd", "진행해", "진행해줘")
 
+# 분석 요약 점진 노출(타이핑 효과)의 flush 횟수. 분석은 블로킹 JSON 이라 스트리밍이
+# 불가능하므로, 완성된 요약 문자열을 이 횟수로 잘라 초안 스트리밍과 같은 시간 배치
+# (STREAM_FLUSH_INTERVAL_SEC)로 흘린다. 길이와 무관하게 총 노출 시간이 일정하도록 청크
+# 크기를 길이/횟수로 잡는다(짧은 글은 굵게, 긴 글은 잘게).
+_REVEAL_FLUSHES = 18
+
 MODE_INTRO = (
     "----------------------------------------------------\n\n"
     "## 보고 유형 안내\n"
@@ -809,8 +815,7 @@ class ReportMakerState(rx.State):
             mode_label = "서머리" if self.report_mode == "summary" else "심층 보고"
 
             self.flow_stage = "await_page_count"
-            self.messages[-1] = ReportMessage(
-            content=(
+            content = (
                 "## **파악한 내용**\n"
                 f"- 목적: {a.get('purpose','')}\n- 현재 상태: {a.get('current_state','')}\n"
                 f"- 핵심 메시지: {a.get('key_message','')}\n"
@@ -822,8 +827,15 @@ class ReportMakerState(rx.State):
                 f"{opts}\n\n"
                 "몇 장 구조로 작성할까요? 정해진 분량이 있으면 골라주시고, 없으면 **추천**이라고 답해 주세요.\n\n"
                 + md_linebreaks(MODE_INTRO)
-            ),
-            is_flow=True,
+            )
+            idx = len(self.messages) - 1
+
+        # 블로킹 JSON 결과를 초안과 동일한 타이핑 UX 로 점진 노출(추가 호출 없음)
+        await self._reveal_into(idx, content)
+        async with self:
+            # 노출 완료본 확정(타이핑 중 partial 마크다운 → 최종본 고정) + 흐름 메시지 표시
+            self.messages[idx] = self.messages[idx].copy(
+                update={"content": content, "is_flow": True, "is_loading": False}
             )
             self.is_streaming = False
 
@@ -834,6 +846,8 @@ class ReportMakerState(rx.State):
 
         async with self:
             self.is_streaming = True
+            self.messages.append(ReportMessage(content="구조 설계 중...", is_loading=True))
+            idx = len(self.messages) - 1
             if any(k in _u for k in ("추천", "알아서", "정해줘", "적당", "골라")):
                 used_recommend = True
                 pages_list = [float(o.get("pages", 0)) for o in self.page_options if o.get("pages") is not None]
@@ -890,11 +904,13 @@ class ReportMakerState(rx.State):
                     self.outline_reasked = False
                     q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
                     rec_phrase = f"적정 분량은 {int(rec)}장 내외이며, " if rec > 0 else ""
-                    self.messages.append(ReportMessage(content=(
+                    gate_content = (
                         f"{rec_phrase}{int(float(self.page_count))}장을 채우려면 아래 정보가 더 필요합니다.\n\n"
                         f"{q_text}\n\n---\n답을 입력해 주세요. 모르는 항목은 'TBD', 지금 정보로 진행하려면 '진행'."
-                    )))
+                    )
                     self.flow_stage = "await_struct_info"
+                await self._reveal_into(idx, gate_content)
+                async with self:
                     self.is_streaming = False
                 return
 
@@ -930,11 +946,13 @@ class ReportMakerState(rx.State):
             self.outline_reasked = False
             rec_note = (f"적정 분량으로 **{fmt_pages(self.page_count)}장**을 추천드립니다. 다른 분량을 원하시면 알려주세요.\n\n"
                         if used_recommend else "")
-            self.messages.append(ReportMessage(content=(
+            struct_content = (
                 rec_note + md_linebreaks(self.proposed_structure)
                 + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
-            )))
+            )
             self.flow_stage = "await_clarify"
+        await self._reveal_into(idx, struct_content)
+        async with self:
             self.is_streaming = False
 
     async def _apply_grounding(self):
@@ -984,6 +1002,8 @@ class ReportMakerState(rx.State):
                     self.page_count = new_pc
                     do_repropose = True
             if do_repropose:
+                self.messages.append(ReportMessage(content="구조 설계 중...", is_loading=True))
+                idx = len(self.messages) - 1
                 snap = (
                     self.pending_topic, self.flow_analysis, self.report_type_name,
                     self.page_count, self.report_mode, self._chosen_label(),
@@ -995,12 +1015,14 @@ class ReportMakerState(rx.State):
             proposal = await asyncio.to_thread(structure.propose_structure, *snap)
             async with self:
                 self.proposed_structure = proposal["structure"]
-                self.messages.append(ReportMessage(content=(
+                repropose_content = (
                     f"**{fmt_pages(self.page_count)}장** 구조로 다시 제안드립니다.\n\n"
                     + md_linebreaks(proposal["structure"])
                     + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
-                )))
+                )
                 self.flow_stage = "await_clarify"
+            await self._reveal_into(idx, repropose_content)
+            async with self:
                 self.is_streaming = False
             return
 
@@ -1017,20 +1039,23 @@ class ReportMakerState(rx.State):
                 self.pending_questions = pending_questions
 
         async with self:
-            if (not self.outline_reasked) and self.pending_questions:
+            reask = (not self.outline_reasked) and bool(self.pending_questions)
+            if reask:
                 q_text = "  \n".join(f"{i}. {q}" for i, q in enumerate(self.pending_questions, 1))
-                self.messages.append(ReportMessage(content=(
+                confirm_content = (
                     "아웃라인 작성 전 마지막으로 확인합니다. 정보를 입력하시면 반영하고, "
                     "'진행'이라고 하시면 해당 항목은 (TBD)로 두고 작성합니다.\n\n" + q_text
-                )))
+                )
+                self.messages.append(ReportMessage(content="확인 중...", is_loading=True))
+                idx = len(self.messages) - 1
                 self.outline_reasked = True
                 self.flow_stage = "await_outline_info"
-                self.is_streaming = False
-                reask = True
             else:
                 self.flow_stage = ""
-                reask = False
         if reask:
+            await self._reveal_into(idx, confirm_content)
+            async with self:
+                self.is_streaming = False
             return
         await self._run_build()
 
@@ -1067,12 +1092,16 @@ class ReportMakerState(rx.State):
                 rec = float(self.recommended_pages)
             except (TypeError, ValueError):
                 rec = 0
+            shortage_note = ""
             if answered_ratio < 0.5 and rec > 0 and rec < float(self.page_count):
                 self.page_count = rec
-                self.messages.append(ReportMessage(content=(
+                # 별도 스피너를 또 띄우지 않고 구조 제안 메시지 앞에 붙여 함께 타이핑 노출
+                shortage_note = (
                     f"입력하신 정보가 요청하신 분량을 채우기에 부족하여, 적정 분량인 "
-                    f"**{fmt_pages(rec)}장**으로 구조를 제안드립니다."
-                )))
+                    f"**{fmt_pages(rec)}장**으로 구조를 제안드립니다.\n\n"
+                )
+            self.messages.append(ReportMessage(content="구조 설계 중...", is_loading=True))
+            idx = len(self.messages) - 1
             snap = (
                 self.pending_topic, self.flow_analysis, self.report_type_name,
                 self.page_count, self.report_mode, self._chosen_label(),
@@ -1087,11 +1116,14 @@ class ReportMakerState(rx.State):
         await self._apply_grounding()
         async with self:
             self.outline_reasked = False
-            self.messages.append(ReportMessage(content=(
-                md_linebreaks(proposal["structure"])
+            struct_content = (
+                shortage_note
+                + md_linebreaks(proposal["structure"])
                 + "\n\n---\n이 구조로 진행할까요? 수정할 점이 있으면 알려주세요."
-            )))
+            )
             self.flow_stage = "await_clarify"
+        await self._reveal_into(idx, struct_content)
+        async with self:
             self.is_streaming = False
 
     async def _handle_outline_info(self, user_input: str):
@@ -1137,6 +1169,29 @@ class ReportMakerState(rx.State):
         async with self:
             self.messages[idx] = self.messages[idx].copy(update={"content": display(raw)})
         return raw
+
+    async def _reveal_into(self, idx: int, content: str) -> None:
+        """완성된 문자열을 초안 스트리밍과 동일한 시간 배치로 점진 노출(타이핑 효과).
+
+        분석은 구조화 JSON(블로킹)이라 토큰 스트리밍이 불가능하다. 이미 조립된 요약
+        마크다운을 STREAM_FLUSH_INTERVAL_SEC 간격으로 잘라 messages[idx] 에 누적 반영해,
+        초안 단계와 같은 '타이핑되는' UX 로 보이게 한다(추가 LLM 호출 없음). 첫 flush 에서
+        is_loading 을 내려 스피너를 걷고 마크다운 렌더로 전환한다. background task 에서
+        호출되므로 flush 마다 `async with self` 경계로 프론트에 push 한다.
+        """
+        n = len(content)
+        if n == 0:
+            return
+        step = max(1, (n + _REVEAL_FLUSHES - 1) // _REVEAL_FLUSHES)
+        shown = 0
+        while shown < n:
+            shown = min(n, shown + step)
+            async with self:
+                self.messages[idx] = self.messages[idx].copy(
+                    update={"content": content[:shown], "is_loading": False}
+                )
+            if shown < n:
+                await asyncio.sleep(STREAM_FLUSH_INTERVAL_SEC)
 
     # ── STEP 4: 아웃라인 빌드 (스트리밍) ──
     async def _run_build(self):
