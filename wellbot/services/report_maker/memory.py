@@ -107,17 +107,18 @@ def save_style(emp_no: str, template: str, style_desc: str) -> None:
 
 
 def save_preference(emp_no: str, template: str, pref_text: str) -> None:
-    """사용자 선호/피드백 기록 — S3 정본 누적(즉시·결정적) + AgentCore /preference(장기 메모리) 병행.
+    """사용자 선호/피드백 기록 — S3 정본에 '단일 통합 가이드'로 병합(저장 시 LLM 1회) + AgentCore 병행.
 
-    학습(save_style)·편집(replace_style)과 동일하게 S3 정본을 항상 함께 쓴다. 이전엔
-    AgentCore ON 일 때 /preference 에만 기록해(전략이 비동기 추출) 저장 직후 조회에 안 잡혔다.
-    이제 S3 정본에 즉시 누적해 편집기·조회(load_style)에 곧바로 반영되고, AgentCore 는
-    장기 semantic 메모리로 병행 축적한다.
+    조회 때마다 요약하지 않도록, 저장 시점에 기존 S3 정본과 LLM 병합해 항상 하나의 정돈된
+    가이드로 유지한다(save_style 과 동일 규약). 조회(load_style)는 이 정본을 그대로 읽어
+    LLM 을 타지 않는다. AgentCore /preference 는 장기 semantic 메모리로 병행 축적한다.
     """
     actor = actor_id_for(emp_no, template)
-    # S3 정본 즉시 누적(모든 모드) — 조회·편집기 즉시 반영
-    storage.append_combined_style(emp_no, template, pref_text)
-    # AgentCore /preference 병행 기록(가용 시) — 장기 semantic 메모리(권위)
+    # S3 정본에 병합(단일 통합 가이드 유지) — 조회는 이후 LLM 없이 읽기만
+    existing = storage.load_combined_style(emp_no, template)
+    merged = style.merge_style_desc(existing, pref_text) if existing.strip() else pref_text
+    storage.save_combined_style(emp_no, template, merged)
+    # AgentCore /preference 병행 기록(가용 시) — 장기 semantic 메모리
     if _agentcore_ready():
         session_id = f"pref-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
         ok = _create_event(
@@ -160,35 +161,26 @@ def _record_text(r: dict) -> str:
     return content.get("text", "") if isinstance(content, dict) else str(content)
 
 
-def _split_combined(text: str) -> list[str]:
-    """S3 정본(combined_style)을 누적 구분자로 청크 분해(load 병합·중복 제거용)."""
-    return [c.strip() for c in (text or "").split("\n\n---\n\n") if c.strip()]
+def load_style(emp_no: str, template: str, top_k: int = 10, summarize: bool = True) -> str:
+    """스타일 프로파일 로드 — S3 정본(단일 통합 가이드) 우선, 비면 AgentCore 폴백.
 
+    저장 경로(save_style·save_preference·replace_style)가 S3 정본을 항상 '단일 통합
+    가이드'로 병합 유지하므로, 조회는 **LLM 없이** 정본을 그대로 반환한다(편집기·세션 공통).
+    AgentCore 는 저장 시 병행 기록되어 장기 semantic 메모리로 축적되며, 표시에는 병합하지
+    않는다(조회마다 재요약 방지).
 
-def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
-    """스타일 프로파일 로드 — AgentCore(권위·장기) + S3 정본(즉시·결정적) 병행 병합.
-
-    AgentCore 레코드(/writing·/preference)를 우선 수집하고, S3 정본(combined_style)을
-    같은 청크 단위로 합쳐 중복을 제거한다. AgentCore 전략은 비동기 추출이라 방금 저장한
-    내용이 레코드로는 늦게 잡히지만, 저장 시 S3 정본에도 병행 기록되므로(save_style·
-    save_preference·replace_style 모두) S3 청크가 그 갭을 즉시 메운다.
-
-    청크가 여러 개일 때만 legacy 처럼 LLM 으로 핵심 지시 가이드로 정리(summarize_style)
-    한다. 단일 청크(편집기 저장본 등)는 이미 정돈돼 있으므로 원문 그대로 노출한다
-    (편집 round-trip 보존).
+    S3 정본이 없을 때(옛/이관 데이터로 AgentCore 에만 있는 경우)만 폴백으로 AgentCore
+    레코드를 읽고, 레코드가 여러 개이고 summarize=True 면 그때만 LLM 으로 정리한다.
     """
-    actor = actor_id_for(emp_no, template)
-    chunks: list[str] = []
-    seen: set[str] = set()
+    combined = storage.load_combined_style(emp_no, template)
+    if combined.strip():
+        return combined
 
-    def _add(text: str) -> None:
-        t = (text or "").strip()
-        if t and t not in seen:
-            seen.add(t)
-            chunks.append(t)
-
-    # AgentCore 레코드(권위) 우선
+    # 폴백: S3 정본이 비어 있고 AgentCore 에만 기록이 있는 경우
     if _agentcore_ready():
+        actor = actor_id_for(emp_no, template)
+        texts: list[str] = []
+        seen: set[str] = set()
         for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
             recs = _record_summaries(namespace)
             if not recs:
@@ -198,17 +190,16 @@ def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
                 reverse=True,
             )
             for r in recs[:top_k]:
-                _add(_record_text(r))
-
-    # S3 정본(즉시) 병합 — AgentCore 추출 지연분/폴백을 즉시 커버(중복 청크는 스킵)
-    for chunk in _split_combined(storage.load_combined_style(emp_no, template)):
-        _add(chunk)
-
-    if not chunks:
-        return ""
-    if len(chunks) == 1:
-        return chunks[0]
-    return style.summarize_style("\n\n---\n\n".join(chunks))
+                t = _record_text(r).strip()
+                if t and t not in seen:
+                    seen.add(t)
+                    texts.append(t)
+        if texts:
+            joined = "\n\n---\n\n".join(texts)
+            if len(texts) == 1 or not summarize:
+                return joined
+            return style.summarize_style(joined)
+    return ""
 
 
 def _delete_records(namespace: str) -> int:

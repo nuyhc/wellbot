@@ -281,8 +281,9 @@ class ReportMakerState(rx.State):
     async def _start_session(self):
         self.is_streaming = True
         yield
+        # 세션 시작 핫패스 — loaded_style 은 프롬프트용이라 요약(LLM) 생략(속도).
         self.loaded_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id
+            memory.load_style, self._emp_no, self.template_id, summarize=False
         )
         self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
         self._reset_conversation()
@@ -466,8 +467,9 @@ class ReportMakerState(rx.State):
                 log.exception("스타일 학습 실패 key=%s", key)
 
         async with self:
+            # 업로드 후 리로드 핫패스 — 프롬프트용이라 요약(LLM) 생략(속도).
             self.loaded_style = await asyncio.to_thread(
-                memory.load_style, self._emp_no, self.template_id
+                memory.load_style, self._emp_no, self.template_id, summarize=False
             )
             self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
             self.style_docs = await asyncio.to_thread(
