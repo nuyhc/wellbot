@@ -161,8 +161,16 @@ def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
     클라이언트의 list_memory_records 를 쓴다(1.18.x 호환). AgentCore 레코드는 전략이
     비동기 추출하므로 방금 기록한 내용이 즉시 안 보일 수 있어, 편집·즉시성이 필요한
     경로는 S3 정본(load_combined_style)을 병행한다.
+
+    여러 메모리 레코드(문서 스타일 + 누적 선호/피드백)를 합쳐야 할 때만 legacy 처럼
+    LLM 으로 핵심 지시 가이드로 정리(summarize_style)해 반환한다. 단일 레코드나 S3
+    정본(편집기 저장본 포함)은 이미 정돈된 가이드이므로 그대로 노출한다 — 사용자가
+    편집기에서 저장한 지시문이 다음 조회 때 재요약되어 달라지는 것을 막기 위함(round-trip
+    보존). 저장·병합 기준(save_style)은 S3 정본을 직접 읽으므로 영향 없다.
     """
     actor = actor_id_for(emp_no, template)
+    raw = ""
+    multi = False  # 여러 레코드를 실제로 합쳤을 때만 요약(단일/편집본은 원문 보존)
     if _agentcore_ready():
         texts: list[str] = []
         for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
@@ -178,10 +186,14 @@ def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
                 if text:
                     texts.append(text)
         if texts:
-            return "\n\n---\n\n".join(texts)
+            raw = "\n\n---\n\n".join(texts)
+            multi = len(texts) > 1
 
-    # S3 combined_style.json 폴백
-    return storage.load_combined_style(emp_no, template)
+    if not raw:
+        # S3 combined_style.json 폴백 (단일 정본 → 그대로)
+        raw = storage.load_combined_style(emp_no, template)
+
+    return style.summarize_style(raw) if multi else raw
 
 
 def _delete_records(namespace: str) -> int:

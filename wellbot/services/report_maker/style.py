@@ -514,3 +514,25 @@ def merge_style_desc(existing: str, new: str) -> str:
     )
     merged = bedrock.call_model(prompt, get_config().max_tokens_style).strip()
     return merged or (existing.rstrip() + "\n\n---\n\n" + new)
+
+
+def summarize_style(raw: str) -> str:
+    """여러 스타일/선호 메모리 레코드를 하나의 간결한 작성 지시 가이드로 정리(legacy 규약).
+
+    AgentCore /writing·/preference 레코드를 그대로 이어붙이면 장황하고 중복되므로,
+    legacy 처럼 LLM 으로 핵심만 남겨 순수 텍스트 지시 가이드로 합성한다(스타일 조회 시
+    메모리 원문이 그대로 노출되지 않도록). 빈 응답/실패 시 원문을 그대로 반환(유실 방지).
+    """
+    if not (raw or "").strip():
+        return raw or ""
+    prompt = (
+        "아래 문서 작성 스타일 가이드를 핵심만 유지하면서 500자 이내로 요약하세요.\n"
+        "문서 유형, 문서 목적, 영역별 bullet 수, 전개 방식, 문장 종결, 보고서 톤, "
+        "약어 사용방식, 슬라이드 분량, 선호 슬라이드 구성, 표 활용은 반드시 포함하세요.\n\n"
+        "[출력 형식]\n"
+        "마크다운 형식 사용 금지\n"
+        "순수 텍스트로만 작성\n"
+        f"{raw}"
+    )
+    summarized = bedrock.call_model(prompt, get_config().max_tokens_style).strip()
+    return summarized or raw
