@@ -30,7 +30,6 @@ from pydantic import BaseModel
 
 from wellbot.constants import STREAM_FLUSH_INTERVAL_SEC
 from wellbot.services.ai.bedrock.converse import adrain_generator
-from wellbot.services.chat import chat_service
 from wellbot.services.files import attachment_service
 from wellbot.state.chat_helpers.download_script import build_download_script
 from wellbot.services.report_maker import (
@@ -182,24 +181,19 @@ class ReportMakerState(rx.State):
         self.templates = await asyncio.to_thread(db.list_templates, self._emp_no)
 
     async def _consume_report_seed(self):
-        """채팅에서 넘어온 보고서 seed 참조를 cross-state 로 읽어 소비한다.
+        """채팅에서 넘어온 보고서 seed(본문)를 cross-state 로 읽어 소비한다.
 
-        본문은 URL 이 아니라 ChatState backend 필드에 담겨 넘어온다. 소유권은 여기서
-        self._emp_no 로 재검증(get_message_content)하므로 남의 대화는 걸러진다.
+        본문은 URL 이 아니라 ChatState backend 필드(_report_seed_content)에 담겨 넘어온다.
+        로그인 사용자 자신의 대화 본문이므로 별도 재조회/소유권 검증 없이 그대로 쓴다.
+        (seq 참조 + DB 재조회 방식은 스트리밍 직후 메시지의 in-memory seq 가 0 이라
+        get_message_content 가 못 찾아 seed 가 유실됐음.)
         세션이 이미 열려 있으면 즉시 적용하고, 아니면 유형 선택 시 _start_session 이 적용한다.
         """
         chat = await self.get_state(ChatState)
-        smry = chat._report_seed_smry
-        if not smry:
-            return
-        seq = chat._report_seed_seq
-        chat._report_seed_smry = ""   # 중복 소비 방지
-        chat._report_seed_seq = 0
-        content = await asyncio.to_thread(
-            chat_service.get_message_content, smry, self._emp_no, seq
-        )
+        content = chat._report_seed_content
         if not content:
             return
+        chat._report_seed_content = ""   # 중복 소비 방지
         self._pending_seed = content
         if self.session_ready:
             self._apply_pending_seed()

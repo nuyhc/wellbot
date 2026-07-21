@@ -147,7 +147,7 @@ def _ai_message_actions(message: Message) -> rx.Component:
         ),
         _action_icon(
             "file-text",
-            on_click=ChatState.start_report_from_message(message.seq),
+            on_click=ChatState.start_report_from_message(message.content),
             tooltip="보고서 만들기",
         ),
         gap="0.25em",
