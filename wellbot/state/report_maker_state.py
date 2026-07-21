@@ -165,6 +165,11 @@ class ReportMakerState(rx.State):
     def recent_chats_label(self) -> str:
         return "최근 대화" if self.conversation_list else ""
 
+    @rx.var
+    def can_save_style(self) -> bool:
+        """편집기 저장 가능 여부 — 내용이 비어 있으면(초기화 직후 등) 저장 버튼 비활성화."""
+        return bool(self.edited_style.strip())
+
     # ══════════════════════════════════════════════════════════
     # 진입 / 인증
     # ══════════════════════════════════════════════════════════
@@ -621,6 +626,8 @@ class ReportMakerState(rx.State):
         # 전체 교체(멱등) — 기존 AgentCore 기록·S3 삭제 후 단일 기록으로 저장
         await asyncio.to_thread(memory.replace_style, self._emp_no, self.template_id, edited)
         self.loaded_style = edited
+        # 스타일을 저장했으므로 이번 세션도 즉시 report_based 로 취급(reset 의 text_based 와 대칭).
+        self.user_mode = "report_based"
         self.is_streaming = False
         yield rx.toast.success("작성 가이드 저장 완료")
 
@@ -635,6 +642,8 @@ class ReportMakerState(rx.State):
         self.user_mode = "text_based"
         await self._load_style_docs()
         self.is_streaming = False
+        # 초기화는 그 자체로 영속 완료 — 별도 '저장'이 필요 없음을 알려 흐름 혼선을 없앤다.
+        yield rx.toast.success("작성 가이드를 초기화했습니다.")
         yield rx.toast.success("작성 가이드를 초기화했습니다.")
 
     # ══════════════════════════════════════════════════════════

@@ -497,7 +497,8 @@ def report_maker_style_page() -> rx.Component:
                                 ),
                                 "저장",
                                 type="submit",
-                                disabled=ReportMakerState.is_streaming,
+                                disabled=ReportMakerState.is_streaming
+                                | ~ReportMakerState.can_save_style,
                                 size="3",
                                 style={"background": _ACCENT, "color": "white"},
                             ),
