@@ -107,10 +107,19 @@ def save_style(emp_no: str, template: str, style_desc: str) -> None:
 
 
 def save_preference(emp_no: str, template: str, pref_text: str) -> None:
-    """사용자 선호/피드백 기록 (AgentCore /preference). 미가용 시 S3 폴백 누적."""
+    """사용자 선호/피드백 기록 — S3 정본 누적(즉시·결정적) + AgentCore /preference(장기 메모리) 병행.
+
+    학습(save_style)·편집(replace_style)과 동일하게 S3 정본을 항상 함께 쓴다. 이전엔
+    AgentCore ON 일 때 /preference 에만 기록해(전략이 비동기 추출) 저장 직후 조회에 안 잡혔다.
+    이제 S3 정본에 즉시 누적해 편집기·조회(load_style)에 곧바로 반영되고, AgentCore 는
+    장기 semantic 메모리로 병행 축적한다.
+    """
     actor = actor_id_for(emp_no, template)
-    session_id = f"pref-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
+    # S3 정본 즉시 누적(모든 모드) — 조회·편집기 즉시 반영
+    storage.append_combined_style(emp_no, template, pref_text)
+    # AgentCore /preference 병행 기록(가용 시) — 장기 semantic 메모리(권위)
     if _agentcore_ready():
+        session_id = f"pref-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
         ok = _create_event(
             actor, session_id,
             f"나는 다음과 같은 문서 작성 스타일을 선호합니다:\n{pref_text}",
@@ -118,9 +127,6 @@ def save_preference(emp_no: str, template: str, pref_text: str) -> None:
         )
         if ok:
             log.info("AgentCore preference 저장 actor=%s", actor)
-    else:
-        # AgentCore 미가용 시에도 유실되지 않도록 S3 정본에 누적(무동작 방지).
-        storage.append_combined_style(emp_no, template, pref_text)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -154,25 +160,35 @@ def _record_text(r: dict) -> str:
     return content.get("text", "") if isinstance(content, dict) else str(content)
 
 
+def _split_combined(text: str) -> list[str]:
+    """S3 정본(combined_style)을 누적 구분자로 청크 분해(load 병합·중복 제거용)."""
+    return [c.strip() for c in (text or "").split("\n\n---\n\n") if c.strip()]
+
+
 def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
-    """스타일 프로파일 로드. AgentCore(/writing·/preference) 우선 → 없으면 S3 폴백.
+    """스타일 프로파일 로드 — AgentCore(권위·장기) + S3 정본(즉시·결정적) 병행 병합.
 
-    legacy 와 동일한 AgentCore-primary 구조. 단 고수준 MemoryClient 대신 저수준 boto3
-    클라이언트의 list_memory_records 를 쓴다(1.18.x 호환). AgentCore 레코드는 전략이
-    비동기 추출하므로 방금 기록한 내용이 즉시 안 보일 수 있어, 편집·즉시성이 필요한
-    경로는 S3 정본(load_combined_style)을 병행한다.
+    AgentCore 레코드(/writing·/preference)를 우선 수집하고, S3 정본(combined_style)을
+    같은 청크 단위로 합쳐 중복을 제거한다. AgentCore 전략은 비동기 추출이라 방금 저장한
+    내용이 레코드로는 늦게 잡히지만, 저장 시 S3 정본에도 병행 기록되므로(save_style·
+    save_preference·replace_style 모두) S3 청크가 그 갭을 즉시 메운다.
 
-    여러 메모리 레코드(문서 스타일 + 누적 선호/피드백)를 합쳐야 할 때만 legacy 처럼
-    LLM 으로 핵심 지시 가이드로 정리(summarize_style)해 반환한다. 단일 레코드나 S3
-    정본(편집기 저장본 포함)은 이미 정돈된 가이드이므로 그대로 노출한다 — 사용자가
-    편집기에서 저장한 지시문이 다음 조회 때 재요약되어 달라지는 것을 막기 위함(round-trip
-    보존). 저장·병합 기준(save_style)은 S3 정본을 직접 읽으므로 영향 없다.
+    청크가 여러 개일 때만 legacy 처럼 LLM 으로 핵심 지시 가이드로 정리(summarize_style)
+    한다. 단일 청크(편집기 저장본 등)는 이미 정돈돼 있으므로 원문 그대로 노출한다
+    (편집 round-trip 보존).
     """
     actor = actor_id_for(emp_no, template)
-    raw = ""
-    multi = False  # 여러 레코드를 실제로 합쳤을 때만 요약(단일/편집본은 원문 보존)
+    chunks: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        t = (text or "").strip()
+        if t and t not in seen:
+            seen.add(t)
+            chunks.append(t)
+
+    # AgentCore 레코드(권위) 우선
     if _agentcore_ready():
-        texts: list[str] = []
         for namespace in (f"/writing/{actor}/", f"/preference/{actor}/"):
             recs = _record_summaries(namespace)
             if not recs:
@@ -182,18 +198,17 @@ def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
                 reverse=True,
             )
             for r in recs[:top_k]:
-                text = _record_text(r)
-                if text:
-                    texts.append(text)
-        if texts:
-            raw = "\n\n---\n\n".join(texts)
-            multi = len(texts) > 1
+                _add(_record_text(r))
 
-    if not raw:
-        # S3 combined_style.json 폴백 (단일 정본 → 그대로)
-        raw = storage.load_combined_style(emp_no, template)
+    # S3 정본(즉시) 병합 — AgentCore 추출 지연분/폴백을 즉시 커버(중복 청크는 스킵)
+    for chunk in _split_combined(storage.load_combined_style(emp_no, template)):
+        _add(chunk)
 
-    return style.summarize_style(raw) if multi else raw
+    if not chunks:
+        return ""
+    if len(chunks) == 1:
+        return chunks[0]
+    return style.summarize_style("\n\n---\n\n".join(chunks))
 
 
 def _delete_records(namespace: str) -> int:
@@ -216,7 +231,7 @@ def _delete_records(namespace: str) -> int:
 
 
 def clear_style(emp_no: str, template: str) -> int:
-    """작성 가이드 초기화 — AgentCore /writing·/preference 레코드 + S3 스타일 파일 삭제.
+    """작성 스타일 초기화 — AgentCore /writing·/preference 레코드 + S3 스타일 파일 삭제.
 
     삭제한 AgentCore 레코드 수를 반환한다(S3 삭제는 storage.delete_style 이 담당).
     """
@@ -227,7 +242,7 @@ def clear_style(emp_no: str, template: str) -> int:
 
 
 def replace_style(emp_no: str, template: str, text: str) -> None:
-    """작성 가이드 전체 교체(편집기 저장). 문서 스타일을 편집 텍스트 하나로 교체(멱등).
+    """작성 스타일 전체 교체(편집기 저장). 문서 스타일을 편집 텍스트 하나로 교체(멱등).
 
     병합 없이 그대로 교체하며, 학습 문서 목록(style_docs)은 보존한다(초기화와 구분).
     선호(/preference)는 편집 텍스트가 대체하므로 함께 비운다. AgentCore 는 비동기

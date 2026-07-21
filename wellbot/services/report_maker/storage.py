@@ -102,7 +102,7 @@ def list_style_doc_names(emp_no: str, template: str) -> list[str]:
 
 
 def delete_style(emp_no: str, template: str) -> int:
-    """작성 가이드 관련 S3 파일만 삭제(대화·주제 첨부는 보존). 삭제 객체 수 반환.
+    """작성 스타일 관련 S3 파일만 삭제(대화·주제 첨부는 보존). 삭제 객체 수 반환.
 
     삭제: input/style_docs/*, meta/combined_style.json, meta/analyzed.json
     """
