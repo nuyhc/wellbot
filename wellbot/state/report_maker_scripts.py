@@ -108,3 +108,30 @@ window.reportMakerPickAndUploadMany = function(template, kind) {
     });
 };
 """
+
+# 자동 스크롤 — 메인 챗과 동일 UX(스트리밍/새 메시지 시 하단 고정, 사용자가 위로 올리면 중단).
+# 대화 컨테이너(#rm-chat-container)는 세션 시작 후에야 마운트되므로, body 변화를 감시해
+# 컨테이너가 나타나는 즉시 1회 wire 한다. wire 후에는 컨테이너 자체의 MutationObserver 가
+# 스트리밍 중 텍스트 변화(characterData)·새 메시지(childList)에 반응해 하단으로 스크롤한다.
+REPORT_MAKER_AUTOSCROLL_SCRIPT = """
+(function initRmAutoScroll() {
+    var THRESHOLD = 120;  // 하단에서 이 px 이내면 '맨 아래'로 간주
+    function wire(el) {
+        if (el._rmAutoScroll) return;
+        el._rmAutoScroll = true;
+        var userUp = false;
+        function dist() { return el.scrollHeight - el.scrollTop - el.clientHeight; }
+        el.addEventListener('scroll', function() { userUp = dist() > THRESHOLD; });
+        new MutationObserver(function() {
+            if (!userUp) el.scrollTop = el.scrollHeight;
+        }).observe(el, { childList: true, subtree: true, characterData: true });
+        el.scrollTop = el.scrollHeight;
+    }
+    function tryWire() {
+        var el = document.getElementById('rm-chat-container');
+        if (el) wire(el);
+    }
+    tryWire();
+    new MutationObserver(tryWire).observe(document.body, { childList: true, subtree: true });
+})();
+"""
