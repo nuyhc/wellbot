@@ -287,9 +287,9 @@ class ReportMakerState(rx.State):
     async def _start_session(self):
         self.is_streaming = True
         yield
-        # 세션 시작 핫패스 — loaded_style 은 프롬프트용이라 요약(LLM) 생략(속도).
+        # 세션 시작 — 정본이 있으면 LLM 없이 그대로, 없으면 legacy 이관(1회 정규화).
         self.loaded_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id, summarize=False
+            memory.load_style, self._emp_no, self.template_id
         )
         self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
         self._reset_conversation()
@@ -497,9 +497,9 @@ class ReportMakerState(rx.State):
                 prev = await asyncio.to_thread(storage.load_extracted_docs, emp_no, template) or []
                 merged = list(dict.fromkeys([*prev, *extracted_now]))
                 await asyncio.to_thread(storage.save_extracted_docs, emp_no, template, merged)
-            # 추출 후 리로드 핫패스 — 프롬프트용이라 요약(LLM) 생략(속도).
+            # 추출 후 리로드 — 방금 병합한 정본을 그대로 읽는다(LLM 없음).
             self.loaded_style = await asyncio.to_thread(
-                memory.load_style, self._emp_no, self.template_id, summarize=False
+                memory.load_style, self._emp_no, self.template_id
             )
             self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
             # 단일 편집기: 추출본이 병합된 정본을 편집 필드에 그대로 반영
@@ -675,9 +675,9 @@ class ReportMakerState(rx.State):
         if not self.template_id:
             # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
             return rx.redirect("/ai-services/report-generator")
-        # 정본 스타일 전체를 편집 필드로 (요약 없이 — 저장 시점에 이미 통합됨)
+        # 정본 스타일 전체를 편집 필드로 (정본이 있으면 그대로, legacy 는 1회 정규화 이관)
         self.edited_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id, summarize=False
+            memory.load_style, self._emp_no, self.template_id
         )
         await self._load_style_docs()
 
