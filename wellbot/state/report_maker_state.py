@@ -272,6 +272,35 @@ class ReportMakerState(rx.State):
             yield
 
     @rx.event
+    async def rename_template(self, template_id: str, form_data: dict):
+        """보고서 유형 표시명 변경 — ID(스토리지 스코프)는 유지하고 display 만 갱신.
+
+        template_id 는 to_safe_id(원래 이름)로 고정돼 S3/스타일 스코프를 결정하므로
+        rename 은 표시명(display)만 바꾼다(save_template upsert 가 display 만 갱신).
+        """
+        name = (form_data.get("template_name") or "").strip()
+        if not name:
+            yield rx.toast.error("보고서 유형명을 입력해주세요.")
+            return
+        t = await asyncio.to_thread(db.get_template, self._emp_no, template_id)
+        if not t:
+            yield rx.toast.error("보고서 유형을 찾을 수 없습니다.")
+            return
+        await asyncio.to_thread(db.save_template, self._emp_no, template_id, name, t["actor"])
+        await self._load_templates()
+        if self.template_id == template_id:
+            self.template_display = name
+        yield rx.toast.success("이름을 변경했습니다.")
+
+    @rx.event
+    async def edit_template_style(self, template_id: str):
+        """세션 시작 없이 해당 유형의 작성 스타일 편집기로 바로 이동(유형만 지정)."""
+        t = await asyncio.to_thread(db.get_template, self._emp_no, template_id)
+        self.template_id = template_id
+        self.template_display = t["display"] if t else template_id
+        return rx.redirect("/ai-services/report-generator/style")
+
+    @rx.event
     async def delete_template(self, template_id: str):
         await asyncio.to_thread(db.delete_template, self._emp_no, template_id)
         await asyncio.to_thread(storage.delete_template_files, self._emp_no, template_id)
