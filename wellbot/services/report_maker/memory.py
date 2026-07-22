@@ -96,58 +96,43 @@ def _replace_writing(emp_no: str, template: str, desc: str) -> None:
                 log.info("AgentCore writing 교체 저장 actor=%s", actor)
 
 
-def _rebuild(emp_no: str, template: str, *, rebuild_base: bool = False) -> None:
-    """뼈대(문서 desc 병합) + 세부조정(manual)을 합쳐 최종 combined 를 materialize.
+def add_doc_style(emp_no: str, template: str, style_desc: str) -> None:
+    """참고 문서 하나의 추출 스타일을 정본(단일 편집 스타일)에 병합.
 
-    rebuild_base=True 면 문서 사이드카에서 뼈대를 다시 병합해 저장(문서 add/delete 시).
-    False 면 저장된 뼈대를 재사용(manual 만 바뀐 경우). 최종본은 _replace_writing 으로
-    S3 정본 + AgentCore /writing 에 반영해 조회(load_style)가 LLM 없이 읽게 한다.
+    단일 편집기 모델: 스타일은 하나의 편집 가능한 정본이다. 문서 추출본은 기존 정본 위에
+    LLM 으로 병합해 얹는다(정본이 비어 있으면 추출본 그대로). 이후 사용자가 편집기에서
+    자유롭게 수정·저장할 수 있고, 문서 삭제는 정본 텍스트를 건드리지 않는다.
     """
-    if rebuild_base:
-        base = ""
-        for d in storage.load_style_doc_descs(emp_no, template).values():
-            d = (d or "").strip()
-            if d:
-                base = style.merge_style_desc(base, d) if base else d
-        storage.save_doc_base(emp_no, template, base)
-    else:
-        base = storage.load_doc_base(emp_no, template)
-
-    manual = storage.load_style_manual(emp_no, template).strip()
-    combined = style.merge_style_desc(base, manual) if (base and manual) else (base or manual)
-    _replace_writing(emp_no, template, combined)
-
-
-def save_style(emp_no: str, template: str, style_desc: str, doc_basename: str) -> None:
-    """참고 문서 하나의 스타일을 뼈대 사이드카에 기록하고 뼈대·최종본을 재빌드.
-
-    문서별 style_desc 를 사이드카({basename: desc})에 보관하므로, 이후 문서 삭제/교체 시
-    남은 문서로 뼈대를 재빌드할 수 있다(수동 편집 레이어는 보존).
-    """
-    storage.save_style_doc_desc(emp_no, template, doc_basename, style_desc)
-    _rebuild(emp_no, template, rebuild_base=True)
+    existing = storage.load_combined_style(emp_no, template)
+    merged = style.merge_style_desc(existing, style_desc) if existing.strip() else style_desc
+    _replace_writing(emp_no, template, merged)
 
 
 def delete_doc(emp_no: str, template: str, doc_basename: str) -> None:
-    """참고 문서 하나 삭제 — 원본 파일 + 뼈대 사이드카 제거 후 뼈대·최종본 재빌드(세부조정 보존)."""
-    storage.remove_style_doc_desc(emp_no, template, doc_basename)
+    """참고 문서 원본 파일 하나만 삭제. 정본 스타일 텍스트는 건드리지 않는다.
+
+    단일 편집기 모델에서는 문서 추출본이 정본에 병합되어 개별 기여분을 되돌릴 수 없다.
+    따라서 삭제는 목록/원본 파일만 정리하고, 스타일 조정은 편집기에서 사용자가 직접 한다.
+    """
     storage.delete_style_doc_file(emp_no, template, doc_basename)
-    _rebuild(emp_no, template, rebuild_base=True)
+
+
+def set_style(emp_no: str, template: str, text: str) -> None:
+    """편집기 저장 — 정본 스타일 전체를 편집 텍스트로 덮어쓴다(S3 정본 + AgentCore /writing)."""
+    _replace_writing(emp_no, template, text.strip())
 
 
 def save_preference(emp_no: str, template: str, pref_text: str) -> None:
-    """사용자 선호/피드백 기록 — S3 정본에 '단일 통합 가이드'로 병합(저장 시 LLM 1회) + AgentCore 병행.
+    """사용자 선호/피드백 기록 — 정본에 '단일 통합 가이드'로 병합(저장 시 LLM 1회) + AgentCore 병행.
 
-    조회 때마다 요약하지 않도록, 저장 시점에 기존 S3 정본과 LLM 병합해 항상 하나의 정돈된
-    가이드로 유지한다(save_style 과 동일 규약). 조회(load_style)는 이 정본을 그대로 읽어
-    LLM 을 타지 않는다. AgentCore /preference 는 장기 semantic 메모리로 병행 축적한다.
+    조회 때마다 요약하지 않도록, 저장 시점에 기존 정본과 LLM 병합해 항상 하나의 정돈된
+    가이드로 유지한다. 조회(load_style)는 이 정본을 그대로 읽어 LLM 을 타지 않는다.
+    AgentCore /preference 는 장기 semantic 메모리로 병행 축적한다.
     """
     actor = actor_id_for(emp_no, template)
-    # 세부조정(manual) 레이어에 병합 — 뼈대(문서)는 건드리지 않고 그 위에 얹힘
-    existing = storage.load_style_manual(emp_no, template)
+    existing = storage.load_combined_style(emp_no, template)
     merged = style.merge_style_desc(existing, pref_text) if existing.strip() else pref_text
-    storage.save_style_manual(emp_no, template, merged)
-    _rebuild(emp_no, template, rebuild_base=False)
+    _replace_writing(emp_no, template, merged)
     # AgentCore /preference 병행 기록(가용 시) — 장기 semantic 메모리
     if _agentcore_ready():
         session_id = f"pref-{actor}-{datetime.now(_KST).strftime('%y%m%d%H%M%S')}"
@@ -261,12 +246,3 @@ def clear_style(emp_no: str, template: str) -> int:
     storage.delete_style(emp_no, template)
     return deleted
 
-
-def replace_style(emp_no: str, template: str, text: str) -> None:
-    """편집기 저장 — 세부조정(manual) 레이어를 편집 텍스트로 교체 후 재빌드(뼈대 보존).
-
-    편집기는 세부조정 레이어만 편집하므로, 문서 뼈대(doc_base)는 그대로 두고 manual 만
-    교체한 뒤 최종본(뼈대+세부조정)을 다시 materialize 한다. 문서 목록도 보존된다.
-    """
-    storage.save_style_manual(emp_no, template, text)
-    _rebuild(emp_no, template, rebuild_base=False)
