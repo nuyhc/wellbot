@@ -113,7 +113,7 @@ class ReportMakerState(rx.State):
     session_id: str = ""
     loaded_style: str = ""
     user_mode: str = ""          # "report_based" | "text_based"
-    edited_style: str = ""
+    edited_style: str = ""       # 편집기: 단일 편집 스타일 정본(문서 추출+수동편집 통합)
 
     # ── 대화 ──
     messages: list[ReportMessage] = []
@@ -150,7 +150,6 @@ class ReportMakerState(rx.State):
     pending_topic_file_no: int = 0    # 대기 중 첨부의 atch_file_m 번호
     _pending_msg_id: str = ""         # 첨부-메시지 매핑용 사전발급 msg_id(전송 시 메시지에 부여)
     style_docs: list[dict] = []       # 추출 문서 목록 [{"name","key"}] (key=삭제 식별용 S3 key)
-    doc_base_preview: str = ""        # 편집기: 문서 병합 뼈대 미리보기(읽기 전용)
 
     # 채팅에서 넘어온 보고서 seed(대화 메시지 본문). _reset_conversation 에서 지우지 않고
     # 세션 시작 시점(_start_session)에 _uploaded_topic_text 로 적용한다.
@@ -436,16 +435,34 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     # 스타일 학습 (업로드 → 분석 → AgentCore/S3 저장)
     # ══════════════════════════════════════════════════════════
+    @rx.event
+    async def on_styles_registered(self, keys: list[str]):
+        """업로드된 참고 문서를 목록에 등록만 한다(추출은 '스타일 추출' 버튼에서 별도 실행).
+
+        등록 = S3 에 파일이 올라가 목록에 뜨는 것. 스타일 반영(추출)은 사용자가 명시적으로
+        '스타일 추출'을 눌러야 일어난다(업데이트성 동작).
+        """
+        valid = [k for k in (keys or []) if storage.owns_key(k, self._emp_no, self.template_id)]
+        if not valid:
+            log.warning("스타일 등록 key 소유권 불일치 emp_no=%s keys=%s", self._emp_no, keys)
+            return rx.toast.error("잘못된 파일 참조입니다.")
+        await self._load_style_docs()
+        self.style_upload_status = f"{len(valid)}개 문서를 등록했습니다. '스타일 추출'을 눌러 반영하세요."
+        return rx.toast.success("문서를 등록했습니다. '스타일 추출'로 스타일에 반영하세요.")
+
     @rx.event(background=True)
-    async def on_styles_uploaded(self, keys: list[str]):
-        """API 업로드가 반환한 S3 key 목록을 받아 각 문서 스타일을 순차 학습한다."""
+    async def extract_pending_styles(self):
+        """등록된 문서 중 '미추출' 문서만 추출해 정본 스타일에 병합(사용자 클릭 업데이트).
+
+        이미 반영된 문서는 건너뛰어 중복 병합을 막는다. 추출 완료 문서는 마커에 기록돼
+        이후 '추출됨'으로 표시된다.
+        """
         async with self:
             emp_no, template = self._emp_no, self.template_id
-            valid = [k for k in (keys or []) if storage.owns_key(k, emp_no, template)]
-            if not valid:
-                log.warning("스타일 업로드 key 소유권 불일치 emp_no=%s keys=%s", emp_no, keys)
-                self.style_upload_status = "잘못된 파일 참조입니다."
-                self.is_streaming = False
+            pending = [d["key"] for d in self.style_docs
+                       if not d.get("extracted") and storage.owns_key(d["key"], emp_no, template)]
+            if not pending:
+                self.style_upload_status = "추출할 새 문서가 없습니다."
                 return
             self.is_streaming = True
 
@@ -455,45 +472,44 @@ class ReportMakerState(rx.State):
                 doc = style.extract_doc_style(path)
                 analyzed = style.analyze_style_with_claude(doc)
                 desc = style.build_style_desc(doc, analyzed)
-                # 문서 식별자(basename='{ts}_{name}')로 뼈대 사이드카에 기록 → 삭제/교체 가능
-                memory.save_style(emp_no, template, desc, os.path.basename(key))
+                # 단일 편집기 모델: 추출본을 정본 스타일에 병합(기존 편집 내용 위에 얹힘)
+                memory.add_doc_style(emp_no, template, desc)
             finally:
                 try:
                     os.remove(path)
                 except OSError:
                     pass
 
-        total = len(valid)
-        done = 0
-        for i, key in enumerate(valid, 1):
+        total = len(pending)
+        extracted_now: list[str] = []
+        for i, key in enumerate(pending, 1):
             async with self:
                 self.style_upload_status = f"스타일 추출 중... ({i}/{total})"
             try:
                 await asyncio.to_thread(worker, key)
-                done += 1
+                extracted_now.append(os.path.basename(key))
             except Exception:
-                log.exception("스타일 학습 실패 key=%s", key)
+                log.exception("스타일 추출 실패 key=%s", key)
 
         async with self:
-            # 업로드 후 리로드 핫패스 — 프롬프트용이라 요약(LLM) 생략(속도).
+            # 추출 완료 문서를 마커에 누적(중복 방지)
+            if extracted_now:
+                prev = await asyncio.to_thread(storage.load_extracted_docs, emp_no, template) or []
+                merged = list(dict.fromkeys([*prev, *extracted_now]))
+                await asyncio.to_thread(storage.save_extracted_docs, emp_no, template, merged)
+            # 추출 후 리로드 핫패스 — 프롬프트용이라 요약(LLM) 생략(속도).
             self.loaded_style = await asyncio.to_thread(
                 memory.load_style, self._emp_no, self.template_id, summarize=False
             )
             self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
-            # 편집기 뼈대 미리보기 갱신(세부조정 manual 은 보존 — 문서는 뼈대에만 반영)
-            self.doc_base_preview = await asyncio.to_thread(
-                storage.load_doc_base, self._emp_no, self.template_id
-            )
-            keys = await asyncio.to_thread(
-                storage.list_style_docs, self._emp_no, self.template_id
-            )
-            self.style_docs = [
-                {"name": storage.style_doc_name(k), "key": k} for k in keys
-            ]
+            # 단일 편집기: 추출본이 병합된 정본을 편집 필드에 그대로 반영
+            self.edited_style = self.loaded_style
+            await self._load_style_docs()
+            done = len(extracted_now)
             if done == total:
-                self.style_upload_status = f"스타일 추출 완료 ({done}개)"
+                self.style_upload_status = f"스타일 추출 완료 ({done}개 반영)"
             elif done > 0:
-                self.style_upload_status = f"{done}/{total}개 추출 완료 (일부 실패)"
+                self.style_upload_status = f"{done}/{total}개 반영 (일부 실패)"
             else:
                 self.style_upload_status = "스타일 추출에 실패했습니다. 다시 시도해주세요."
             self.is_streaming = False
@@ -543,8 +559,8 @@ class ReportMakerState(rx.State):
             yield rx.toast.error("첨부 파일 처리에 실패했습니다.")
 
     @rx.event
-    def pick_and_upload_style(self):
-        """참고 문서(다중) 선택 → 순차 업로드(JS) → 콜백에서 스타일 학습 트리거."""
+    def register_style_docs(self):
+        """참고 문서(다중) 선택 → 순차 업로드(JS) → 콜백에서 목록에 '등록'(추출은 별도)."""
         if not self.template_id:
             return rx.toast.error("먼저 보고서 유형을 선택하세요.")
         return rx.call_script(
@@ -554,14 +570,14 @@ class ReportMakerState(rx.State):
 
     @rx.event
     def on_style_result(self, results: list):
-        """다중 업로드 결과([{key,filename,error}, ...]) → 유효 key 만 모아 학습."""
+        """다중 업로드 결과([{key,filename,error}, ...]) → 유효 key 만 모아 목록 등록."""
         keys = [r["key"] for r in (results or []) if r and r.get("key")]
         if not keys:
             errors = [r["error"] for r in (results or []) if r and r.get("error")]
             if errors:
                 return rx.toast.error(errors[0])
             return
-        return ReportMakerState.on_styles_uploaded(keys)
+        return ReportMakerState.on_styles_registered(keys)
 
     @rx.event
     def pick_and_upload_topic(self):
@@ -621,15 +637,36 @@ class ReportMakerState(rx.State):
         return rx.redirect("/ai-services/report-generator/style")
 
     async def _load_style_docs(self):
-        keys = await asyncio.to_thread(storage.list_style_docs, self._emp_no, self.template_id)
-        self.style_docs = [{"name": storage.style_doc_name(k), "key": k} for k in keys]
+        """참고 문서 목록 + 문서별 추출 상태(extracted) 로드.
+
+        추출 마커가 아직 없으면(구데이터/최초 진입): 이미 정본 스타일이 있으면 기존 문서는
+        '반영됨'으로 간주해 마커를 초기화(중복 병합 방지), 정본이 비어 있으면 모두 '미추출'.
+        """
+        emp_no, template = self._emp_no, self.template_id
+        keys = await asyncio.to_thread(storage.list_style_docs, emp_no, template)
+        extracted = await asyncio.to_thread(storage.load_extracted_docs, emp_no, template)
+        if extracted is None:
+            existing = await asyncio.to_thread(storage.load_combined_style, emp_no, template)
+            extracted = [os.path.basename(k) for k in keys] if (existing.strip() and keys) else []
+            await asyncio.to_thread(storage.save_extracted_docs, emp_no, template, extracted)
+        extracted_set = set(extracted)
+        self.style_docs = [
+            {"name": storage.style_doc_name(k), "key": k,
+             "extracted": os.path.basename(k) in extracted_set}
+            for k in keys
+        ]
+
+    @rx.var
+    def pending_extract_count(self) -> int:
+        """아직 스타일에 반영되지 않은(미추출) 등록 문서 수."""
+        return sum(1 for d in self.style_docs if not d.get("extracted"))
 
     @rx.event
     async def load_style_editor(self):
         """스타일 편집 페이지 on_load.
 
-        편집기는 세부 조정(manual) 레이어만 편집한다. 문서 뼈대는 읽기 전용 미리보기로
-        보여주고, 최종 가이드(뼈대+세부조정)는 생성에 쓰인다.
+        단일 편집기 모델: 문서 추출본과 수동 편집이 하나의 정본으로 통합돼 있어, 정본
+        전체를 편집 필드에 로드한다(사용자가 직접 수정·저장). 문서 목록은 참고용으로 표시.
         """
         auth = await self.get_state(AuthState)
         self._emp_no = auth.current_emp_no
@@ -638,49 +675,47 @@ class ReportMakerState(rx.State):
         if not self.template_id:
             # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
             return rx.redirect("/ai-services/report-generator")
+        # 정본 스타일 전체를 편집 필드로 (요약 없이 — 저장 시점에 이미 통합됨)
         self.edited_style = await asyncio.to_thread(
-            storage.load_style_manual, self._emp_no, self.template_id
-        )
-        self.doc_base_preview = await asyncio.to_thread(
-            storage.load_doc_base, self._emp_no, self.template_id
+            memory.load_style, self._emp_no, self.template_id, summarize=False
         )
         await self._load_style_docs()
 
     @rx.event
     async def save_edited_style(self, form_data: dict):
-        """세부 조정(manual) 레이어 저장 — 뼈대 위에 얹어 최종 가이드 재빌드. 빈 값도 허용(조정 없음)."""
+        """작성 스타일 저장 — 편집 텍스트로 정본 전체를 덮어쓴다. 빈 값도 허용(스타일 없음)."""
         edited = (form_data.get("edited_style") or "").strip()
         self.is_streaming = True
         yield
-        # 세부조정 레이어만 교체 → memory 가 뼈대+세부조정 최종본을 다시 materialize
-        await asyncio.to_thread(memory.replace_style, self._emp_no, self.template_id, edited)
-        # 세션의 최종 스타일 갱신(생성에 반영)
-        self.loaded_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id, summarize=False
-        )
-        self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+        await asyncio.to_thread(memory.set_style, self._emp_no, self.template_id, edited)
+        # 세션의 스타일 갱신(생성에 반영)
+        self.loaded_style = edited
+        self.edited_style = edited
+        self.user_mode = "report_based" if edited else "text_based"
         self.is_streaming = False
         yield rx.toast.success("작성 스타일 저장 완료")
 
     @rx.event
     async def delete_style_doc(self, key: str):
-        """추출 문서 하나 삭제 — 원본 + 뼈대 사이드카 제거 후 뼈대·최종본 재빌드(세부조정 보존)."""
+        """추출 문서 하나 삭제 — 원본 파일/목록만 정리. 정본 스타일 텍스트는 유지된다."""
         if not storage.owns_key(key, self._emp_no, self.template_id):
             yield rx.toast.error("잘못된 파일 참조입니다.")
             return
         self.is_streaming = True
         yield
-        await asyncio.to_thread(memory.delete_doc, self._emp_no, self.template_id, os.path.basename(key))
-        self.doc_base_preview = await asyncio.to_thread(
-            storage.load_doc_base, self._emp_no, self.template_id
-        )
-        self.loaded_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id, summarize=False
-        )
-        self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+        bn = os.path.basename(key)
+        await asyncio.to_thread(memory.delete_doc, self._emp_no, self.template_id, bn)
+        # 추출 마커에서도 제거(있을 때만)
+        prev = await asyncio.to_thread(storage.load_extracted_docs, self._emp_no, self.template_id) or []
+        if bn in prev:
+            await asyncio.to_thread(
+                storage.save_extracted_docs, self._emp_no, self.template_id,
+                [x for x in prev if x != bn],
+            )
         await self._load_style_docs()
         self.is_streaming = False
-        yield rx.toast.success("문서를 삭제했습니다.")
+        # 단일 편집기 모델: 삭제는 목록만 정리하고, 스타일 텍스트는 편집기에서 직접 조정.
+        yield rx.toast.success("문서를 목록에서 삭제했습니다. (작성 스타일 텍스트는 유지됩니다)")
 
     @rx.event
     async def reset_style(self):
@@ -690,7 +725,6 @@ class ReportMakerState(rx.State):
         await asyncio.to_thread(memory.clear_style, self._emp_no, self.template_id)
         self.loaded_style = ""
         self.edited_style = ""
-        self.doc_base_preview = ""
         self.user_mode = "text_based"
         await self._load_style_docs()
         self.is_streaming = False
