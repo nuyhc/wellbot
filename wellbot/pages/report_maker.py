@@ -562,11 +562,15 @@ def report_maker_style_page() -> rx.Component:
                         rx.vstack(
                             rx.foreach(
                                 ReportMakerState.style_docs,
-                                lambda name: rx.hstack(
+                                lambda d: rx.hstack(
                                     rx.icon("file-text", size=13,
                                             color=COLORS["text_secondary"]),
-                                    rx.text(name, size="1", color=COLORS["text_primary"]),
-                                    align="center", spacing="1",
+                                    rx.text(d["name"], size="1", color=COLORS["text_primary"]),
+                                    rx.spacer(),
+                                    rx.icon("x", size=13, color=COLORS["text_secondary"],
+                                            cursor="pointer", title="문서 삭제",
+                                            on_click=ReportMakerState.delete_style_doc(d["key"])),
+                                    align="center", spacing="1", width="100%",
                                 ),
                             ),
                             spacing="1", align="start", margin_top="0.5em", width="100%",
@@ -580,6 +584,36 @@ def report_maker_style_page() -> rx.Component:
                     border_radius=SPACING["border_radius_md"],
                     bg=COLORS["sidebar_bg"],
                 ),
+                # 문서 기반 스타일(뼈대) — 읽기 전용 미리보기 (문서가 있을 때만)
+                rx.cond(
+                    ReportMakerState.doc_base_preview != "",
+                    rx.box(
+                        rx.hstack(
+                            rx.icon("layers", size=14, color=COLORS["text_secondary"]),
+                            rx.text("문서 기반 스타일 (뼈대)", size="2", weight="medium",
+                                    color=COLORS["text_primary"]),
+                            align="center", spacing="1",
+                        ),
+                        rx.text(
+                            "추출한 문서에서 만든 기본 스타일입니다. 아래 '세부 조정'이 이 위에 얹혀 최종 가이드가 됩니다.",
+                            size="1", color=COLORS["text_secondary"], margin_top="0.2em",
+                        ),
+                        rx.text(
+                            ReportMakerState.doc_base_preview,
+                            size="1", color=COLORS["text_secondary"],
+                            white_space="pre-wrap", margin_top="0.5em",
+                            style={"fontFamily": "monospace", "lineHeight": "1.5",
+                                   "maxHeight": "200px", "overflowY": "auto"},
+                        ),
+                        width="100%",
+                        padding="0.8em 1em",
+                        border=f"1px solid {COLORS['border']}",
+                        border_radius=SPACING["border_radius_md"],
+                        bg=COLORS["sidebar_bg"],
+                    ),
+                ),
+                # 세부 조정(수동 편집 레이어)
+                rx.text("세부 조정", size="2", weight="medium", color=COLORS["text_primary"]),
                 rx.form(
                     rx.vstack(
                         rx.text_area(
@@ -587,8 +621,8 @@ def report_maker_style_page() -> rx.Component:
                             value=ReportMakerState.edited_style,
                             on_change=ReportMakerState.set_edited_style,
                             placeholder=(
-                                "아직 학습된 작성 스타일이 없습니다. '스타일 추출'로 문서를 올리거나 "
-                                "여기에 직접 작성해 저장하세요."
+                                "문서 뼈대 위에 얹을 세부 조정을 적으세요 (예: 문장 종결·톤·표 활용 등). "
+                                "비워두면 문서 뼈대만 사용합니다."
                             ),
                             rows="20",
                             width="100%",
@@ -605,8 +639,7 @@ def report_maker_style_page() -> rx.Component:
                                 ),
                                 "저장",
                                 type="submit",
-                                disabled=ReportMakerState.is_streaming
-                                | ~ReportMakerState.can_save_style,
+                                disabled=ReportMakerState.is_streaming,
                                 size="3",
                                 style={"background": _ACCENT, "color": "white"},
                             ),
