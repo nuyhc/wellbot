@@ -478,6 +478,8 @@ class ReportMakerState(rx.State):
                 memory.load_style, self._emp_no, self.template_id, summarize=False
             )
             self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+            # 편집기에서 추출한 경우, 학습된 스타일을 편집기 textarea 에 즉시 반영
+            self.edited_style = self.loaded_style
             self.style_docs = await asyncio.to_thread(
                 storage.list_style_doc_names, self._emp_no, self.template_id
             )
