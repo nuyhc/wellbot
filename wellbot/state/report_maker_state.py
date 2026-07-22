@@ -149,7 +149,8 @@ class ReportMakerState(rx.State):
     pending_topic_file: str = ""      # 첨부됐지만 아직 전송 안 한 주제 파일명(표시용)
     pending_topic_file_no: int = 0    # 대기 중 첨부의 atch_file_m 번호
     _pending_msg_id: str = ""         # 첨부-메시지 매핑용 사전발급 msg_id(전송 시 메시지에 부여)
-    style_docs: list[str] = []        # 스타일 추출에 올린 문서 파일명 목록
+    style_docs: list[dict] = []       # 추출 문서 목록 [{"name","key"}] (key=삭제 식별용 S3 key)
+    doc_base_preview: str = ""        # 편집기: 문서 병합 뼈대 미리보기(읽기 전용)
 
     # 채팅에서 넘어온 보고서 seed(대화 메시지 본문). _reset_conversation 에서 지우지 않고
     # 세션 시작 시점(_start_session)에 _uploaded_topic_text 로 적용한다.
@@ -454,7 +455,8 @@ class ReportMakerState(rx.State):
                 doc = style.extract_doc_style(path)
                 analyzed = style.analyze_style_with_claude(doc)
                 desc = style.build_style_desc(doc, analyzed)
-                memory.save_style(emp_no, template, desc)
+                # 문서 식별자(basename='{ts}_{name}')로 뼈대 사이드카에 기록 → 삭제/교체 가능
+                memory.save_style(emp_no, template, desc, os.path.basename(key))
             finally:
                 try:
                     os.remove(path)
@@ -478,11 +480,16 @@ class ReportMakerState(rx.State):
                 memory.load_style, self._emp_no, self.template_id, summarize=False
             )
             self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
-            # 편집기에서 추출한 경우, 학습된 스타일을 편집기 textarea 에 즉시 반영
-            self.edited_style = self.loaded_style
-            self.style_docs = await asyncio.to_thread(
-                storage.list_style_doc_names, self._emp_no, self.template_id
+            # 편집기 뼈대 미리보기 갱신(세부조정 manual 은 보존 — 문서는 뼈대에만 반영)
+            self.doc_base_preview = await asyncio.to_thread(
+                storage.load_doc_base, self._emp_no, self.template_id
             )
+            keys = await asyncio.to_thread(
+                storage.list_style_docs, self._emp_no, self.template_id
+            )
+            self.style_docs = [
+                {"name": storage.style_doc_name(k), "key": k} for k in keys
+            ]
             if done == total:
                 self.style_upload_status = f"스타일 추출 완료 ({done}개)"
             elif done > 0:
@@ -606,22 +613,24 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     @rx.event
     def set_edited_style(self, value: str):
-        """작성 스타일 편집기(controlled textarea) on_change 핸들러."""
+        """세부 조정(manual) 편집기(controlled textarea) on_change 핸들러."""
         self.edited_style = value
 
     @rx.event
     def open_style_editor(self):
-        self.edited_style = self.loaded_style
         return rx.redirect("/ai-services/report-generator/style")
 
     async def _load_style_docs(self):
-        self.style_docs = await asyncio.to_thread(
-            storage.list_style_doc_names, self._emp_no, self.template_id
-        )
+        keys = await asyncio.to_thread(storage.list_style_docs, self._emp_no, self.template_id)
+        self.style_docs = [{"name": storage.style_doc_name(k), "key": k} for k in keys]
 
     @rx.event
     async def load_style_editor(self):
-        """스타일 편집 페이지 on_load. 직접 진입/새로고침 시에도 현재 가이드를 채운다."""
+        """스타일 편집 페이지 on_load.
+
+        편집기는 세부 조정(manual) 레이어만 편집한다. 문서 뼈대는 읽기 전용 미리보기로
+        보여주고, 최종 가이드(뼈대+세부조정)는 생성에 쓰인다.
+        """
         auth = await self.get_state(AuthState)
         self._emp_no = auth.current_emp_no
         if not self._emp_no:
@@ -629,27 +638,49 @@ class ReportMakerState(rx.State):
         if not self.template_id:
             # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
             return rx.redirect("/ai-services/report-generator")
-        self.loaded_style = await asyncio.to_thread(
-            memory.load_style, self._emp_no, self.template_id
+        self.edited_style = await asyncio.to_thread(
+            storage.load_style_manual, self._emp_no, self.template_id
         )
-        self.edited_style = self.loaded_style
+        self.doc_base_preview = await asyncio.to_thread(
+            storage.load_doc_base, self._emp_no, self.template_id
+        )
         await self._load_style_docs()
 
     @rx.event
     async def save_edited_style(self, form_data: dict):
+        """세부 조정(manual) 레이어 저장 — 뼈대 위에 얹어 최종 가이드 재빌드. 빈 값도 허용(조정 없음)."""
         edited = (form_data.get("edited_style") or "").strip()
-        if not edited:
-            yield rx.toast.error("스타일 내용을 입력해주세요.")
+        self.is_streaming = True
+        yield
+        # 세부조정 레이어만 교체 → memory 가 뼈대+세부조정 최종본을 다시 materialize
+        await asyncio.to_thread(memory.replace_style, self._emp_no, self.template_id, edited)
+        # 세션의 최종 스타일 갱신(생성에 반영)
+        self.loaded_style = await asyncio.to_thread(
+            memory.load_style, self._emp_no, self.template_id, summarize=False
+        )
+        self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+        self.is_streaming = False
+        yield rx.toast.success("작성 스타일 저장 완료")
+
+    @rx.event
+    async def delete_style_doc(self, key: str):
+        """추출 문서 하나 삭제 — 원본 + 뼈대 사이드카 제거 후 뼈대·최종본 재빌드(세부조정 보존)."""
+        if not storage.owns_key(key, self._emp_no, self.template_id):
+            yield rx.toast.error("잘못된 파일 참조입니다.")
             return
         self.is_streaming = True
         yield
-        # 전체 교체(멱등) — 기존 AgentCore 기록·S3 삭제 후 단일 기록으로 저장
-        await asyncio.to_thread(memory.replace_style, self._emp_no, self.template_id, edited)
-        self.loaded_style = edited
-        # 스타일을 저장했으므로 이번 세션도 즉시 report_based 로 취급(reset 의 text_based 와 대칭).
-        self.user_mode = "report_based"
+        await asyncio.to_thread(memory.delete_doc, self._emp_no, self.template_id, os.path.basename(key))
+        self.doc_base_preview = await asyncio.to_thread(
+            storage.load_doc_base, self._emp_no, self.template_id
+        )
+        self.loaded_style = await asyncio.to_thread(
+            memory.load_style, self._emp_no, self.template_id, summarize=False
+        )
+        self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
+        await self._load_style_docs()
         self.is_streaming = False
-        yield rx.toast.success("작성 스타일 저장 완료")
+        yield rx.toast.success("문서를 삭제했습니다.")
 
     @rx.event
     async def reset_style(self):
@@ -659,6 +690,7 @@ class ReportMakerState(rx.State):
         await asyncio.to_thread(memory.clear_style, self._emp_no, self.template_id)
         self.loaded_style = ""
         self.edited_style = ""
+        self.doc_base_preview = ""
         self.user_mode = "text_based"
         await self._load_style_docs()
         self.is_streaming = False
