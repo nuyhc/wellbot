@@ -504,25 +504,39 @@ def report_maker_style_page() -> rx.Component:
                     size="2",
                     color=COLORS["text_secondary"],
                 ),
-                # 추출된 문서 목록 + 초기화
+                # 참고 문서 목록 (등록 · 추출 · 초기화)
                 rx.box(
                     rx.hstack(
                         rx.icon("files", size=16, color=COLORS["text_secondary"]),
-                        rx.text("추출된 문서", size="2", weight="medium",
+                        rx.text("참고 문서", size="2", weight="medium",
                                 color=COLORS["text_primary"]),
                         rx.badge(ReportMakerState.style_docs.length(),
                                  color_scheme="gray", variant="soft", size="1"),
                         rx.spacer(),
+                        # 등록: 파일 선택·업로드만 (추출 안 함)
+                        rx.button(
+                            rx.icon("plus", size=14),
+                            "문서 등록",
+                            on_click=ReportMakerState.register_style_docs,
+                            variant="soft", color_scheme="gray", size="1",
+                            disabled=ReportMakerState.is_streaming,
+                        ),
+                        # 추출: 미추출 문서를 스타일에 반영(업데이트). 미추출 없으면 비활성.
                         rx.button(
                             rx.cond(
                                 ReportMakerState.is_streaming,
                                 rx.spinner(size="1"),
                                 rx.icon("scan-text", size=14),
                             ),
-                            "스타일 추출",
-                            on_click=ReportMakerState.pick_and_upload_style,
-                            variant="soft", color_scheme="gray", size="1",
-                            disabled=ReportMakerState.is_streaming,
+                            rx.cond(
+                                ReportMakerState.pending_extract_count > 0,
+                                f"스타일 추출 ({ReportMakerState.pending_extract_count})",
+                                "스타일 추출",
+                            ),
+                            on_click=ReportMakerState.extract_pending_styles,
+                            variant="solid", color_scheme="gray", size="1",
+                            disabled=ReportMakerState.is_streaming
+                            | (ReportMakerState.pending_extract_count == 0),
                         ),
                         rx.alert_dialog.root(
                             rx.alert_dialog.trigger(
@@ -535,7 +549,7 @@ def report_maker_style_page() -> rx.Component:
                             rx.alert_dialog.content(
                                 rx.alert_dialog.title("작성 스타일 초기화"),
                                 rx.alert_dialog.description(
-                                    "학습된 스타일 기록과 추출 문서가 모두 삭제됩니다. "
+                                    "작성 스타일과 등록된 참고 문서가 모두 삭제됩니다. "
                                     "이 작업은 되돌릴 수 없습니다.",
                                 ),
                                 rx.hstack(
@@ -566,6 +580,13 @@ def report_maker_style_page() -> rx.Component:
                                     rx.icon("file-text", size=13,
                                             color=COLORS["text_secondary"]),
                                     rx.text(d["name"], size="1", color=COLORS["text_primary"]),
+                                    rx.cond(
+                                        d["extracted"],
+                                        rx.badge("추출됨", color_scheme="green",
+                                                 variant="soft", size="1"),
+                                        rx.badge("미추출", color_scheme="amber",
+                                                 variant="soft", size="1"),
+                                    ),
                                     rx.spacer(),
                                     rx.icon("x", size=13, color=COLORS["text_secondary"],
                                             cursor="pointer", title="문서 삭제",
@@ -575,8 +596,8 @@ def report_maker_style_page() -> rx.Component:
                             ),
                             spacing="1", align="start", margin_top="0.5em", width="100%",
                         ),
-                        rx.text("아직 추출한 문서가 없습니다.", size="1",
-                                color=COLORS["text_secondary"], margin_top="0.4em"),
+                        rx.text("아직 등록한 문서가 없습니다. '문서 등록'으로 참고 문서를 올리세요.",
+                                size="1", color=COLORS["text_secondary"], margin_top="0.4em"),
                     ),
                     width="100%",
                     padding="0.8em 1em",
@@ -584,36 +605,17 @@ def report_maker_style_page() -> rx.Component:
                     border_radius=SPACING["border_radius_md"],
                     bg=COLORS["sidebar_bg"],
                 ),
-                # 문서 기반 스타일(뼈대) — 읽기 전용 미리보기 (문서가 있을 때만)
-                rx.cond(
-                    ReportMakerState.doc_base_preview != "",
-                    rx.box(
-                        rx.hstack(
-                            rx.icon("layers", size=14, color=COLORS["text_secondary"]),
-                            rx.text("문서 기반 스타일 (뼈대)", size="2", weight="medium",
-                                    color=COLORS["text_primary"]),
-                            align="center", spacing="1",
-                        ),
-                        rx.text(
-                            "추출한 문서에서 만든 기본 스타일입니다. 아래 '세부 조정'이 이 위에 얹혀 최종 가이드가 됩니다.",
-                            size="1", color=COLORS["text_secondary"], margin_top="0.2em",
-                        ),
-                        rx.text(
-                            ReportMakerState.doc_base_preview,
-                            size="1", color=COLORS["text_secondary"],
-                            white_space="pre-wrap", margin_top="0.5em",
-                            style={"fontFamily": "monospace", "lineHeight": "1.5",
-                                   "maxHeight": "200px", "overflowY": "auto"},
-                        ),
-                        width="100%",
-                        padding="0.8em 1em",
-                        border=f"1px solid {COLORS['border']}",
-                        border_radius=SPACING["border_radius_md"],
-                        bg=COLORS["sidebar_bg"],
-                    ),
+                # 작성 스타일 — 추출본+수동편집 통합 단일 편집기
+                rx.hstack(
+                    rx.text("작성 스타일", size="2", weight="medium",
+                            color=COLORS["text_primary"]),
+                    align="center", spacing="1",
                 ),
-                # 세부 조정(수동 편집 레이어)
-                rx.text("세부 조정", size="2", weight="medium", color=COLORS["text_primary"]),
+                rx.text(
+                    "문서에서 추출된 내용이 여기에 반영되어 있습니다. 직접 수정한 뒤 저장하세요. "
+                    "'스타일 추출'로 문서를 추가하면 이 내용 위에 병합됩니다.",
+                    size="1", color=COLORS["text_secondary"],
+                ),
                 rx.form(
                     rx.vstack(
                         rx.text_area(
@@ -621,8 +623,8 @@ def report_maker_style_page() -> rx.Component:
                             value=ReportMakerState.edited_style,
                             on_change=ReportMakerState.set_edited_style,
                             placeholder=(
-                                "문서 뼈대 위에 얹을 세부 조정을 적으세요 (예: 문장 종결·톤·표 활용 등). "
-                                "비워두면 문서 뼈대만 사용합니다."
+                                "작성 스타일을 자유롭게 편집하세요 (예: 문장 종결·톤·표 활용 등). "
+                                "'스타일 추출'로 참고 문서를 올리면 여기에 자동 반영됩니다."
                             ),
                             rows="20",
                             width="100%",
