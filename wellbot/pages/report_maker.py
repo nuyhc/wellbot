@@ -17,6 +17,82 @@ from wellbot.styles import COLORS, MARKDOWN_COMPONENT_MAP, SPACING
 _ACCENT = "#E97055"
 
 
+def _template_menu_row(t) -> rx.Component:
+    """드롭다운의 유형 1행 — 선택(전환) + 작성 스타일 바로가기 + 이름 변경 + 삭제(확인)."""
+    return rx.hstack(
+        rx.text(
+            t["display"], size="2", color=COLORS["text_primary"],
+            cursor="pointer", flex="1",
+            on_click=ReportMakerState.select_template(t["id"]),
+        ),
+        # 작성 스타일 편집 바로가기
+        rx.icon_button(
+            rx.icon("palette", size=14),
+            on_click=ReportMakerState.edit_template_style(t["id"]),
+            variant="ghost", color_scheme="gray", size="1", title="작성 스타일 편집",
+        ),
+        # 이름 변경
+        rx.dialog.root(
+            rx.dialog.trigger(
+                rx.icon_button(rx.icon("pencil", size=14), variant="ghost",
+                               color_scheme="gray", size="1", title="이름 변경"),
+            ),
+            rx.dialog.content(
+                rx.dialog.title("이름 변경"),
+                rx.form(
+                    rx.vstack(
+                        rx.input(name="template_name", default_value=t["display"],
+                                 placeholder="보고서 유형명", size="3", width="100%"),
+                        rx.hstack(
+                            rx.dialog.close(
+                                rx.button("취소", type="button", variant="soft",
+                                          color_scheme="gray"),
+                            ),
+                            rx.dialog.close(
+                                rx.button("저장", type="submit",
+                                          style={"background": _ACCENT, "color": "white"}),
+                            ),
+                            spacing="2", justify="end", width="100%",
+                        ),
+                        spacing="3", width="100%",
+                    ),
+                    on_submit=ReportMakerState.rename_template(t["id"]),
+                    reset_on_submit=False,
+                ),
+                max_width="360px",
+            ),
+        ),
+        # 삭제(확인)
+        rx.alert_dialog.root(
+            rx.alert_dialog.trigger(
+                rx.icon_button(rx.icon("trash-2", size=14), variant="ghost",
+                               color_scheme="red", size="1", title="삭제"),
+            ),
+            rx.alert_dialog.content(
+                rx.alert_dialog.title("보고서 유형 삭제"),
+                rx.alert_dialog.description(
+                    "이 유형의 대화·작성 스타일·참고 문서가 모두 삭제됩니다. 되돌릴 수 없습니다.",
+                ),
+                rx.hstack(
+                    rx.alert_dialog.cancel(
+                        rx.button("취소", variant="soft", color_scheme="gray"),
+                    ),
+                    rx.alert_dialog.action(
+                        rx.button("삭제", color_scheme="red",
+                                  on_click=ReportMakerState.delete_template(t["id"])),
+                    ),
+                    spacing="3", justify="end", margin_top="1em",
+                ),
+            ),
+        ),
+        width="100%",
+        align="center",
+        padding="0.4em 0.6em",
+        _hover={"background": COLORS["sidebar_hover"]},
+        border_radius=SPACING["border_radius_sm"],
+    )
+
+
 def _template_menu() -> rx.Component:
     """보고서 유형 선택/생성 드롭다운."""
     return rx.box(
@@ -39,31 +115,7 @@ def _template_menu() -> rx.Component:
                     z_index="40",
                 ),
                 rx.vstack(
-                    rx.foreach(
-                        ReportMakerState.templates,
-                        lambda t: rx.hstack(
-                            rx.text(
-                                t["display"],
-                                size="2",
-                                color=COLORS["text_primary"],
-                                cursor="pointer",
-                                flex="1",
-                                on_click=ReportMakerState.select_template(t["id"]),
-                            ),
-                            rx.icon(
-                                "trash-2",
-                                size=14,
-                                color=COLORS["text_secondary"],
-                                cursor="pointer",
-                                on_click=ReportMakerState.delete_template(t["id"]),
-                            ),
-                            width="100%",
-                            align="center",
-                            padding="0.4em 0.6em",
-                            _hover={"background": COLORS["sidebar_hover"]},
-                            border_radius=SPACING["border_radius_sm"],
-                        ),
-                    ),
+                    rx.foreach(ReportMakerState.templates, _template_menu_row),
                     rx.divider(),
                     rx.form(
                         rx.hstack(
@@ -98,127 +150,53 @@ def _template_menu() -> rx.Component:
     )
 
 
-def _template_setup_row(t) -> rx.Component:
-    """시작 화면의 유형 1행 — 선택(시작) + 작성 스타일 바로가기 + 이름 변경 + 삭제."""
-    return rx.hstack(
-        # 이름 클릭 → 세션 시작
-        rx.button(
-            rx.icon("file-text", size=14),
-            t["display"],
-            on_click=ReportMakerState.select_template(t["id"]),
-            variant="soft", color_scheme="gray",
-            flex="1", justify="start", size="2",
-        ),
-        # 작성 스타일 편집 바로가기
-        rx.icon_button(
-            rx.icon("palette", size=15),
-            on_click=ReportMakerState.edit_template_style(t["id"]),
-            variant="ghost", color_scheme="gray", size="2",
-            title="작성 스타일 편집",
-        ),
-        # 이름 변경
-        rx.dialog.root(
-            rx.dialog.trigger(
-                rx.icon_button(rx.icon("pencil", size=15), variant="ghost",
-                               color_scheme="gray", size="2", title="이름 변경"),
-            ),
-            rx.dialog.content(
-                rx.dialog.title("이름 변경"),
-                rx.form(
-                    rx.vstack(
-                        rx.input(name="template_name", default_value=t["display"],
-                                 placeholder="보고서 유형명", size="3", width="100%"),
-                        rx.hstack(
-                            rx.dialog.close(
-                                rx.button("취소", type="button", variant="soft",
-                                          color_scheme="gray"),
-                            ),
-                            rx.dialog.close(
-                                rx.button("저장", type="submit",
-                                          style={"background": _ACCENT, "color": "white"}),
-                            ),
-                            spacing="2", justify="end", width="100%",
-                        ),
-                        spacing="3", width="100%",
-                    ),
-                    on_submit=ReportMakerState.rename_template(t["id"]),
-                    reset_on_submit=False,
-                ),
-                max_width="360px",
-            ),
-        ),
-        # 삭제(확인)
-        rx.alert_dialog.root(
-            rx.alert_dialog.trigger(
-                rx.icon_button(rx.icon("trash-2", size=15), variant="ghost",
-                               color_scheme="red", size="2", title="삭제"),
-            ),
-            rx.alert_dialog.content(
-                rx.alert_dialog.title("보고서 유형 삭제"),
-                rx.alert_dialog.description(
-                    "이 유형의 대화·작성 스타일·참고 문서가 모두 삭제됩니다. "
-                    "되돌릴 수 없습니다.",
-                ),
-                rx.hstack(
-                    rx.alert_dialog.cancel(
-                        rx.button("취소", variant="soft", color_scheme="gray"),
-                    ),
-                    rx.alert_dialog.action(
-                        rx.button("삭제", color_scheme="red",
-                                  on_click=ReportMakerState.delete_template(t["id"])),
-                    ),
-                    spacing="3", justify="end", margin_top="1em",
-                ),
-            ),
-        ),
-        width="100%", align="center", spacing="1",
-    )
-
-
 def _setup_view() -> rx.Component:
-    """세션 시작 전 — 보고서 유형 선택/생성."""
+    """유형 0개(첫 사용)일 때만 보이는 생성 화면. 유형이 있으면 on_load 가 자동 진입한다.
+
+    유형은 있는데 세션이 아직 준비 중인 짧은 순간에는 생성 폼 대신 로딩만 보여
+    '첫 유형 만들기'가 잘못 노출되지 않게 한다.
+    """
     return rx.center(
-        rx.vstack(
-            rx.icon("sparkles", size=32, color=_ACCENT),
-            rx.heading("보고서 문구 작성 지원", size="6", color=COLORS["text_primary"]),
-            rx.text(
-                "보고서 유형을 선택하거나 새로 만들어 시작하세요.",
-                size="2",
-                color=COLORS["text_secondary"],
+        rx.cond(
+            ReportMakerState.has_templates,
+            # 자동 진입 중(유형은 있으나 세션 준비 전) — 잠깐 로딩
+            rx.vstack(
+                rx.spinner(size="3"),
+                rx.text("불러오는 중...", size="2", color=COLORS["text_secondary"]),
+                spacing="3", align="center",
             ),
-            rx.cond(
-                ReportMakerState.has_templates,
-                rx.vstack(
-                    rx.foreach(ReportMakerState.templates, _template_setup_row),
-                    width="100%",
-                    spacing="2",
+            # 첫 사용 — 보고서 유형 생성
+            rx.vstack(
+                rx.icon("sparkles", size=32, color=_ACCENT),
+                rx.heading("보고서 문구 작성 지원", size="6", color=COLORS["text_primary"]),
+                rx.text(
+                    "첫 보고서 유형을 만들어 시작하세요.",
+                    size="2", color=COLORS["text_secondary"],
                 ),
-                rx.text("아직 만든 보고서 유형이 없습니다.", size="2", color=COLORS["text_secondary"]),
-            ),
-            rx.form(
-                rx.hstack(
-                    rx.input(
-                        name="template_name",
-                        placeholder="새 보고서 유형명 (예: 먼슬리)",
-                        size="3",
-                        flex="1",
+                rx.form(
+                    rx.hstack(
+                        rx.input(
+                            name="template_name",
+                            placeholder="새 보고서 유형명 (예: 먼슬리)",
+                            size="3", flex="1",
+                        ),
+                        rx.button("시작하기", type="submit", size="3",
+                                  style={"background": _ACCENT, "color": "white"}),
+                        width="100%",
                     ),
-                    rx.button("시작하기", type="submit", size="3",
-                              style={"background": _ACCENT, "color": "white"}),
+                    on_submit=ReportMakerState.create_template,
+                    reset_on_submit=True,
                     width="100%",
                 ),
-                on_submit=ReportMakerState.create_template,
-                reset_on_submit=True,
+                spacing="4",
                 width="100%",
+                max_width="420px",
+                padding="2em",
+                border=f"1px solid {COLORS['border']}",
+                border_radius=SPACING["border_radius_md"],
+                bg=COLORS["sidebar_bg"],
+                align="center",
             ),
-            spacing="4",
-            width="100%",
-            max_width="420px",
-            padding="2em",
-            border=f"1px solid {COLORS['border']}",
-            border_radius=SPACING["border_radius_md"],
-            bg=COLORS["sidebar_bg"],
-            align="center",
         ),
         width="100%",
         height="100%",
