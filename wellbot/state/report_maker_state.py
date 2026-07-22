@@ -328,9 +328,20 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def delete_template(self, template_id: str):
-        await asyncio.to_thread(db.delete_template, self._emp_no, template_id)
+        """보고서 유형 완전 삭제 — DB 비활성화 + S3 전체 + AgentCore 기록까지.
+
+        template_id 는 to_safe_id(이름)로 고정돼 같은 이름 재생성 시 스코프가 동일하다.
+        AgentCore 레코드를 남기면 재생성 때 load_style 폴백으로 옛 스타일이 되살아나므로,
+        삭제 문구('모두 삭제')대로 AgentCore(/writing·/preference)까지 정리해 백지로 만든다.
+        """
+        # AgentCore /writing·/preference + S3 스타일 파일 삭제
+        await asyncio.to_thread(memory.clear_style, self._emp_no, template_id)
+        # 나머지 S3(대화·주제 첨부 등) 프리픽스 전체 삭제
         await asyncio.to_thread(storage.delete_template_files, self._emp_no, template_id)
+        await asyncio.to_thread(db.delete_template, self._emp_no, template_id)
         await self._load_templates()
+        if self.last_template_id == template_id:
+            self.last_template_id = ""   # 자동 진입이 삭제된 유형을 다시 집지 않도록
         if self.template_id == template_id:
             self.session_ready = False
             self.template_id = ""
@@ -687,10 +698,6 @@ class ReportMakerState(rx.State):
     def set_edited_style(self, value: str):
         """세부 조정(manual) 편집기(controlled textarea) on_change 핸들러."""
         self.edited_style = value
-
-    @rx.event
-    def open_style_editor(self):
-        return rx.redirect("/ai-services/report-generator/style")
 
     async def _load_style_docs(self):
         """참고 문서 목록 + 문서별 추출 상태(extracted) 로드.
