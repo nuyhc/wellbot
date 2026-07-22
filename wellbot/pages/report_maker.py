@@ -311,11 +311,6 @@ def _chat_view() -> rx.Component:
                     ),
                 ),
             ),
-            rx.button(
-                rx.icon("pencil-ruler", size=16), "작성 스타일",
-                on_click=ReportMakerState.open_style_editor,
-                variant="soft", color_scheme="gray", size="2",
-            ),
             rx.spacer(),
             width="100%",
             align="center",
