@@ -27,11 +27,13 @@ from wellbot.services.report_maker.parsing import to_safe_id
 log = logging.getLogger(__name__)
 
 _STYLE_DOCS = "input/style_docs"
-_META_COMBINED = "meta/combined_style.json"     # 최종 가이드(뼈대+세부조정 병합, 조회용)
+_META_COMBINED = "meta/combined_style.json"     # 작성 스타일 정본(단일 편집기, 조회·생성용)
 _META_ANALYZED = "meta/analyzed.json"
-_META_DOC_DESCS = "meta/style_doc_descs.json"   # 문서별 style_desc 사이드카 {basename: desc}
-_META_DOC_BASE = "meta/style_doc_base.json"     # 뼈대(문서 desc 병합본) — 편집기 미리보기용
-_META_MANUAL = "meta/style_manual.json"         # 세부 조정(수동 편집 레이어)
+_META_EXTRACTED = "meta/style_extracted.json"   # 스타일에 이미 반영(추출)된 문서 basename 목록
+# 아래 3개는 구(2-레이어) 데이터의 잔여 사이드카 — delete_style 정리에서만 참조(하위호환).
+_META_DOC_DESCS = "meta/style_doc_descs.json"
+_META_DOC_BASE = "meta/style_doc_base.json"
+_META_MANUAL = "meta/style_manual.json"
 
 
 def _base_prefix() -> str:
@@ -107,11 +109,12 @@ def list_style_doc_names(emp_no: str, template: str) -> list[str]:
 def delete_style(emp_no: str, template: str) -> int:
     """작성 스타일 관련 S3 파일만 삭제(대화·주제 첨부는 보존). 삭제 객체 수 반환.
 
-    삭제: input/style_docs/*, meta/combined_style.json, meta/analyzed.json
+    삭제: input/style_docs/*, 정본/분석/추출마커 및 구(2-레이어) 잔여 사이드카.
     """
     prefix = template_prefix(emp_no, template)
     count = storage_service.delete_prefix(f"{prefix}{_STYLE_DOCS}/")
-    for meta in (_META_COMBINED, _META_ANALYZED, _META_DOC_DESCS, _META_DOC_BASE, _META_MANUAL):
+    for meta in (_META_COMBINED, _META_ANALYZED, _META_DOC_DESCS, _META_DOC_BASE,
+                 _META_MANUAL, _META_EXTRACTED):
         key = f"{prefix}{meta}"
         if storage_service.object_exists(key):
             storage_service.delete_object(key)
@@ -155,18 +158,7 @@ def save_combined_style(emp_no: str, template: str, style_desc: str) -> None:
     log.info("combined_style 저장 emp_no=%s template=%s", emp_no, template)
 
 
-def append_combined_style(emp_no: str, template: str, style_desc: str) -> None:
-    """combined_style.json 에 스타일 서술을 누적(여러 참고 문서 학습 시).
-
-    AgentCore 미가용(S3 폴백) 시에도 문서를 여러 개 학습하면 누적되도록,
-    기존 내용 뒤에 구분자로 이어붙인다. (편집기의 전체 덮어쓰기와 구분)
-    """
-    existing = load_combined_style(emp_no, template)
-    combined = (existing.rstrip() + "\n\n---\n\n" + style_desc) if existing else style_desc
-    save_combined_style(emp_no, template, combined)
-
-
-# ── 2-레이어 스타일: 문서 desc 사이드카 / 뼈대 / 세부조정(manual) ──
+# ── 메타 JSON 헬퍼 (추출 마커 등) ──
 def _load_json(emp_no: str, template: str, meta_key: str, default):
     key = f"{template_prefix(emp_no, template)}{meta_key}"
     if not storage_service.object_exists(key):
@@ -184,47 +176,6 @@ def _save_json(emp_no: str, template: str, meta_key: str, data) -> None:
     storage_service.upload_bytes(body, key, content_type="application/json; charset=utf-8")
 
 
-def load_style_doc_descs(emp_no: str, template: str) -> dict[str, str]:
-    """문서별 style_desc 사이드카 {basename: desc} 로드(없으면 {})."""
-    data = _load_json(emp_no, template, _META_DOC_DESCS, {})
-    return data if isinstance(data, dict) else {}
-
-
-def save_style_doc_desc(emp_no: str, template: str, basename: str, desc: str) -> None:
-    """문서 하나의 style_desc 를 사이드카에 upsert."""
-    descs = load_style_doc_descs(emp_no, template)
-    descs[basename] = desc
-    _save_json(emp_no, template, _META_DOC_DESCS, descs)
-
-
-def remove_style_doc_desc(emp_no: str, template: str, basename: str) -> None:
-    """문서 하나의 style_desc 를 사이드카에서 제거."""
-    descs = load_style_doc_descs(emp_no, template)
-    if basename in descs:
-        del descs[basename]
-        _save_json(emp_no, template, _META_DOC_DESCS, descs)
-
-
-def load_doc_base(emp_no: str, template: str) -> str:
-    """뼈대(문서 desc 병합본) 로드(없으면 "")."""
-    data = _load_json(emp_no, template, _META_DOC_BASE, {})
-    return data.get("style_desc", "") if isinstance(data, dict) else ""
-
-
-def save_doc_base(emp_no: str, template: str, text: str) -> None:
-    _save_json(emp_no, template, _META_DOC_BASE, {"style_desc": text})
-
-
-def load_style_manual(emp_no: str, template: str) -> str:
-    """세부 조정(수동 편집 레이어) 로드(없으면 "")."""
-    data = _load_json(emp_no, template, _META_MANUAL, {})
-    return data.get("text", "") if isinstance(data, dict) else ""
-
-
-def save_style_manual(emp_no: str, template: str, text: str) -> None:
-    _save_json(emp_no, template, _META_MANUAL, {"text": text})
-
-
 def delete_style_doc_file(emp_no: str, template: str, basename: str) -> bool:
     """참고 문서 원본 파일 하나를 S3 에서 삭제(basename = '{ts}_{name}'). 삭제 성공 시 True."""
     key = f"{template_prefix(emp_no, template)}{_STYLE_DOCS}/{_safe_name(basename)}"
@@ -232,6 +183,17 @@ def delete_style_doc_file(emp_no: str, template: str, basename: str) -> bool:
         storage_service.delete_object(key)
         return True
     return False
+
+
+def load_extracted_docs(emp_no: str, template: str):
+    """스타일에 이미 반영(추출)된 문서 basename 목록. 마커 파일이 없으면 None(미초기화)."""
+    data = _load_json(emp_no, template, _META_EXTRACTED, None)
+    return data if isinstance(data, list) else None
+
+
+def save_extracted_docs(emp_no: str, template: str, basenames) -> None:
+    """추출 완료 문서 basename 목록 저장(전체 덮어쓰기)."""
+    _save_json(emp_no, template, _META_EXTRACTED, list(basenames))
 
 
 # ──────────────────────────────────────────────────────────────
