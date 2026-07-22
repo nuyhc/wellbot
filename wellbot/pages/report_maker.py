@@ -267,21 +267,11 @@ def _chat_view() -> rx.Component:
                 ),
             ),
             rx.button(
-                rx.icon("scan-text", size=16), "스타일 추출",
-                on_click=ReportMakerState.pick_and_upload_style,
-                variant="soft", color_scheme="gray", size="2",
-            ),
-            rx.button(
                 rx.icon("pencil-ruler", size=16), "작성 스타일",
                 on_click=ReportMakerState.open_style_editor,
                 variant="soft", color_scheme="gray", size="2",
             ),
             rx.spacer(),
-            rx.cond(
-                ReportMakerState.style_upload_status != "",
-                rx.text(ReportMakerState.style_upload_status, size="1",
-                        color=COLORS["text_secondary"]),
-            ),
             width="100%",
             align="center",
             padding_bottom="0.5em",
@@ -485,7 +475,10 @@ def report_maker_page() -> rx.Component:
 
 def report_maker_style_page() -> rx.Component:
     """작성 스타일 조회/편집 페이지 (/ai-services/report-generator/style)."""
-    return chat_layout(
+    return rx.fragment(
+        # 스타일 추출(참고 문서 업로드) JS 헬퍼 — 편집기에서 추출 버튼이 동작하려면 필요.
+        rx.script(REPORT_MAKER_SCRIPT),
+        chat_layout(
         rx.box(
             rx.vstack(
                 rx.hstack(
@@ -520,6 +513,17 @@ def report_maker_style_page() -> rx.Component:
                         rx.badge(ReportMakerState.style_docs.length(),
                                  color_scheme="gray", variant="soft", size="1"),
                         rx.spacer(),
+                        rx.button(
+                            rx.cond(
+                                ReportMakerState.is_streaming,
+                                rx.spinner(size="1"),
+                                rx.icon("scan-text", size=14),
+                            ),
+                            "스타일 추출",
+                            on_click=ReportMakerState.pick_and_upload_style,
+                            variant="soft", color_scheme="gray", size="1",
+                            disabled=ReportMakerState.is_streaming,
+                        ),
                         rx.alert_dialog.root(
                             rx.alert_dialog.trigger(
                                 rx.button(
@@ -547,6 +551,11 @@ def report_maker_style_page() -> rx.Component:
                             ),
                         ),
                         width="100%", align="center", spacing="2",
+                    ),
+                    rx.cond(
+                        ReportMakerState.style_upload_status != "",
+                        rx.text(ReportMakerState.style_upload_status, size="1",
+                                color=COLORS["text_secondary"], margin_top="0.4em"),
                     ),
                     rx.cond(
                         ReportMakerState.style_docs.length() > 0,
@@ -620,4 +629,5 @@ def report_maker_style_page() -> rx.Component:
             overflow_y="auto",
             padding="2.5em 2em",
         )
+        ),
     )
