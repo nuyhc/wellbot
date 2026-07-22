@@ -107,6 +107,8 @@ class ReportMakerState(rx.State):
     templates: list[dict] = []
     show_new_template: bool = False
     show_template_menu: bool = False
+    # 마지막 사용 유형(브라우저 영구 저장) — 재진입 시 자동 선택해 랜딩 존 없이 바로 챗 진입
+    last_template_id: str = rx.LocalStorage("", name="wellbot_rm_last_template")
 
     # ── 세션 ──
     session_ready: bool = False
@@ -183,12 +185,36 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     @rx.event
     async def on_load(self):
+        """페이지 진입 — 유형이 있으면 랜딩 존 없이 바로 챗으로 자동 진입.
+
+        마지막 사용 유형(없으면 첫 유형)을 자동 선택해 세션을 시작한다. 이미 세션 중이면
+        유지하고, 유형이 하나도 없을 때만 유형 생성 화면(_setup_view 빈 상태)을 보인다.
+        """
         auth = await self.get_state(AuthState)
         self._emp_no = auth.current_emp_no
         if not self._emp_no:
-            return rx.redirect("/login")
+            yield rx.redirect("/login")
+            return
         await self._load_templates()
         await self._consume_report_seed()
+        # 이미 세션 진행 중이면 그대로 유지
+        if self.session_ready and self.template_id:
+            return
+        target = self._pick_auto_template()
+        if not target:
+            return   # 유형 0개 → 생성 화면
+        self.template_id = target
+        t = await asyncio.to_thread(db.get_template, self._emp_no, target)
+        self.template_display = t["display"] if t else target
+        async for _ in self._start_session():
+            yield
+
+    def _pick_auto_template(self) -> str:
+        """자동 진입 대상 유형 — 마지막 사용 유형 우선, 없으면 첫 유형."""
+        ids = [t["id"] for t in self.templates]
+        if self.last_template_id and self.last_template_id in ids:
+            return self.last_template_id
+        return ids[0] if ids else ""
 
     async def _load_templates(self):
         self.templates = await asyncio.to_thread(db.list_templates, self._emp_no)
@@ -325,6 +351,7 @@ class ReportMakerState(rx.State):
         self._apply_pending_seed()   # 채팅에서 넘어온 seed 는 리셋 이후에 적용
         self.session_id = uuid.uuid4().hex[:50]
         self.session_ready = True
+        self.last_template_id = self.template_id   # 재진입 자동 선택용 기억
         await self._load_conversation_list()
         self.is_streaming = False
         yield
