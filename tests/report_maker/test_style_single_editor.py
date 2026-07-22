@@ -57,6 +57,36 @@ def test_set_style_overwrites(monkeypatch):
     assert fake.combined == "사용자가 직접 쓴 스타일"  # 병합 없이 전체 교체(+trim)
 
 
+def test_load_style_returns_combined_verbatim(monkeypatch):
+    fake = _FakeStorage(combined="[문서 작성 스타일]\n* 문서유형: 주간보고")
+    _patch(monkeypatch, fake)
+    # 정본이 있으면 AgentCore 폴백/LLM 없이 그대로 반환
+    monkeypatch.setattr(memory, "_agentcore_ready", lambda: True)
+
+    assert memory.load_style("100", "주간") == "[문서 작성 스타일]\n* 문서유형: 주간보고"
+
+
+def test_load_style_fallback_normalizes_and_materializes(monkeypatch):
+    """정본이 비고 AgentCore 에만 (JSON) 레코드가 있을 때: 순수 지시문으로 정규화 + 정본 이관."""
+    fake = _FakeStorage(combined="")
+    _patch(monkeypatch, fake)
+    monkeypatch.setattr(memory, "_agentcore_ready", lambda: True)
+    # AgentCore 레코드는 JSON 원문 — 그대로 노출되면 안 됨
+    monkeypatch.setattr(
+        memory, "_record_summaries",
+        lambda ns: [{"content": {"text": '{"preference": "개조식", "tone": "단정"}'}}],
+    )
+    monkeypatch.setattr(
+        memory.style, "summarize_style",
+        lambda raw: "[문서 작성 스타일]\n* 문장종결: 개조식",
+    )
+
+    out = memory.load_style("100", "주간")
+
+    assert out == "[문서 작성 스타일]\n* 문장종결: 개조식"        # JSON 아님, 지시문
+    assert fake.combined == "[문서 작성 스타일]\n* 문장종결: 개조식"  # 정본으로 materialize
+
+
 def test_delete_doc_does_not_touch_style(monkeypatch):
     fake = _FakeStorage(combined="유지되어야 함")
     _patch(monkeypatch, fake)
