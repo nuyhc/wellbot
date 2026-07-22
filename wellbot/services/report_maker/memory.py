@@ -176,22 +176,22 @@ def _record_text(r: dict) -> str:
     return content.get("text", "") if isinstance(content, dict) else str(content)
 
 
-def load_style(emp_no: str, template: str, top_k: int = 10, summarize: bool = True) -> str:
-    """스타일 프로파일 로드 — S3 정본(단일 통합 가이드) 우선, 비면 AgentCore 폴백.
+def load_style(emp_no: str, template: str, top_k: int = 10) -> str:
+    """스타일 프로파일 로드 — S3 정본(단일 편집 스타일) 우선, 비면 AgentCore 폴백.
 
-    저장 경로(save_style·save_preference·replace_style)가 S3 정본을 항상 '단일 통합
-    가이드'로 병합 유지하므로, 조회는 **LLM 없이** 정본을 그대로 반환한다(편집기·세션 공통).
-    AgentCore 는 저장 시 병행 기록되어 장기 semantic 메모리로 축적되며, 표시에는 병합하지
-    않는다(조회마다 재요약 방지).
+    저장 경로(set_style·add_doc_style·save_preference)가 S3 정본을 항상 '단일 통합
+    가이드'로 유지하므로, 조회는 **LLM 없이** 정본을 그대로 반환한다(편집기·세션 공통).
 
-    S3 정본이 없을 때(옛/이관 데이터로 AgentCore 에만 있는 경우)만 폴백으로 AgentCore
-    레코드를 읽고, 레코드가 여러 개이고 summarize=True 면 그때만 LLM 으로 정리한다.
+    S3 정본이 없을 때(옛/legacy 데이터로 AgentCore 에만 기록이 있는 경우)만 폴백한다.
+    AgentCore memory record 는 전략이 추출한 **JSON/원문**이라 그대로 노출하면 안 되므로,
+    항상 순수 지시문 가이드로 정규화(summarize_style)한 뒤 정본으로 1회 materialize 한다.
+    이렇게 이관해 두면 다음 조회부터는 정본을 LLM 없이 그대로 읽는다.
     """
     combined = storage.load_combined_style(emp_no, template)
     if combined.strip():
         return combined
 
-    # 폴백: S3 정본이 비어 있고 AgentCore 에만 기록이 있는 경우
+    # 폴백: S3 정본이 비어 있고 AgentCore 에만 기록이 있는 경우(legacy 이관)
     if _agentcore_ready():
         actor = actor_id_for(emp_no, template)
         texts: list[str] = []
@@ -210,10 +210,11 @@ def load_style(emp_no: str, template: str, top_k: int = 10, summarize: bool = Tr
                     seen.add(t)
                     texts.append(t)
         if texts:
-            joined = "\n\n---\n\n".join(texts)
-            if len(texts) == 1 or not summarize:
-                return joined
-            return style.summarize_style(joined)
+            # 메모리 원문(JSON/장황)을 순수 지시문으로 정규화 후 정본으로 이관
+            guide = style.summarize_style("\n\n---\n\n".join(texts)).strip()
+            if guide:
+                storage.save_combined_style(emp_no, template, guide)
+            return guide
     return ""
 
 
