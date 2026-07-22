@@ -98,6 +98,83 @@ def _template_menu() -> rx.Component:
     )
 
 
+def _template_setup_row(t) -> rx.Component:
+    """시작 화면의 유형 1행 — 선택(시작) + 작성 스타일 바로가기 + 이름 변경 + 삭제."""
+    return rx.hstack(
+        # 이름 클릭 → 세션 시작
+        rx.button(
+            rx.icon("file-text", size=14),
+            t["display"],
+            on_click=ReportMakerState.select_template(t["id"]),
+            variant="soft", color_scheme="gray",
+            flex="1", justify="start", size="2",
+        ),
+        # 작성 스타일 편집 바로가기
+        rx.icon_button(
+            rx.icon("palette", size=15),
+            on_click=ReportMakerState.edit_template_style(t["id"]),
+            variant="ghost", color_scheme="gray", size="2",
+            title="작성 스타일 편집",
+        ),
+        # 이름 변경
+        rx.dialog.root(
+            rx.dialog.trigger(
+                rx.icon_button(rx.icon("pencil", size=15), variant="ghost",
+                               color_scheme="gray", size="2", title="이름 변경"),
+            ),
+            rx.dialog.content(
+                rx.dialog.title("이름 변경"),
+                rx.form(
+                    rx.vstack(
+                        rx.input(name="template_name", default_value=t["display"],
+                                 placeholder="보고서 유형명", size="3", width="100%"),
+                        rx.hstack(
+                            rx.dialog.close(
+                                rx.button("취소", type="button", variant="soft",
+                                          color_scheme="gray"),
+                            ),
+                            rx.dialog.close(
+                                rx.button("저장", type="submit",
+                                          style={"background": _ACCENT, "color": "white"}),
+                            ),
+                            spacing="2", justify="end", width="100%",
+                        ),
+                        spacing="3", width="100%",
+                    ),
+                    on_submit=ReportMakerState.rename_template(t["id"]),
+                    reset_on_submit=False,
+                ),
+                max_width="360px",
+            ),
+        ),
+        # 삭제(확인)
+        rx.alert_dialog.root(
+            rx.alert_dialog.trigger(
+                rx.icon_button(rx.icon("trash-2", size=15), variant="ghost",
+                               color_scheme="red", size="2", title="삭제"),
+            ),
+            rx.alert_dialog.content(
+                rx.alert_dialog.title("보고서 유형 삭제"),
+                rx.alert_dialog.description(
+                    "이 유형의 대화·작성 스타일·참고 문서가 모두 삭제됩니다. "
+                    "되돌릴 수 없습니다.",
+                ),
+                rx.hstack(
+                    rx.alert_dialog.cancel(
+                        rx.button("취소", variant="soft", color_scheme="gray"),
+                    ),
+                    rx.alert_dialog.action(
+                        rx.button("삭제", color_scheme="red",
+                                  on_click=ReportMakerState.delete_template(t["id"])),
+                    ),
+                    spacing="3", justify="end", margin_top="1em",
+                ),
+            ),
+        ),
+        width="100%", align="center", spacing="1",
+    )
+
+
 def _setup_view() -> rx.Component:
     """세션 시작 전 — 보고서 유형 선택/생성."""
     return rx.center(
@@ -112,17 +189,7 @@ def _setup_view() -> rx.Component:
             rx.cond(
                 ReportMakerState.has_templates,
                 rx.vstack(
-                    rx.foreach(
-                        ReportMakerState.templates,
-                        lambda t: rx.button(
-                            t["display"],
-                            on_click=ReportMakerState.select_template(t["id"]),
-                            variant="soft",
-                            color_scheme="gray",
-                            width="100%",
-                            justify="start",
-                        ),
-                    ),
+                    rx.foreach(ReportMakerState.templates, _template_setup_row),
                     width="100%",
                     spacing="2",
                 ),
