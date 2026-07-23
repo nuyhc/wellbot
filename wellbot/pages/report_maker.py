@@ -461,22 +461,25 @@ def slides_modal() -> rx.Component:
                     width="100%", align="center", padding="10px 14px",
                     border_bottom=f"1px solid {COLORS['border']}",
                 ),
-                rx.cond(
-                    ReportMakerState.slides_loading,
-                    rx.center(
-                        rx.vstack(
-                            rx.spinner(size="3"),
-                            rx.text("슬라이드 렌더 중...", size="2",
-                                    color=COLORS["text_secondary"]),
-                            spacing="3", align="center",
+                rx.box(
+                    rx.cond(
+                        ReportMakerState.slides_loading,
+                        rx.center(
+                            rx.vstack(
+                                rx.spinner(size="3"),
+                                rx.text("슬라이드 렌더 중...", size="2",
+                                        color=COLORS["text_secondary"]),
+                                spacing="3", align="center",
+                            ),
+                            width="100%", height="100%",
                         ),
-                        width="100%", flex="1",
+                        rx.el.iframe(
+                            src=ReportMakerState.slides_src,
+                            style={"width": "100%", "height": "100%", "border": "none",
+                                   "background": "#e9ebef", "display": "block"},
+                        ),
                     ),
-                    rx.el.iframe(
-                        custom_attrs={"srcdoc": ReportMakerState.slides_html},
-                        style={"width": "100%", "flex": "1", "border": "none",
-                               "background": "#e9ebef"},
-                    ),
+                    flex="1", width="100%", min_height="0",
                 ),
                 position="fixed", top="3vh", left="2vw", width="96vw", height="94vh",
                 bg=COLORS["main_bg"], border=f"1px solid {COLORS['border']}",
