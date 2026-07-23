@@ -294,6 +294,7 @@ class ReportMakerState(rx.State):
         if not ok:
             yield rx.toast.error(f"보고서 유형은 최대 {get_config().max_templates}개까지 가능합니다.")
             return
+        log.info("[report_maker] 유형 생성 emp_no=%s template=%s", self._emp_no, tid)
         await self._load_templates()
         self.template_id = tid
         self.template_display = name
@@ -317,6 +318,7 @@ class ReportMakerState(rx.State):
             yield rx.toast.error("보고서 유형을 찾을 수 없습니다.")
             return
         await asyncio.to_thread(db.save_template, self._emp_no, template_id, name, t["actor"])
+        log.info("[report_maker] 유형 이름변경 emp_no=%s template=%s", self._emp_no, template_id)
         await self._load_templates()
         if self.template_id == template_id:
             self.template_display = name
@@ -339,10 +341,14 @@ class ReportMakerState(rx.State):
         삭제 문구('모두 삭제')대로 AgentCore(/writing·/preference)까지 정리해 백지로 만든다.
         """
         # AgentCore /writing·/preference + S3 스타일 파일 삭제
-        await asyncio.to_thread(memory.clear_style, self._emp_no, template_id)
+        deleted_records = await asyncio.to_thread(memory.clear_style, self._emp_no, template_id)
         # 나머지 S3(대화·주제 첨부 등) 프리픽스 전체 삭제
         await asyncio.to_thread(storage.delete_template_files, self._emp_no, template_id)
         await asyncio.to_thread(db.delete_template, self._emp_no, template_id)
+        log.info(
+            "[report_maker] 유형 삭제 emp_no=%s template=%s (AgentCore 레코드 %d건 삭제)",
+            self._emp_no, template_id, deleted_records,
+        )
         await self._load_templates()
         if self.last_template_id == template_id:
             self.last_template_id = ""   # 자동 진입이 삭제된 유형을 다시 집지 않도록
@@ -367,6 +373,10 @@ class ReportMakerState(rx.State):
         self.session_id = uuid.uuid4().hex[:50]
         self.session_ready = True
         self.last_template_id = self.template_id   # 재진입 자동 선택용 기억
+        log.info(
+            "[report_maker] 세션 시작 emp_no=%s template=%s session=%s",
+            self._emp_no, self.template_id, self.session_id,
+        )
         await self._load_conversation_list()
         self.is_streaming = False
         yield
@@ -504,6 +514,7 @@ class ReportMakerState(rx.State):
     @rx.event
     async def delete_conversation_by_id(self, session_id: str):
         await asyncio.to_thread(db.delete_conversation, session_id, self._emp_no)
+        log.info("[report_maker] 보고서 대화 삭제 emp_no=%s session=%s", self._emp_no, session_id)
         if session_id == self.session_id:
             await self.start_new_chat()
         else:
@@ -535,6 +546,7 @@ class ReportMakerState(rx.State):
             emp_no = self._emp_no
             session_id = self.session_id
             template_id = self.template_id
+            persisted_before = self._persisted_count
             title = next(
                 (m.content[:30] for m in self.messages if m.role == "user"), "새 보고서"
             )
@@ -545,28 +557,46 @@ class ReportMakerState(rx.State):
                     m.content, m.model_name, m.input_tokens, m.output_tokens,
                     (m.msg_id or None),
                 )
-                for m in self.messages[self._persisted_count:]
+                for m in self.messages[persisted_before:]
             ]
-            total = len(self.messages)
 
-        await asyncio.to_thread(db.save_conversation, emp_no, session_id, title, template_id)
-        for role, content, model_name, in_tok, out_tok, msg_id in pending:
+        # 부분 실패 안전: 저장 성공한 개수만큼만 _persisted_count 를 올려 중복 append 를 막는다.
+        # 헤더 저장이 실패하면 아무것도 커밋하지 않고 다음 턴에 통째로 재시도(카운트 유지).
+        saved = 0
+        try:
             await asyncio.to_thread(
-                db.append_message, session_id, role, content, emp_no,
-                model_name=model_name,
-                input_tokens=in_tok,
-                output_tokens=out_tok,
-                msg_id=msg_id,
+                db.save_conversation, emp_no, session_id, title, template_id
             )
-        rows = await asyncio.to_thread(db.list_conversations, emp_no)
+            for role, content, model_name, in_tok, out_tok, msg_id in pending:
+                await asyncio.to_thread(
+                    db.append_message, session_id, role, content, emp_no,
+                    model_name=model_name,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    msg_id=msg_id,
+                )
+                saved += 1
+        except Exception:
+            log.exception(
+                "보고서 대화 저장 실패 emp_no=%s session=%s (%d/%d 저장됨)",
+                emp_no, session_id, saved, len(pending),
+            )
+
+        try:
+            rows = await asyncio.to_thread(db.list_conversations, emp_no)
+        except Exception:
+            log.exception("대화 목록 조회 실패 emp_no=%s", emp_no)
+            rows = None
+
         async with self:
-            self._persisted_count = total
-            self.conversation_list = [
-                ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"],
-                            created_label=r.get("created_label", ""),
-                            template_id=r.get("template_id", ""))
-                for r in rows
-            ]
+            self._persisted_count = persisted_before + saved
+            if rows is not None:
+                self.conversation_list = [
+                    ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"],
+                                created_label=r.get("created_label", ""),
+                                template_id=r.get("template_id", ""))
+                    for r in rows
+                ]
 
     # ══════════════════════════════════════════════════════════
     # 스타일 학습 (업로드 → 분석 → AgentCore/S3 저장)
@@ -649,6 +679,10 @@ class ReportMakerState(rx.State):
             else:
                 self.style_upload_status = "스타일 추출에 실패했습니다. 다시 시도해주세요."
             self.is_streaming = False
+        log.info(
+            "[report_maker] 스타일 추출 emp_no=%s template=%s (%d/%d 반영)",
+            emp_no, template, len(extracted_now), total,
+        )
 
     @rx.event
     async def on_topic_uploaded(self, file_no: int, filename: str = ""):
@@ -822,6 +856,10 @@ class ReportMakerState(rx.State):
         self.is_streaming = True
         yield
         await asyncio.to_thread(memory.set_style, self._emp_no, self.template_id, edited)
+        log.info(
+            "[report_maker] 작성 스타일 저장 emp_no=%s template=%s (%d자)",
+            self._emp_no, self.template_id, len(edited),
+        )
         # 세션의 스타일 갱신(생성에 반영)
         self.loaded_style = edited
         self.edited_style = edited
@@ -1431,6 +1469,12 @@ class ReportMakerState(rx.State):
                 output_tokens=usage.get("output_tokens", 0),
             )
             self.is_streaming = False
+            log.info(
+                "[report_maker] 보고서 초안 생성 emp_no=%s template=%s session=%s "
+                "mode=%s pages=%s tokens(in=%s,out=%s)",
+                self._emp_no, self.template_id, self.session_id, self.report_mode,
+                self.page_count, usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+            )
 
     # ── 편집 루프 (스트리밍) ──
     async def _edit_outline(self, feedback: str):
@@ -1464,6 +1508,12 @@ class ReportMakerState(rx.State):
                 output_tokens=usage.get("output_tokens", 0),
             )
             self.is_streaming = False
+            log.info(
+                "[report_maker] 보고서 수정 emp_no=%s template=%s session=%s iter=%d "
+                "tokens(in=%s,out=%s)",
+                self._emp_no, self.template_id, self.session_id, self.iteration,
+                usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+            )
 
     # ── 의도 분류 (동기, to_thread 로 호출) ──
     # background task 의 워커 스레드에서 실행되므로 self.outline 을 직접 읽지 않고
