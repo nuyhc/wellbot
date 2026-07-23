@@ -465,8 +465,7 @@ background:var(--grad);-webkit-background-clip:text;background-clip:text;color:t
 @page{size:1280px 720px;margin:0;}
 </style></head><body>
 <div class="dl-bar">
-  <button class="ghost" onclick="rmSaveHtml()">HTML 저장</button>
-  <button onclick="window.print()">PDF 인쇄</button>
+  <button onclick="rmSaveHtml()">다운로드</button>
 </div>
 {{BODY}}
 <script>
