@@ -999,9 +999,13 @@ class ReportMakerState(rx.State):
             return
 
         def render() -> str:
-            outline = slides.parse_outline(md)
-            tags = slides.suggest_component_tags(outline)   # LLM(+휴리스틱 폴백)
-            html_out = slides.render_html(outline, tags)
+            # LLM 이 레이아웃·시각화를 판단해 슬라이드 HTML 생성(브랜드 셸로 감쌈).
+            # 실패/비정상 출력 시 결정적 렌더로 폴백해 항상 결과를 낸다.
+            try:
+                html_out = slides.render_html_llm(md)
+            except Exception:
+                log.exception("LLM 슬라이드 생성 실패 — 결정적 렌더 폴백 idx=%s", idx)
+                html_out = slides.build_deck(md)
             # iframe src 로 앱 CSS 와 격리해 안전하게 렌더(대용량·따옴표 걱정 없이)
             return "data:text/html;charset=utf-8," + urllib.parse.quote(html_out)
 
