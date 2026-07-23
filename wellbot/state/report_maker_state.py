@@ -23,6 +23,7 @@ import logging
 import os
 import tempfile
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -129,7 +130,7 @@ class ReportMakerState(rx.State):
     # ── 슬라이드 미리보기 ──
     show_slides: bool = False           # 슬라이드 미리보기 오버레이 열림
     slides_loading: bool = False        # 렌더 중(파싱→태깅→렌더)
-    slides_html: str = ""               # 렌더된 슬라이드 HTML(iframe srcdoc)
+    slides_src: str = ""                # 렌더된 슬라이드 HTML의 data URI(iframe src)
     _slides_hash: str = ""              # 원본 아웃라인 해시(캐시 무효화)
     is_streaming: bool = False
     show_guide: bool = False   # 시작 화면의 '상세 작성 가이드' 토글(입력 항목 1~6 안내)
@@ -966,7 +967,7 @@ class ReportMakerState(rx.State):
                 return
             md = self.messages[idx].content
             src_hash = hashlib.sha1(md.encode("utf-8")).hexdigest()
-            cached = (src_hash == self._slides_hash and bool(self.slides_html))
+            cached = (src_hash == self._slides_hash and bool(self.slides_src))
             self.show_slides = True
             self.slides_loading = not cached
 
@@ -976,10 +977,12 @@ class ReportMakerState(rx.State):
         def render() -> str:
             outline = slides.parse_outline(md)
             tags = slides.suggest_component_tags(outline)   # LLM(+휴리스틱 폴백)
-            return slides.render_html(outline, tags)
+            html_out = slides.render_html(outline, tags)
+            # iframe src 로 앱 CSS 와 격리해 안전하게 렌더(대용량·따옴표 걱정 없이)
+            return "data:text/html;charset=utf-8," + urllib.parse.quote(html_out)
 
         try:
-            html_out = await asyncio.to_thread(render)
+            src = await asyncio.to_thread(render)
         except Exception:
             log.exception("슬라이드 렌더 실패 idx=%s", idx)
             async with self:
@@ -989,7 +992,7 @@ class ReportMakerState(rx.State):
             return
 
         async with self:
-            self.slides_html = html_out
+            self.slides_src = src
             self._slides_hash = src_hash
             self.slides_loading = False
         log.info("[report_maker] 슬라이드 렌더 emp_no=%s template=%s session=%s",
