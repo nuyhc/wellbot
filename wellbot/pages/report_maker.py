@@ -71,7 +71,9 @@ def _template_menu_row(t) -> rx.Component:
             rx.alert_dialog.content(
                 rx.alert_dialog.title("보고서 유형 삭제"),
                 rx.alert_dialog.description(
-                    "이 유형의 대화·작성 스타일·참고 문서가 모두 삭제됩니다. 되돌릴 수 없습니다.",
+                    "이 유형의 작성 스타일·참고 문서가 삭제됩니다. "
+                    "지난 대화 이력은 목록에 남지만 유형이 없어 스타일 없이 열립니다. "
+                    "이 작업은 되돌릴 수 없습니다.",
                 ),
                 rx.hstack(
                     rx.alert_dialog.cancel(
@@ -280,6 +282,157 @@ def _message(m: ReportMessage, idx: int) -> rx.Component:
     )
 
 
+def _report_history_row(c) -> rx.Component:
+    """'이전 보고서' 모달의 개별 항목 — 제목·작성일 클릭 시 불러오기 + 이름변경·삭제."""
+    is_active = ReportMakerState.session_id == c.id
+    return rx.hstack(
+        rx.icon("file-text", size=16, color=COLORS["text_secondary"], flex_shrink="0"),
+        # 제목 + 작성일 (클릭 → 불러오기 + 모달 닫기)
+        rx.vstack(
+            rx.text(
+                c.title, size="2",
+                color=rx.cond(is_active, COLORS["text_primary"], COLORS["text_secondary"]),
+                weight=rx.cond(is_active, "medium", "regular"),
+                overflow="hidden", text_overflow="ellipsis", white_space="nowrap",
+                min_width="0", width="100%",
+            ),
+            rx.text(c.created_label, size="1", color=COLORS["text_secondary"]),
+            spacing="0", align="start", flex="1", min_width="0",
+            cursor="pointer",
+            on_click=[
+                ReportMakerState.load_conversation_by_id(c.id),
+                ReportMakerState.close_report_history,
+            ],
+        ),
+        # 이름 변경
+        rx.dialog.root(
+            rx.dialog.trigger(
+                rx.icon_button(rx.icon("pencil", size=14), variant="ghost",
+                               color_scheme="gray", size="1", title="이름 변경"),
+            ),
+            rx.dialog.content(
+                rx.dialog.title("보고서 이름 변경"),
+                rx.form(
+                    rx.vstack(
+                        rx.input(name="title", default_value=c.title,
+                                 placeholder="보고서 제목", size="3", width="100%"),
+                        rx.hstack(
+                            rx.dialog.close(
+                                rx.button("취소", type="button", variant="soft",
+                                          color_scheme="gray"),
+                            ),
+                            rx.dialog.close(
+                                rx.button("저장", type="submit",
+                                          style={"background": _ACCENT, "color": "white"}),
+                            ),
+                            spacing="2", justify="end", width="100%",
+                        ),
+                        spacing="3", width="100%",
+                    ),
+                    on_submit=ReportMakerState.rename_conversation(c.id),
+                    reset_on_submit=False,
+                ),
+                max_width="360px",
+            ),
+        ),
+        # 삭제(확인)
+        rx.alert_dialog.root(
+            rx.alert_dialog.trigger(
+                rx.icon_button(rx.icon("trash-2", size=14), variant="ghost",
+                               color_scheme="red", size="1", title="삭제"),
+            ),
+            rx.alert_dialog.content(
+                rx.alert_dialog.title("보고서 삭제"),
+                rx.alert_dialog.description(
+                    "이 보고서 대화를 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+                ),
+                rx.hstack(
+                    rx.alert_dialog.cancel(
+                        rx.button("취소", variant="soft", color_scheme="gray"),
+                    ),
+                    rx.alert_dialog.action(
+                        rx.button("삭제", color_scheme="red",
+                                  on_click=ReportMakerState.delete_conversation_by_id(c.id)),
+                    ),
+                    spacing="3", justify="end", margin_top="1em",
+                ),
+            ),
+        ),
+        width="100%", align="center", spacing="2",
+        padding_x="1em", padding_y="0.5em",
+        bg=rx.cond(is_active, COLORS["sidebar_active"], "transparent"),
+        _hover={"bg": rx.cond(is_active, COLORS["sidebar_active"], COLORS["sidebar_hover"])},
+        border_radius=SPACING["border_radius_sm"],
+    )
+
+
+def report_history_modal() -> rx.Component:
+    """'이전 보고서' 검색/선택 모달 — WellBot 채팅 검색과 동일한 중앙 오버레이 패턴."""
+    return rx.cond(
+        ReportMakerState.show_report_history,
+        rx.box(
+            # 배경 오버레이(클릭 시 닫기)
+            rx.box(
+                position="fixed", top="0", left="0", width="100vw", height="100vh",
+                bg="rgba(0, 0, 0, 0.5)", z_index="999",
+                on_click=ReportMakerState.close_report_history,
+            ),
+            # 중앙 패널
+            rx.box(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("search", size=18, color=COLORS["text_secondary"],
+                                flex_shrink="0"),
+                        rx.el.input(
+                            placeholder="이전 보고서 검색...",
+                            value=ReportMakerState.report_history_query,
+                            on_change=ReportMakerState.set_report_history_query,
+                            auto_focus=True,
+                            style={
+                                "flex": "1", "background": "transparent", "border": "none",
+                                "boxShadow": "none", "outline": "none",
+                                "color": str(COLORS["text_primary"]),
+                                "fontSize": "0.875rem", "padding": "0", "minWidth": "0",
+                            },
+                        ),
+                        rx.icon_button(
+                            rx.icon("x", size=18), variant="ghost", color_scheme="gray",
+                            size="2", on_click=ReportMakerState.close_report_history,
+                        ),
+                        width="100%", align="center", spacing="3",
+                        padding_x="1em", padding_y="0.625em",
+                        border_bottom=f"1px solid {COLORS['border']}",
+                    ),
+                    rx.box(
+                        rx.cond(
+                            ReportMakerState.filtered_conversations.length() > 0,
+                            rx.vstack(
+                                rx.foreach(
+                                    ReportMakerState.filtered_conversations,
+                                    _report_history_row,
+                                ),
+                                spacing="0", width="100%",
+                            ),
+                            rx.text("일치하는 보고서가 없습니다.", size="2",
+                                    color=COLORS["text_secondary"],
+                                    padding_x="1em", padding_y="0.75em"),
+                        ),
+                        flex="1", overflow_y="auto", overflow_x="hidden",
+                        padding_y="0.25em", max_height="400px", width="100%",
+                    ),
+                    spacing="0", width="100%",
+                ),
+                position="fixed", top="50%", left="50%",
+                transform="translate(-50%, -50%)",
+                width="min(560px, 90vw)", max_height="500px",
+                bg=COLORS["sidebar_bg"], border=f"1px solid {COLORS['border']}",
+                border_radius="12px", z_index="1000", overflow="hidden",
+                box_shadow="0 16px 48px rgba(0, 0, 0, 0.3)",
+            ),
+        ),
+    )
+
+
 def _chat_view() -> rx.Component:
     """세션 시작 후 — 대화/생성 흐름."""
     return rx.vstack(
@@ -287,28 +440,16 @@ def _chat_view() -> rx.Component:
         rx.hstack(
             _template_menu(),
             rx.button(
-                rx.icon("plus", size=16), "새 대화",
+                rx.icon("plus", size=16), "새 보고서",
                 on_click=ReportMakerState.start_new_chat,
                 variant="soft", color_scheme="gray", size="2",
             ),
             rx.cond(
                 ReportMakerState.conversation_list.length() > 0,
-                rx.menu.root(
-                    rx.menu.trigger(
-                        rx.button(
-                            rx.icon("history", size=16), "이전 대화",
-                            variant="soft", color_scheme="gray", size="2",
-                        ),
-                    ),
-                    rx.menu.content(
-                        rx.foreach(
-                            ReportMakerState.conversation_list,
-                            lambda c: rx.menu.item(
-                                c.title,
-                                on_click=ReportMakerState.load_conversation_by_id(c.id),
-                            ),
-                        ),
-                    ),
+                rx.button(
+                    rx.icon("history", size=16), "이전 보고서",
+                    on_click=ReportMakerState.open_report_history,
+                    variant="soft", color_scheme="gray", size="2",
                 ),
             ),
             rx.spacer(),
@@ -498,6 +639,7 @@ def report_maker_page() -> rx.Component:
     return rx.fragment(
         rx.script(REPORT_MAKER_SCRIPT),
         rx.script(REPORT_MAKER_AUTOSCROLL_SCRIPT),
+        report_history_modal(),
         chat_layout(
             rx.box(
                 rx.cond(
