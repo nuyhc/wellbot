@@ -66,8 +66,11 @@ def list_conversations(emp_no: str) -> list[dict]:
         return [
             {
                 "id": r.chtb_tlk_smry_id,
-                "title": r.chtb_tlk_smry_ttl or "새 대화",
+                "title": r.chtb_tlk_smry_ttl or "새 보고서",
                 "created_at": r.rgst_dtm.timestamp() if r.rgst_dtm else 0.0,
+                "created_label": r.rgst_dtm.strftime("%Y.%m.%d") if r.rgst_dtm else "",
+                # CHTB_MDL_NM 재활용 — 대화가 속한 보고서 유형(없으면 legacy 대화)
+                "template_id": r.chtb_mdl_nm or "",
             }
             for r in rows
         ]
@@ -103,14 +106,19 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
         ]
 
 
-def save_conversation(emp_no: str, conv_id: str, title: str, model_name: str = "") -> None:
-    """대화 헤더 upsert (없으면 INSERT, 있으면 소유자 확인 후 UPDATE)."""
+def save_conversation(emp_no: str, conv_id: str, title: str, template_id: str = "") -> None:
+    """대화 헤더 upsert (없으면 INSERT, 있으면 소유자 확인 후 UPDATE).
+
+    report_maker 대화 헤더는 생성 모델명을 쓰지 않으므로(모델은 메시지 레벨 저장),
+    CHTB_MDL_NM 컬럼을 재활용해 대화가 속한 보고서 유형(template_id)을 기록한다.
+    이걸로 대화를 불러올 때 유형·스타일을 원래대로 맞춘다.
+    """
     now = datetime.now(KST)
     with get_session() as session:
         existing = _verify_ownership(session, conv_id, emp_no)
         if existing:
             existing.chtb_tlk_smry_ttl = title
-            existing.chtb_mdl_nm = model_name or existing.chtb_mdl_nm
+            existing.chtb_mdl_nm = template_id or existing.chtb_mdl_nm
             existing.upd_dtm = now
             existing.uppr_id = emp_no[:20]
         else:
@@ -119,7 +127,7 @@ def save_conversation(emp_no: str, conv_id: str, title: str, model_name: str = "
                     chtb_tlk_smry_id=conv_id,
                     emp_no=emp_no,
                     chtb_tlk_smry_ttl=title,
-                    chtb_mdl_nm=model_name or None,
+                    chtb_mdl_nm=template_id or None,
                     bkmr_yn="N",
                     rgsr_id=emp_no[:20],
                     rgst_dtm=now,
