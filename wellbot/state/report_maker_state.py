@@ -307,7 +307,7 @@ class ReportMakerState(rx.State):
         if not ok:
             yield rx.toast.error(f"보고서 유형은 최대 {get_config().max_templates}개까지 가능합니다.")
             return
-        log.info("[report_maker] 유형 생성 emp_no=%s template=%s", self._emp_no, tid)
+        log.info("유형 생성 emp_no=%s template=%s", self._emp_no, tid)
         await self._load_templates()
         self.template_id = tid
         self.template_display = name
@@ -356,7 +356,7 @@ class ReportMakerState(rx.State):
                 yield rx.toast.error("보고서 유형을 찾을 수 없습니다.")
                 return
             await asyncio.to_thread(db.save_template, self._emp_no, rid, name, t["actor"])
-            log.info("[report_maker] 유형 이름변경 emp_no=%s template=%s", self._emp_no, rid)
+            log.info("유형 이름변경 emp_no=%s template=%s", self._emp_no, rid)
             await self._load_templates()
             if self.template_id == rid:
                 self.template_display = name
@@ -391,7 +391,7 @@ class ReportMakerState(rx.State):
         await asyncio.to_thread(storage.delete_template_files, self._emp_no, template_id)
         await asyncio.to_thread(db.delete_template, self._emp_no, template_id)
         log.info(
-            "[report_maker] 유형 삭제 emp_no=%s template=%s (AgentCore 레코드 %d건 삭제)",
+            "유형 삭제 emp_no=%s template=%s (AgentCore 레코드 %d건 삭제)",
             self._emp_no, template_id, deleted_records,
         )
         await self._load_templates()
@@ -419,7 +419,7 @@ class ReportMakerState(rx.State):
         self.session_ready = True
         self.last_template_id = self.template_id   # 재진입 자동 선택용 기억
         log.info(
-            "[report_maker] 세션 시작 emp_no=%s template=%s session=%s",
+            "세션 시작 emp_no=%s template=%s session=%s",
             self._emp_no, self.template_id, self.session_id,
         )
         await self._load_conversation_list()
@@ -559,7 +559,7 @@ class ReportMakerState(rx.State):
     @rx.event
     async def delete_conversation_by_id(self, session_id: str):
         await asyncio.to_thread(db.delete_conversation, session_id, self._emp_no)
-        log.info("[report_maker] 보고서 대화 삭제 emp_no=%s session=%s", self._emp_no, session_id)
+        log.info("보고서 대화 삭제 emp_no=%s session=%s", self._emp_no, session_id)
         if session_id == self.session_id:
             await self.start_new_chat()
         else:
@@ -712,7 +712,7 @@ class ReportMakerState(rx.State):
                 self.style_upload_status = "스타일 추출에 실패했습니다. 다시 시도해주세요."
             self.is_streaming = False
         log.info(
-            "[report_maker] 스타일 추출 emp_no=%s template=%s (%d/%d 반영)",
+            "스타일 추출 emp_no=%s template=%s (%d/%d 반영)",
             emp_no, template, len(extracted_now), total,
         )
 
@@ -889,7 +889,7 @@ class ReportMakerState(rx.State):
         yield
         await asyncio.to_thread(memory.set_style, self._emp_no, self.template_id, edited)
         log.info(
-            "[report_maker] 작성 스타일 저장 emp_no=%s template=%s (%d자)",
+            "작성 스타일 저장 emp_no=%s template=%s (%d자)",
             self._emp_no, self.template_id, len(edited),
         )
         # 세션의 스타일 갱신(생성에 반영)
@@ -1023,7 +1023,7 @@ class ReportMakerState(rx.State):
             self.slides_src = src
             self._slides_hash = src_hash
             self.slides_loading = False
-        log.info("[report_maker] 슬라이드 렌더 emp_no=%s template=%s session=%s",
+        log.info("슬라이드 렌더 emp_no=%s template=%s session=%s",
                  self._emp_no, self.template_id, self.session_id)
 
     @rx.event
@@ -1556,7 +1556,7 @@ class ReportMakerState(rx.State):
             )
             self.is_streaming = False
             log.info(
-                "[report_maker] 보고서 초안 생성 emp_no=%s template=%s session=%s "
+                "보고서 초안 생성 emp_no=%s template=%s session=%s "
                 "mode=%s pages=%s tokens(in=%s,out=%s)",
                 self._emp_no, self.template_id, self.session_id, self.report_mode,
                 self.page_count, usage.get("input_tokens", 0), usage.get("output_tokens", 0),
@@ -1595,7 +1595,7 @@ class ReportMakerState(rx.State):
             )
             self.is_streaming = False
             log.info(
-                "[report_maker] 보고서 수정 emp_no=%s template=%s session=%s iter=%d "
+                "보고서 수정 emp_no=%s template=%s session=%s iter=%d "
                 "tokens(in=%s,out=%s)",
                 self._emp_no, self.template_id, self.session_id, self.iteration,
                 usage.get("input_tokens", 0), usage.get("output_tokens", 0),
