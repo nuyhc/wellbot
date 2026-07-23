@@ -47,6 +47,11 @@ def template_prefix(emp_no: str, template: str) -> str:
     return f"{_base_prefix()}/{emp_no}/{to_safe_id(template)}/"
 
 
+def emp_prefix(emp_no: str) -> str:
+    """emp_no 의 report_maker S3 프리픽스 전체(모든 템플릿 포함) — 초기화/정리용."""
+    return f"{_base_prefix()}/{emp_no}/"
+
+
 def _safe_name(filename: str) -> str:
     """경로 조작 차단 — basename 만 취한다 (H1/H2)."""
     return os.path.basename(filename or "").strip() or "file"
