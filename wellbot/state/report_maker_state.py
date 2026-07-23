@@ -31,6 +31,7 @@ import reflex as rx
 from pydantic import BaseModel
 
 from wellbot.constants import STREAM_FLUSH_INTERVAL_SEC
+from wellbot.logger import log_context
 from wellbot.services.ai.bedrock.converse import adrain_generator
 from wellbot.services.files import attachment_service
 from wellbot.state.chat_helpers.download_script import build_download_script
@@ -200,6 +201,19 @@ class ReportMakerState(rx.State):
     # ══════════════════════════════════════════════════════════
     # 진입 / 인증
     # ══════════════════════════════════════════════════════════
+    def _bind_log(self, **extra) -> None:
+        """이후 로그에 emp/conv/req 상관관계 태그 주입(메인 챗과 동일 규약).
+
+        State 이벤트는 API 미들웨어를 안 거치므로 여기서 컨텍스트를 바인딩해야
+        로그 앞머리 [emp=… conv=… …] 가 채워진다. 핸들러 진입부에서 호출한다.
+        """
+        log_context.bind(
+            emp_no=self._emp_no or None,
+            conversation_id=self.session_id or None,
+            request_id=log_context.new_request_id(),
+            **extra,
+        )
+
     @rx.event
     async def on_load(self):
         """페이지 진입 — 유형이 있으면 랜딩 존 없이 바로 챗으로 자동 진입.
@@ -212,6 +226,7 @@ class ReportMakerState(rx.State):
         if not self._emp_no:
             yield rx.redirect("/login")
             return
+        self._bind_log()
         await self._load_templates()
         await self._consume_report_seed()
         # 이미 세션 진행 중이면 그대로 유지
@@ -288,6 +303,7 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def select_template(self, template_id: str):
+        self._bind_log()
         t = await asyncio.to_thread(db.get_template, self._emp_no, template_id)
         self.template_id = template_id
         self.template_display = t["display"] if t else template_id
@@ -297,6 +313,7 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def create_template(self, form_data: dict):
+        self._bind_log()
         name = (form_data.get("template_name") or "").strip()
         if not name:
             yield rx.toast.error("보고서 유형명을 입력해주세요.")
@@ -345,6 +362,7 @@ class ReportMakerState(rx.State):
         유형: template_id 는 to_safe_id(원래 이름)로 고정돼 S3/스타일 스코프를 결정하므로
         display 만 갱신(save_template upsert). 대화: 헤더 제목만 갱신.
         """
+        self._bind_log()
         name = self.rename_value.strip()
         if not name:
             yield rx.toast.error("이름을 입력해주세요.")
@@ -385,6 +403,7 @@ class ReportMakerState(rx.State):
         AgentCore 레코드를 남기면 재생성 때 load_style 폴백으로 옛 스타일이 되살아나므로,
         삭제 문구('모두 삭제')대로 AgentCore(/writing·/preference)까지 정리해 백지로 만든다.
         """
+        self._bind_log()
         # AgentCore /writing·/preference + S3 스타일 파일 삭제
         deleted_records = await asyncio.to_thread(memory.clear_style, self._emp_no, template_id)
         # 나머지 S3(대화·주제 첨부 등) 프리픽스 전체 삭제
@@ -418,6 +437,7 @@ class ReportMakerState(rx.State):
         self.session_id = uuid.uuid4().hex[:50]
         self.session_ready = True
         self.last_template_id = self.template_id   # 재진입 자동 선택용 기억
+        self._bind_log()   # session_id 확정 후 재바인딩 → 이후 로그에 conv 채움
         log.info(
             "세션 시작 emp_no=%s template=%s session=%s",
             self._emp_no, self.template_id, self.session_id,
@@ -499,6 +519,7 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def load_conversation_by_id(self, session_id: str):
+        self._bind_log(conversation_id=session_id)
         rows = await asyncio.to_thread(
             db.get_conversation_messages, session_id, self._emp_no
         )
@@ -558,6 +579,7 @@ class ReportMakerState(rx.State):
 
     @rx.event
     async def delete_conversation_by_id(self, session_id: str):
+        self._bind_log(conversation_id=session_id)
         await asyncio.to_thread(db.delete_conversation, session_id, self._emp_no)
         log.info("보고서 대화 삭제 emp_no=%s session=%s", self._emp_no, session_id)
         if session_id == self.session_id:
@@ -640,6 +662,7 @@ class ReportMakerState(rx.State):
         등록 = S3 에 파일이 올라가 목록에 뜨는 것. 스타일 반영(추출)은 사용자가 명시적으로
         '스타일 추출'을 눌러야 일어난다(업데이트성 동작).
         """
+        self._bind_log()
         valid = [k for k in (keys or []) if storage.owns_key(k, self._emp_no, self.template_id)]
         if not valid:
             log.warning("스타일 등록 key 소유권 불일치 emp_no=%s keys=%s", self._emp_no, keys)
@@ -655,6 +678,7 @@ class ReportMakerState(rx.State):
         이미 반영된 문서는 건너뛰어 중복 병합을 막는다. 추출 완료 문서는 마커에 기록돼
         이후 '추출됨'으로 표시된다.
         """
+        self._bind_log()
         async with self:
             emp_no, template = self._emp_no, self.template_id
             pending = [d["key"] for d in self.style_docs
@@ -873,6 +897,7 @@ class ReportMakerState(rx.State):
         if not self.template_id:
             # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
             return rx.redirect("/ai-services/report-generator")
+        self._bind_log()
         # 이전 방문의 등록/추출 상태 문구 초기화(재진입 시 stale 표시 방지)
         self.style_upload_status = ""
         # 정본 스타일 전체를 편집 필드로 (정본이 있으면 그대로, legacy 는 1회 정규화 이관)
@@ -884,6 +909,7 @@ class ReportMakerState(rx.State):
     @rx.event
     async def save_edited_style(self, form_data: dict):
         """작성 스타일 저장 — 편집 텍스트로 정본 전체를 덮어쓴다. 빈 값도 허용(스타일 없음)."""
+        self._bind_log()
         edited = (form_data.get("edited_style") or "").strip()
         self.is_streaming = True
         yield
@@ -902,6 +928,7 @@ class ReportMakerState(rx.State):
     @rx.event
     async def delete_style_doc(self, key: str):
         """추출 문서 하나 삭제 — 원본 파일/목록만 정리. 정본 스타일 텍스트는 유지된다."""
+        self._bind_log()
         if not storage.owns_key(key, self._emp_no, self.template_id):
             yield rx.toast.error("잘못된 파일 참조입니다.")
             return
@@ -924,6 +951,7 @@ class ReportMakerState(rx.State):
     @rx.event
     async def reset_style(self):
         """작성 스타일 초기화 — AgentCore 기록 + S3 스타일 파일 삭제."""
+        self._bind_log()
         self.is_streaming = True
         yield
         await asyncio.to_thread(memory.clear_style, self._emp_no, self.template_id)
@@ -959,6 +987,7 @@ class ReportMakerState(rx.State):
         self.loaded_style·user_mode 를 즉시 갱신한다(저장 후 편집기·후속 생성에 동기화).
         (기존 구현은 원문 아웃라인만 저장하고 세션 상태를 갱신하지 않아 동기화가 안 됐음.)
         """
+        self._bind_log()
         if not (0 <= idx < len(self.messages)):
             return
         content = self.messages[idx].content
@@ -986,6 +1015,7 @@ class ReportMakerState(rx.State):
         내용은 결정적 파서(slides.parse_outline)가 무손실 트리로 만들고, LLM 은 영역별
         컴포넌트 타입만 태깅한다(내용 변형 0). 동일 원문은 해시 캐시로 재생성을 건너뛴다.
         """
+        self._bind_log()
         async with self:
             if not (0 <= idx < len(self.messages)):
                 return
@@ -1038,6 +1068,7 @@ class ReportMakerState(rx.State):
         # 메인 챗과 동일 패턴: background task 로 실행해 스트리밍 flush 마다
         # (async with self 경계에서) 프론트로 delta 를 push 한다. foreground 핸들러는
         # 응답이 끝날 때까지 락을 잡아 중간 갱신이 화면에 반영되지 않는다.
+        self._bind_log()   # 턴 단위 로그 상관관계(emp/conv/req) 바인딩
         async with self:
             typed = (form_data.get("message") or "").strip()
             if not typed or self.is_streaming:
