@@ -17,6 +17,7 @@ legacy ChatState 의 flow_stage 흐름을 동일 UX 로 재현하되:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ from wellbot.services.report_maker import (
     build,
     db,
     memory,
+    slides,
     storage,
     structure,
     style,
@@ -124,6 +126,11 @@ class ReportMakerState(rx.State):
     conversation_list: list[ConvSummary] = []
     show_report_history: bool = False   # '이전 보고서' 모달 열림 여부
     report_history_query: str = ""      # 이전 보고서 검색어(제목 필터)
+    # ── 슬라이드 미리보기 ──
+    show_slides: bool = False           # 슬라이드 미리보기 오버레이 열림
+    slides_loading: bool = False        # 렌더 중(파싱→태깅→렌더)
+    slides_html: str = ""               # 렌더된 슬라이드 HTML(iframe srcdoc)
+    _slides_hash: str = ""              # 원본 아웃라인 해시(캐시 무효화)
     is_streaming: bool = False
     show_guide: bool = False   # 시작 화면의 '상세 작성 가이드' 토글(입력 항목 1~6 안내)
 
@@ -943,6 +950,54 @@ class ReportMakerState(rx.State):
         self.messages[idx] = self.messages[idx].copy(update={"style_saved": True})
         self.is_streaming = False
         yield rx.toast.success("현재 스타일을 저장했습니다.")
+
+    # ══════════════════════════════════════════════════════════
+    # 슬라이드 미리보기 (아웃라인 → 결정적 파서 → 타입 태깅 → SK 렌더)
+    # ══════════════════════════════════════════════════════════
+    @rx.event(background=True)
+    async def open_slides(self, idx: int):
+        """아웃라인 메시지를 SK 슬라이드로 렌더해 전체화면 미리보기로 연다.
+
+        내용은 결정적 파서(slides.parse_outline)가 무손실 트리로 만들고, LLM 은 영역별
+        컴포넌트 타입만 태깅한다(내용 변형 0). 동일 원문은 해시 캐시로 재생성을 건너뛴다.
+        """
+        async with self:
+            if not (0 <= idx < len(self.messages)):
+                return
+            md = self.messages[idx].content
+            src_hash = hashlib.sha1(md.encode("utf-8")).hexdigest()
+            cached = (src_hash == self._slides_hash and bool(self.slides_html))
+            self.show_slides = True
+            self.slides_loading = not cached
+
+        if cached:
+            return
+
+        def render() -> str:
+            outline = slides.parse_outline(md)
+            tags = slides.suggest_component_tags(outline)   # LLM(+휴리스틱 폴백)
+            return slides.render_html(outline, tags)
+
+        try:
+            html_out = await asyncio.to_thread(render)
+        except Exception:
+            log.exception("슬라이드 렌더 실패 idx=%s", idx)
+            async with self:
+                self.slides_loading = False
+                self.show_slides = False
+            yield rx.toast.error("슬라이드 렌더에 실패했습니다. 다시 시도해주세요.")
+            return
+
+        async with self:
+            self.slides_html = html_out
+            self._slides_hash = src_hash
+            self.slides_loading = False
+        log.info("[report_maker] 슬라이드 렌더 emp_no=%s template=%s session=%s",
+                 self._emp_no, self.template_id, self.session_id)
+
+    @rx.event
+    def close_slides(self):
+        self.show_slides = False
 
     # ══════════════════════════════════════════════════════════
     # 메인 입력 처리
