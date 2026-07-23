@@ -11,7 +11,7 @@
 
 ai_services:
   - id: report-generator
-    name: 보고서 문구 지원
+    name: 보고서 draft 지원
     description: 사용자 문체를 학습해 보고서 초안(아웃라인)을 AI가 작성·다듬어 줍니다.
     icon: library
     route: "/ai-services/report-generator"
@@ -19,7 +19,7 @@ ai_services:
     enabled: true
 
   - id: report-checker
-    name: 보고서 오류 검출
+    name: 보고서 오류 탐지
     description: PDF 보고서의 오탈자와 논리(일관성) 오류를 AI가 자동으로 검출합니다.
     icon: file-search
     route: "/ai-services/report-checker"
