@@ -198,6 +198,28 @@ def test_heuristic_tags_roadmap_as_timeline():
     assert slides._heuristic_component(right) == "timeline"
 
 
+def test_render_html_llm_wraps_body_and_strips_fences(monkeypatch):
+    """LLM 이 낸 <section> 본문을 브랜드 셸로 감싸고 코드펜스는 제거한다."""
+    from wellbot.services.report_maker import bedrock
+    monkeypatch.setattr(
+        bedrock, "call_model",
+        lambda prompt, mt: '```html\n<section class="slide">본문</section>\n```',
+    )
+    doc = slides.render_html_llm("## [1 페이지] 제목\n□ **a**")
+    assert doc.strip().startswith("<!DOCTYPE html>")
+    assert "--sk-red:#EA002C" in doc                       # 브랜드 셸
+    assert '<section class="slide">본문</section>' in doc   # 펜스 제거 + 본문 삽입
+
+
+def test_render_html_llm_rejects_nonslide_output(monkeypatch):
+    """LLM 이 <section> 없는 잡음을 내면 예외 → 호출측이 폴백하도록."""
+    import pytest
+    from wellbot.services.report_maker import bedrock
+    monkeypatch.setattr(bedrock, "call_model", lambda prompt, mt: "설명만 있고 슬라이드 없음")
+    with pytest.raises(ValueError):
+        slides.render_html_llm("x")
+
+
 def test_single_layout_without_area_headers():
     """single 페이지(영역 헤더 없음): 박스가 기본 영역에 무손실로 담긴다."""
     md = """## [1 페이지] 한 장 요약
