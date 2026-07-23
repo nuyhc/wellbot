@@ -95,6 +95,8 @@ class ConvSummary(BaseModel):
     id: str = ""
     title: str = ""
     created_at: float = 0.0
+    created_label: str = ""  # 작성일 표시용(YYYY.MM.DD)
+    template_id: str = ""   # 대화가 속한 보고서 유형(없으면 legacy)
 
 
 class ReportMakerState(rx.State):
@@ -120,6 +122,8 @@ class ReportMakerState(rx.State):
     # ── 대화 ──
     messages: list[ReportMessage] = []
     conversation_list: list[ConvSummary] = []
+    show_report_history: bool = False   # '이전 보고서' 모달 열림 여부
+    report_history_query: str = ""      # 이전 보고서 검색어(제목 필터)
     is_streaming: bool = False
     show_guide: bool = False   # 시작 화면의 '상세 작성 가이드' 토글(입력 항목 1~6 안내)
 
@@ -405,12 +409,38 @@ class ReportMakerState(rx.State):
     async def _load_conversation_list(self):
         rows = await asyncio.to_thread(db.list_conversations, self._emp_no)
         self.conversation_list = [
-            ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"]) for r in rows
+            ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"],
+                        created_label=r.get("created_label", ""),
+                        template_id=r.get("template_id", ""))
+            for r in rows
         ]
 
     @rx.event
     async def load_conversation_list(self):
         await self._load_conversation_list()
+
+    # ── '이전 보고서' 모달 ──
+    @rx.var
+    def filtered_conversations(self) -> list[ConvSummary]:
+        """검색어(제목 부분일치)로 필터한 이전 보고서 목록."""
+        q = self.report_history_query.strip().lower()
+        if not q:
+            return self.conversation_list
+        return [c for c in self.conversation_list if q in c.title.lower()]
+
+    @rx.event
+    def set_report_history_query(self, value: str):
+        self.report_history_query = value
+
+    @rx.event
+    def open_report_history(self):
+        self.report_history_query = ""
+        self.show_report_history = True
+
+    @rx.event
+    def close_report_history(self):
+        self.show_report_history = False
+        self.report_history_query = ""
 
     @rx.event
     async def load_conversation_by_id(self, session_id: str):
@@ -441,6 +471,35 @@ class ReportMakerState(rx.State):
         self.messages = msgs
         self.outline = last_outline  # 편집 이어가기 복원 (flow_state 는 비영속)
         self._persisted_count = len(msgs)
+        # 대화가 속한 보고서 유형으로 정렬(스타일 포함). 유형이 삭제/미상이면 현재 유형 유지.
+        return await self._align_template_to_conversation(session_id)
+
+    async def _align_template_to_conversation(self, session_id: str):
+        """불러온 대화의 보고서 유형·스타일을 맞춘다.
+
+        - 유형이 현재와 다르고 아직 존재하면: template_id·표시명·스타일 재설정
+        - 유형이 삭제됐으면(태그는 있으나 목록에 없음): 현재 유형 유지 + 안내 토스트
+        - 태그가 없으면(legacy 대화): 조용히 현재 유형 유지
+        """
+        conv_tid = next(
+            (c.template_id for c in self.conversation_list if c.id == session_id), ""
+        )
+        if not conv_tid or conv_tid == self.template_id:
+            return
+        if conv_tid not in {t["id"] for t in self.templates}:
+            # 유형이 삭제됨 → 현재 유형/스타일 유지, 사용자에게 안내
+            return rx.toast.info(
+                "이 대화의 보고서 유형이 삭제되어, 현재 유형·스타일로 불러왔습니다."
+            )
+        # 유형 존재 → 유형·스타일 정렬
+        self.template_id = conv_tid
+        self.last_template_id = conv_tid
+        t = await asyncio.to_thread(db.get_template, self._emp_no, conv_tid)
+        self.template_display = t["display"] if t else conv_tid
+        self.loaded_style = await asyncio.to_thread(
+            memory.load_style, self._emp_no, conv_tid
+        )
+        self.user_mode = "report_based" if self.loaded_style.strip() else "text_based"
 
     @rx.event
     async def delete_conversation_by_id(self, session_id: str):
@@ -451,11 +510,17 @@ class ReportMakerState(rx.State):
             await self._load_conversation_list()
 
     @rx.event
-    async def rename_conversation(self, session_id: str, new_title: str):
+    async def rename_conversation(self, session_id: str, form_data: dict):
+        """'이전 보고서' 항목 이름 변경(모달의 이름변경 폼 제출)."""
+        title = (form_data.get("title") or "").strip()
+        if not title:
+            yield rx.toast.error("제목을 입력해주세요.")
+            return
         await asyncio.to_thread(
-            db.update_conversation_title, session_id, new_title, self._emp_no
+            db.update_conversation_title, session_id, title, self._emp_no
         )
         await self._load_conversation_list()
+        yield rx.toast.success("이름을 변경했습니다.")
 
     async def _persist_turn(self):
         """이번 턴에서 확정된 새 메시지를 DB 에 append (flow_state 는 저장 안 함).
@@ -469,8 +534,9 @@ class ReportMakerState(rx.State):
                 return
             emp_no = self._emp_no
             session_id = self.session_id
+            template_id = self.template_id
             title = next(
-                (m.content[:30] for m in self.messages if m.role == "user"), "새 대화"
+                (m.content[:30] for m in self.messages if m.role == "user"), "새 보고서"
             )
             # 첨부가 있는 사용자 메시지는 사전발급 msg_id 로 저장 → ChatMessageAttachment 매핑 연결
             pending = [
@@ -483,7 +549,7 @@ class ReportMakerState(rx.State):
             ]
             total = len(self.messages)
 
-        await asyncio.to_thread(db.save_conversation, emp_no, session_id, title)
+        await asyncio.to_thread(db.save_conversation, emp_no, session_id, title, template_id)
         for role, content, model_name, in_tok, out_tok, msg_id in pending:
             await asyncio.to_thread(
                 db.append_message, session_id, role, content, emp_no,
@@ -496,7 +562,10 @@ class ReportMakerState(rx.State):
         async with self:
             self._persisted_count = total
             self.conversation_list = [
-                ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"]) for r in rows
+                ConvSummary(id=r["id"], title=r["title"], created_at=r["created_at"],
+                            created_label=r.get("created_label", ""),
+                            template_id=r.get("template_id", ""))
+                for r in rows
             ]
 
     # ══════════════════════════════════════════════════════════
