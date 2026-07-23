@@ -31,36 +31,11 @@ def _template_menu_row(t) -> rx.Component:
             on_click=ReportMakerState.edit_template_style(t["id"]),
             variant="ghost", color_scheme="gray", size="1", title="작성 스타일 편집",
         ),
-        # 이름 변경
-        rx.dialog.root(
-            rx.dialog.trigger(
-                rx.icon_button(rx.icon("pencil", size=14), variant="ghost",
-                               color_scheme="gray", size="1", title="이름 변경"),
-            ),
-            rx.dialog.content(
-                rx.dialog.title("이름 변경"),
-                rx.form(
-                    rx.vstack(
-                        rx.input(name="template_name", default_value=t["display"],
-                                 placeholder="보고서 유형명", size="3", width="100%"),
-                        rx.hstack(
-                            rx.dialog.close(
-                                rx.button("취소", type="button", variant="soft",
-                                          color_scheme="gray"),
-                            ),
-                            rx.dialog.close(
-                                rx.button("저장", type="submit",
-                                          style={"background": _ACCENT, "color": "white"}),
-                            ),
-                            spacing="2", justify="end", width="100%",
-                        ),
-                        spacing="3", width="100%",
-                    ),
-                    on_submit=ReportMakerState.rename_template(t["id"]),
-                    reset_on_submit=False,
-                ),
-                max_width="360px",
-            ),
+        # 이름 변경 (공용 컨트롤드 다이얼로그 오픈)
+        rx.icon_button(
+            rx.icon("pencil", size=14), variant="ghost", color_scheme="gray", size="1",
+            title="이름 변경",
+            on_click=ReportMakerState.start_rename_template(t["id"], t["display"]),
         ),
         # 삭제(확인)
         rx.alert_dialog.root(
@@ -309,36 +284,11 @@ def _report_history_row(c) -> rx.Component:
                 ReportMakerState.close_report_history,
             ],
         ),
-        # 이름 변경
-        rx.dialog.root(
-            rx.dialog.trigger(
-                rx.icon_button(rx.icon("pencil", size=14), variant="ghost",
-                               color_scheme="gray", size="1", title="이름 변경"),
-            ),
-            rx.dialog.content(
-                rx.dialog.title("보고서 이름 변경"),
-                rx.form(
-                    rx.vstack(
-                        rx.input(name="title", default_value=c.title,
-                                 placeholder="보고서 제목", size="3", width="100%"),
-                        rx.hstack(
-                            rx.dialog.close(
-                                rx.button("취소", type="button", variant="soft",
-                                          color_scheme="gray"),
-                            ),
-                            rx.dialog.close(
-                                rx.button("저장", type="submit",
-                                          style={"background": _ACCENT, "color": "white"}),
-                            ),
-                            spacing="2", justify="end", width="100%",
-                        ),
-                        spacing="3", width="100%",
-                    ),
-                    on_submit=ReportMakerState.rename_conversation(c.id),
-                    reset_on_submit=False,
-                ),
-                max_width="360px",
-            ),
+        # 이름 변경 (공용 컨트롤드 다이얼로그 오픈)
+        rx.icon_button(
+            rx.icon("pencil", size=14), variant="ghost", color_scheme="gray", size="1",
+            title="이름 변경",
+            on_click=ReportMakerState.start_rename_conversation(c.id, c.title),
         ),
         # 삭제(확인)
         rx.alert_dialog.root(
@@ -435,6 +385,33 @@ def report_history_modal() -> rx.Component:
                 box_shadow="0 16px 48px rgba(0, 0, 0, 0.3)",
             ),
         ),
+    )
+
+
+def _rename_dialog() -> rx.Component:
+    """유형/대화 공용 이름 변경 다이얼로그 (컨트롤드 — submit-in-close 회피)."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("이름 변경"),
+            rx.vstack(
+                rx.input(
+                    value=ReportMakerState.rename_value,
+                    on_change=ReportMakerState.set_rename_value,
+                    placeholder="이름 입력", size="3", width="100%", auto_focus=True,
+                ),
+                rx.hstack(
+                    rx.button("취소", variant="soft", color_scheme="gray",
+                              on_click=ReportMakerState.set_rename_open(False)),
+                    rx.button("저장", on_click=ReportMakerState.commit_rename,
+                              style={"background": _ACCENT, "color": "white"}),
+                    spacing="2", justify="end", width="100%",
+                ),
+                spacing="3", width="100%",
+            ),
+            max_width="360px",
+        ),
+        open=ReportMakerState.rename_open,
+        on_open_change=ReportMakerState.set_rename_open,
     )
 
 
@@ -698,6 +675,7 @@ def report_maker_page() -> rx.Component:
         rx.script(REPORT_MAKER_AUTOSCROLL_SCRIPT),
         report_history_modal(),
         slides_modal(),
+        _rename_dialog(),
         chat_layout(
             rx.box(
                 rx.cond(
