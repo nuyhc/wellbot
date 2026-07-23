@@ -807,6 +807,8 @@ class ReportMakerState(rx.State):
         if not self.template_id:
             # 보고서 유형(세션) 없이 진입 → 메인으로 돌려보냄
             return rx.redirect("/ai-services/report-generator")
+        # 이전 방문의 등록/추출 상태 문구 초기화(재진입 시 stale 표시 방지)
+        self.style_upload_status = ""
         # 정본 스타일 전체를 편집 필드로 (정본이 있으면 그대로, legacy 는 1회 정규화 이관)
         self.edited_style = await asyncio.to_thread(
             memory.load_style, self._emp_no, self.template_id
