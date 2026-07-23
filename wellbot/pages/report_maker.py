@@ -269,6 +269,11 @@ def _message(m: ReportMessage, idx: int) -> rx.Component:
                             on_click=ReportMakerState.save_outline_style(idx),
                             variant="soft", color_scheme="gray", size="1",
                         ),
+                        rx.button(
+                            rx.icon("presentation", size=14), "슬라이드로 보기",
+                            on_click=ReportMakerState.open_slides(idx),
+                            variant="soft", color_scheme="gray", size="1",
+                        ),
                         spacing="2",
                         margin_top="0.5em",
                     ),
@@ -428,6 +433,55 @@ def report_history_modal() -> rx.Component:
                 bg=COLORS["sidebar_bg"], border=f"1px solid {COLORS['border']}",
                 border_radius="12px", z_index="1000", overflow="hidden",
                 box_shadow="0 16px 48px rgba(0, 0, 0, 0.3)",
+            ),
+        ),
+    )
+
+
+def slides_modal() -> rx.Component:
+    """슬라이드 전체화면 미리보기 — iframe(srcdoc)로 앱 CSS와 격리해 렌더."""
+    return rx.cond(
+        ReportMakerState.show_slides,
+        rx.box(
+            rx.box(  # 배경 오버레이
+                position="fixed", top="0", left="0", width="100vw", height="100vh",
+                bg="rgba(0,0,0,0.55)", z_index="1000",
+                on_click=ReportMakerState.close_slides,
+            ),
+            rx.vstack(  # 패널
+                rx.hstack(
+                    rx.icon("presentation", size=18, color=COLORS["text_secondary"]),
+                    rx.text("슬라이드 미리보기", size="2", weight="medium",
+                            color=COLORS["text_primary"]),
+                    rx.spacer(),
+                    rx.icon_button(
+                        rx.icon("x", size=18), variant="ghost", color_scheme="gray",
+                        size="2", on_click=ReportMakerState.close_slides,
+                    ),
+                    width="100%", align="center", padding="10px 14px",
+                    border_bottom=f"1px solid {COLORS['border']}",
+                ),
+                rx.cond(
+                    ReportMakerState.slides_loading,
+                    rx.center(
+                        rx.vstack(
+                            rx.spinner(size="3"),
+                            rx.text("슬라이드 렌더 중...", size="2",
+                                    color=COLORS["text_secondary"]),
+                            spacing="3", align="center",
+                        ),
+                        width="100%", flex="1",
+                    ),
+                    rx.el.iframe(
+                        custom_attrs={"srcdoc": ReportMakerState.slides_html},
+                        style={"width": "100%", "flex": "1", "border": "none",
+                               "background": "#e9ebef"},
+                    ),
+                ),
+                position="fixed", top="3vh", left="2vw", width="96vw", height="94vh",
+                bg=COLORS["main_bg"], border=f"1px solid {COLORS['border']}",
+                border_radius="12px", z_index="1001", overflow="hidden",
+                box_shadow="0 16px 48px rgba(0,0,0,0.35)", spacing="0",
             ),
         ),
     )
@@ -640,6 +694,7 @@ def report_maker_page() -> rx.Component:
         rx.script(REPORT_MAKER_SCRIPT),
         rx.script(REPORT_MAKER_AUTOSCROLL_SCRIPT),
         report_history_modal(),
+        slides_modal(),
         chat_layout(
             rx.box(
                 rx.cond(
