@@ -127,6 +127,11 @@ class ReportMakerState(rx.State):
     conversation_list: list[ConvSummary] = []
     show_report_history: bool = False   # '이전 보고서' 모달 열림 여부
     report_history_query: str = ""      # 이전 보고서 검색어(제목 필터)
+    # ── 이름 변경 공용 다이얼로그(유형/대화) — 컨트롤드(폼 submit-in-close 회피) ──
+    rename_open: bool = False
+    rename_kind: str = ""               # "template" | "conversation"
+    rename_id: str = ""
+    rename_value: str = ""
     # ── 슬라이드 미리보기 ──
     show_slides: bool = False           # 슬라이드 미리보기 오버레이 열림
     slides_loading: bool = False        # 렌더 중(파싱→태깅→렌더)
@@ -310,26 +315,58 @@ class ReportMakerState(rx.State):
         async for _ in self._start_session():
             yield
 
+    # ── 공용 이름 변경 다이얼로그 (유형/대화) ──
     @rx.event
-    async def rename_template(self, template_id: str, form_data: dict):
-        """보고서 유형 표시명 변경 — ID(스토리지 스코프)는 유지하고 display 만 갱신.
+    def start_rename_template(self, template_id: str, current: str):
+        self.rename_kind = "template"
+        self.rename_id = template_id
+        self.rename_value = current
+        self.rename_open = True
 
-        template_id 는 to_safe_id(원래 이름)로 고정돼 S3/스타일 스코프를 결정하므로
-        rename 은 표시명(display)만 바꾼다(save_template upsert 가 display 만 갱신).
+    @rx.event
+    def start_rename_conversation(self, session_id: str, current: str):
+        self.rename_kind = "conversation"
+        self.rename_id = session_id
+        self.rename_value = current
+        self.rename_open = True
+
+    @rx.event
+    def set_rename_value(self, v: str):
+        self.rename_value = v
+
+    @rx.event
+    def set_rename_open(self, v: bool):
+        self.rename_open = v
+
+    @rx.event
+    async def commit_rename(self):
+        """다이얼로그 저장 — 유형(display만) 또는 대화(제목) 이름 변경.
+
+        유형: template_id 는 to_safe_id(원래 이름)로 고정돼 S3/스타일 스코프를 결정하므로
+        display 만 갱신(save_template upsert). 대화: 헤더 제목만 갱신.
         """
-        name = (form_data.get("template_name") or "").strip()
+        name = self.rename_value.strip()
         if not name:
-            yield rx.toast.error("보고서 유형명을 입력해주세요.")
+            yield rx.toast.error("이름을 입력해주세요.")
             return
-        t = await asyncio.to_thread(db.get_template, self._emp_no, template_id)
-        if not t:
-            yield rx.toast.error("보고서 유형을 찾을 수 없습니다.")
+        kind, rid = self.rename_kind, self.rename_id
+        if kind == "template":
+            t = await asyncio.to_thread(db.get_template, self._emp_no, rid)
+            if not t:
+                yield rx.toast.error("보고서 유형을 찾을 수 없습니다.")
+                return
+            await asyncio.to_thread(db.save_template, self._emp_no, rid, name, t["actor"])
+            log.info("[report_maker] 유형 이름변경 emp_no=%s template=%s", self._emp_no, rid)
+            await self._load_templates()
+            if self.template_id == rid:
+                self.template_display = name
+        elif kind == "conversation":
+            await asyncio.to_thread(db.update_conversation_title, rid, name, self._emp_no)
+            await self._load_conversation_list()
+        else:
+            self.rename_open = False
             return
-        await asyncio.to_thread(db.save_template, self._emp_no, template_id, name, t["actor"])
-        log.info("[report_maker] 유형 이름변경 emp_no=%s template=%s", self._emp_no, template_id)
-        await self._load_templates()
-        if self.template_id == template_id:
-            self.template_display = name
+        self.rename_open = False
         yield rx.toast.success("이름을 변경했습니다.")
 
     @rx.event
@@ -527,19 +564,6 @@ class ReportMakerState(rx.State):
             await self.start_new_chat()
         else:
             await self._load_conversation_list()
-
-    @rx.event
-    async def rename_conversation(self, session_id: str, form_data: dict):
-        """'이전 보고서' 항목 이름 변경(모달의 이름변경 폼 제출)."""
-        title = (form_data.get("title") or "").strip()
-        if not title:
-            yield rx.toast.error("제목을 입력해주세요.")
-            return
-        await asyncio.to_thread(
-            db.update_conversation_title, session_id, title, self._emp_no
-        )
-        await self._load_conversation_list()
-        yield rx.toast.success("이름을 변경했습니다.")
 
     async def _persist_turn(self):
         """이번 턴에서 확정된 새 메시지를 DB 에 append (flow_state 는 저장 안 함).
