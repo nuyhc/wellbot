@@ -344,6 +344,66 @@ def build_deck(md: str, tags: dict | None = None) -> str:
     return render_html(parse_outline(md), tags)
 
 
+# ──────────────────────────────────────────────────────────────
+# LLM 전체 생성 (레이아웃·시각화를 LLM 이 판단, 브랜드 셸로 감싸 잠금)
+# ──────────────────────────────────────────────────────────────
+_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n|\n```\s*$")
+
+
+def _strip_fences(s: str) -> str:
+    s = (s or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n", "", s)
+        s = re.sub(r"\n```\s*$", "", s)
+    return s.strip()
+
+
+_SLIDE_DESIGN_PROMPT = """당신은 SK 임원 보고 장표 디자이너다. 아래 보고서 아웃라인을 16:9 슬라이드 HTML 로 변환하라.
+
+[절대 규칙 — 내용 보존]
+- 아웃라인의 모든 사실·수치·문구를 그대로 쓴다. 추가·삭제·왜곡·요약 금지(누락 0). □/-/· 항목을 빠짐없이 담는다.
+- 페이지 구분(## [N 페이지])을 그대로 슬라이드로 나눈다. 각 페이지는 <section class="slide"> 하나.
+
+[레이아웃 — 여기가 핵심]
+- 페이지 내용에 맞게 좌우 2단 / 상하 2단 / 단일을 스스로 판단해 배치한다.
+- 좌측/우측(상단/하단) 영역이 있으면 <div class="cols" style="grid-template-columns:1fr 1fr"> 로 2단 구성하고 각 영역을 <div class="col"> 로 감싼다.
+- 표·타임라인·카드·KPI 등 시각 요소를 내용에 맞게 자유롭게 쓰되 임원 보고답게 절제한다.
+
+[브랜드/포맷 — 아래 클래스를 쓰면 SK 톤(레드 #EA002C·오렌지 #F47725)이 자동 적용된다. 직접 색 지정은 자제]
+- 상단바: <div class="top"><span class="wing"><i class="r"></i><i class="o"></i></span><div><div class="rtitle">보고서 제목</div><div class="ptitle">페이지 제목</div></div><span class="pageno">N / 총</span></div>
+- 페이지 결론 바: <div class="pgov">페이지 governing</div>
+- 본문: <div class="cols" style="grid-template-columns:1fr 1fr"><div class="col"><div class="atitle">영역 제목</div><div class="agov">영역 governing</div> …블록… </div> …</div>
+- 대분류 카드: <div class="box"><div class="h">□ 제목</div><ul class="l2"><li>중항목<ul class="l3"><li>세부</li></ul></li></ul></div>
+- 타임라인: <div class="tl"><div class="ph"><div class="ph-t">단계</div><ul class="l2">…</ul></div></div>
+- 표: <table class="exec"><thead><tr><th>…</th></tr></thead><tbody><tr><td>…</td></tr></tbody></table>
+- KPI: <div class="kpis"><div class="kpi"><span class="v">값</span><span class="l">라벨</span></div></div>
+- 표지(선택): <section class="slide cover"><div class="cov-wrap"><span class="wing lg"><i class="r"></i><i class="o"></i></span><div class="cov-title">제목</div><div class="cov-gov">전체 governing</div></div></section>
+
+[출력]
+- <section class="slide"> 들만 출력한다. <html>/<head>/<style>/<script> 는 쓰지 마라(브랜드 셸이 자동 제공됨).
+- 코드펜스·설명·주석 없이 HTML 만 출력한다.
+
+[아웃라인]
+{content}
+"""
+
+
+def render_html_llm(md: str) -> str:
+    """LLM 이 슬라이드 본문(<section>들)을 생성 → 브랜드 셸로 감싼 완결 HTML.
+
+    레이아웃(좌우/상하/단일)·시각화는 LLM 판단, 브랜드 CSS·fit·문서 유효성은 셸이 보장.
+    실패/비정상 출력 시 예외를 던져 호출측이 결정적 렌더로 폴백하게 한다.
+    """
+    from wellbot.services.report_maker import bedrock
+    from wellbot.services.report_maker.config import get_config
+
+    prompt = _SLIDE_DESIGN_PROMPT.replace("{content}", md or "")
+    body = _strip_fences(bedrock.call_model(prompt, get_config().max_tokens_outline))
+    if "<section" not in body:
+        raise ValueError("LLM 슬라이드 출력에 <section> 이 없음")
+    return _HTML_SHELL.replace("{{BODY}}", body)
+
+
 # ── 잠긴 브랜드 셸(SK 톤 CSS + 가독성 하한 fit 스크립트) ──
 _HTML_SHELL = """<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <style>
@@ -393,9 +453,32 @@ ul.l3>li::before{content:"\\00B7";position:absolute;left:3px;color:#a7b0be;font-
 background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;}
 .cover .cov-gov{font-size:16px;font-weight:700;color:#2a2f38;margin-bottom:16px;line-height:1.5;}
 .cover .cov-ov{font-size:13px;color:var(--ink-2);line-height:1.7;}
+.dl-bar{position:fixed;top:14px;right:18px;z-index:9999;display:flex;gap:8px;}
+.dl-bar button{font-size:12px;font-weight:700;color:#fff;background:var(--grad);border:none;
+  border-radius:8px;padding:7px 13px;cursor:pointer;box-shadow:0 3px 10px rgba(234,0,44,.25);}
+.dl-bar button.ghost{background:#fff;color:var(--ink-2);border:1px solid var(--line);box-shadow:none;}
+@media print{
+  body{background:#fff;padding:0;}
+  .dl-bar,.fitnote{display:none !important;}
+  .slide{box-shadow:none;border:none;border-radius:0;margin:0 auto;break-after:page;page-break-after:always;}
+}
+@page{size:1280px 720px;margin:0;}
 </style></head><body>
+<div class="dl-bar">
+  <button class="ghost" onclick="rmSaveHtml()">HTML 저장</button>
+  <button onclick="window.print()">PDF 인쇄</button>
+</div>
 {{BODY}}
 <script>
+// 자체 완결 HTML 다운로드(현재 문서 그대로) — Blob 저장
+function rmSaveHtml(){
+  var html="<!DOCTYPE html>\\n"+document.documentElement.outerHTML;
+  var blob=new Blob([html],{type:"text/html;charset=utf-8"});
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="report_slides.html";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1500);
+}
 // 가독성 하한 fit: 작은 초과만 미세 축소, 큰 초과는 축소 대신 '분할 대상' 표시
 var MIN=0.9;
 requestAnimationFrame(function(){
