@@ -41,11 +41,40 @@ def _client(region: str, read_timeout: int) -> Any:
     )
 
 
-def _converse_content(content: list[dict], max_tokens: int, system: str = "") -> tuple[str, str]:
+def _record_usage_safe(action: str, in_tok: int, out_tok: int) -> None:
+    """비스트리밍 LLM 호출 토큰을 log_context(emp/conv) 기준으로 chtb_msg_d 에 기록.
+
+    best-effort: 귀속 대화가 없으면 로그만, 실패해도 LLM 호출을 깨지 않는다.
+    (스트리밍 생성은 메시지 토큰으로 이미 기록되므로 여기서 이중 기록되지 않는다.)
+    """
+    if (in_tok or 0) + (out_tok or 0) <= 0:
+        return
+    try:
+        from wellbot.logger import log_context
+        from wellbot.services.report_maker import db
+
+        ctx = log_context.current()
+        emp = ctx.get("emp_no")
+        conv = ctx.get("conversation_id")
+        emp = emp if emp and emp != "-" else None
+        conv = conv if conv and conv != "-" else None
+        if emp and conv:
+            db.record_usage(conv, emp, action or "llm", in_tok, out_tok, get_config().model_id)
+        else:
+            log.info("LLM usage(미귀속) action=%s in=%s out=%s", action or "llm", in_tok, out_tok)
+    except Exception:
+        log.exception("LLM usage 기록 실패 action=%s", action)
+
+
+def _converse_content(
+    content: list[dict], max_tokens: int, system: str = "",
+    *, usage_out: dict | None = None, action: str = "",
+) -> tuple[str, str]:
     """Converse 단일 턴 호출(임의 content 블록) → (텍스트, stopReason). 실패 시 ("", "error").
 
     ThrottlingException 지수 백오프 재시도 + max_tokens 잘림 경고를 한곳에 모은다.
     텍스트/이미지 호출이 모두 이 코어를 거쳐 동일한 에러 처리를 공유한다(예외를 올리지 않음).
+    응답 usage(input/output 토큰)를 usage_out 에 채우고, action 라벨로 사용량을 기록한다.
     """
     cfg = get_config()
     client = _client(cfg.region, cfg.read_timeout_sec)
@@ -63,6 +92,13 @@ def _converse_content(content: list[dict], max_tokens: int, system: str = "") ->
             stop = resp.get("stopReason", "")
             if stop == "max_tokens":
                 log.warning("report_maker 응답 잘림(max_tokens) model=%s", cfg.model_id)
+            usage = resp.get("usage") or {}
+            in_tok = int(usage.get("inputTokens", 0) or 0)
+            out_tok = int(usage.get("outputTokens", 0) or 0)
+            if usage_out is not None:
+                usage_out["input_tokens"] = in_tok
+                usage_out["output_tokens"] = out_tok
+            _record_usage_safe(action, in_tok, out_tok)
             blocks = resp["output"]["message"]["content"]
             return "".join(b["text"] for b in blocks if "text" in b), stop
         except client.exceptions.ThrottlingException:
@@ -79,14 +115,16 @@ def _converse_content(content: list[dict], max_tokens: int, system: str = "") ->
     return "", "error"
 
 
-def _converse_raw(prompt: str, max_tokens: int, system: str = "") -> tuple[str, str]:
+def _converse_raw(
+    prompt: str, max_tokens: int, system: str = "", *, action: str = "",
+) -> tuple[str, str]:
     """텍스트 단일 턴 → (텍스트, stopReason)."""
-    return _converse_content([{"text": prompt}], max_tokens, system)
+    return _converse_content([{"text": prompt}], max_tokens, system, action=action)
 
 
-def call_model(prompt: str, max_tokens: int, system: str = "") -> str:
-    """Converse 단일 턴 호출 → 응답 텍스트. 실패 시 빈 문자열."""
-    return _converse_raw(prompt, max_tokens, system)[0]
+def call_model(prompt: str, max_tokens: int, system: str = "", *, action: str = "") -> str:
+    """Converse 단일 턴 호출 → 응답 텍스트. 실패 시 빈 문자열. action=사용량 라벨."""
+    return _converse_raw(prompt, max_tokens, system, action=action)[0]
 
 
 def stream_model(
@@ -147,7 +185,9 @@ def stream_model(
         log.exception("report_maker 스트림 소비 중 오류(부분 출력 유지)")
 
 
-def call_vision(image_bytes: bytes, image_format: str, prompt: str, max_tokens: int) -> str:
+def call_vision(
+    image_bytes: bytes, image_format: str, prompt: str, max_tokens: int, *, action: str = "vision",
+) -> str:
     """이미지 + 지시 프롬프트 → 추출 텍스트. 실패 시 빈 문자열(재시도·에러처리 공유).
 
     image_format: "jpeg" | "png" | "gif" | "webp" (Converse image block format).
@@ -156,17 +196,17 @@ def call_vision(image_bytes: bytes, image_format: str, prompt: str, max_tokens: 
         {"image": {"format": image_format, "source": {"bytes": image_bytes}}},
         {"text": prompt},
     ]
-    return _converse_content(content, max_tokens)[0]
+    return _converse_content(content, max_tokens, action=action)[0]
 
 
-def invoke_compat(prompt: str, max_tokens: int, system: str = "") -> dict:
+def invoke_compat(prompt: str, max_tokens: int, system: str = "", *, action: str = "") -> dict:
     """legacy invoke_model 응답 호환 dict 반환.
 
     포팅한 프롬프트 조립 코드가 ``resp["content"][0]["text"]`` /
     ``resp.get("stop_reason")`` 형태로 응답을 읽으므로, Converse 결과를 그 형태로
     감싸 원문 프롬프트 로직을 그대로 재사용한다.
     """
-    text, stop = _converse_raw(prompt, max_tokens, system)
+    text, stop = _converse_raw(prompt, max_tokens, system, action=action)
     return {"content": [{"text": text}], "stop_reason": stop}
 
 
@@ -184,6 +224,6 @@ def _extract_json_object(text: str) -> dict:
         return {}
 
 
-def call_json(prompt: str, max_tokens: int, system: str = "") -> dict:
+def call_json(prompt: str, max_tokens: int, system: str = "", *, action: str = "") -> dict:
     """call_model 후 JSON 객체로 파싱. 실패 시 빈 dict."""
-    return _extract_json_object(call_model(prompt, max_tokens, system))
+    return _extract_json_object(call_model(prompt, max_tokens, system, action=action))
