@@ -203,7 +203,7 @@ def test_render_html_llm_wraps_body_and_strips_fences(monkeypatch):
     from wellbot.services.report_maker import bedrock
     monkeypatch.setattr(
         bedrock, "call_model",
-        lambda prompt, mt: '```html\n<section class="slide">본문</section>\n```',
+        lambda prompt, mt, **kw: '```html\n<section class="slide">본문</section>\n```',
     )
     doc = slides.render_html_llm("## [1 페이지] 제목\n□ **a**")
     assert doc.strip().startswith("<!DOCTYPE html>")
@@ -215,7 +215,7 @@ def test_render_html_llm_rejects_nonslide_output(monkeypatch):
     """LLM 이 <section> 없는 잡음을 내면 예외 → 호출측이 폴백하도록."""
     import pytest
     from wellbot.services.report_maker import bedrock
-    monkeypatch.setattr(bedrock, "call_model", lambda prompt, mt: "설명만 있고 슬라이드 없음")
+    monkeypatch.setattr(bedrock, "call_model", lambda prompt, mt, **kw: "설명만 있고 슬라이드 없음")
     with pytest.raises(ValueError):
         slides.render_html_llm("x")
 
