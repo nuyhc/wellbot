@@ -206,13 +206,15 @@ class ReportMakerState(rx.State):
 
         State 이벤트는 API 미들웨어를 안 거치므로 여기서 컨텍스트를 바인딩해야
         로그 앞머리 [emp=… conv=… …] 가 채워진다. 핸들러 진입부에서 호출한다.
+        extra 로 넘긴 필드(예: conversation_id)는 기본값을 덮어쓴다.
         """
-        log_context.bind(
-            emp_no=self._emp_no or None,
-            conversation_id=self.session_id or None,
-            request_id=log_context.new_request_id(),
-            **extra,
-        )
+        fields = {
+            "emp_no": self._emp_no or None,
+            "conversation_id": self.session_id or None,
+            "request_id": log_context.new_request_id(),
+        }
+        fields.update(extra)
+        log_context.bind(**fields)
 
     @rx.event
     async def on_load(self):
