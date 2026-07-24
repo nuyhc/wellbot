@@ -444,7 +444,7 @@ def slides_modal() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.spinner(size="3"),
-                                rx.text("슬라이드 렌더 중...", size="2",
+                                rx.text("슬라이드 생성 중...", size="2",
                                         color=COLORS["text_secondary"]),
                                 spacing="3", align="center",
                             ),
