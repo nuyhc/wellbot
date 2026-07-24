@@ -249,7 +249,7 @@ def suggest_component_tags(outline: "Outline") -> dict[tuple[int, str], str]:
             f"{listing}\n\n"
             'JSON 으로만 답하라: {"tags":[{"id":0,"component":"sections"}, ...]}'
         )
-        result = bedrock.call_json(prompt, get_config().max_tokens_style)
+        result = bedrock.call_json(prompt, get_config().max_tokens_style, action="slide_tag")
         for row in (result.get("tags") or []):
             i = row.get("id")
             comp = row.get("component")
@@ -305,7 +305,7 @@ def _render_page(page: "Page", report_title: str, total: int, tags: dict) -> str
     )
     return (
         '<section class="slide">'
-        '<div class="top"><span class="wing"><i class="r"></i><i class="o"></i></span>'
+        '<div class="top">'
         f'<div><div class="rtitle">{_esc(report_title)}</div>'
         f'<div class="ptitle">{_esc(page.title)}</div></div>'
         f'<span class="pageno">{page.no} / {total}</span></div>'
@@ -322,7 +322,6 @@ def _cover_slide(outline: "Outline", report_title: str) -> str:
     ov = f'<div class="cov-ov">{_esc(outline.overview)}</div>' if outline.overview else ""
     return (
         '<section class="slide cover"><div class="cov-wrap">'
-        '<span class="wing lg"><i class="r"></i><i class="o"></i></span>'
         f'<div class="cov-title">{_esc(report_title)}</div>{gov}{ov}'
         "</div></section>"
     )
@@ -370,14 +369,14 @@ _SLIDE_DESIGN_PROMPT = """당신은 SK 임원 보고 장표 디자이너다. 아
 - 표·타임라인·카드·KPI 등 시각 요소를 내용에 맞게 자유롭게 쓰되 임원 보고답게 절제한다.
 
 [브랜드/포맷 — 아래 클래스를 쓰면 SK 톤(레드 #EA002C·오렌지 #F47725)이 자동 적용된다. 직접 색 지정은 자제]
-- 상단바: <div class="top"><span class="wing"><i class="r"></i><i class="o"></i></span><div><div class="rtitle">보고서 제목</div><div class="ptitle">페이지 제목</div></div><span class="pageno">N / 총</span></div>
+- 상단바: <div class="top"><div><div class="rtitle">보고서 제목</div><div class="ptitle">페이지 제목</div></div><span class="pageno">N / 총</span></div>
 - 페이지 결론 바: <div class="pgov">페이지 governing</div>
 - 본문: <div class="cols" style="grid-template-columns:1fr 1fr"><div class="col"><div class="atitle">영역 제목</div><div class="agov">영역 governing</div> …블록… </div> …</div>
 - 대분류 카드: <div class="box"><div class="h">□ 제목</div><ul class="l2"><li>중항목<ul class="l3"><li>세부</li></ul></li></ul></div>
 - 타임라인: <div class="tl"><div class="ph"><div class="ph-t">단계</div><ul class="l2">…</ul></div></div>
 - 표: <table class="exec"><thead><tr><th>…</th></tr></thead><tbody><tr><td>…</td></tr></tbody></table>
 - KPI: <div class="kpis"><div class="kpi"><span class="v">값</span><span class="l">라벨</span></div></div>
-- 표지(선택): <section class="slide cover"><div class="cov-wrap"><span class="wing lg"><i class="r"></i><i class="o"></i></span><div class="cov-title">제목</div><div class="cov-gov">전체 governing</div></div></section>
+- 표지(선택): <section class="slide cover"><div class="cov-wrap"><div class="cov-title">제목</div><div class="cov-gov">전체 governing</div></div></section>
 
 [출력]
 - <section class="slide"> 들만 출력한다. <html>/<head>/<style>/<script> 는 쓰지 마라(브랜드 셸이 자동 제공됨).
@@ -398,7 +397,7 @@ def render_html_llm(md: str) -> str:
     from wellbot.services.report_maker.config import get_config
 
     prompt = _SLIDE_DESIGN_PROMPT.replace("{content}", md or "")
-    body = _strip_fences(bedrock.call_model(prompt, get_config().max_tokens_outline))
+    body = _strip_fences(bedrock.call_model(prompt, get_config().max_tokens_outline, action="slide"))
     if "<section" not in body:
         raise ValueError("LLM 슬라이드 출력에 <section> 이 없음")
     return _HTML_SHELL.replace("{{BODY}}", body)
@@ -415,12 +414,6 @@ font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-se
 .slide{width:1280px;height:720px;margin:0 auto 26px;background:#fff;border:1px solid var(--line);
 border-radius:12px;overflow:hidden;box-shadow:0 12px 34px rgba(32,36,43,.12);display:flex;flex-direction:column;}
 .top{display:flex;align-items:center;gap:14px;padding:15px 28px;border-bottom:1px solid var(--line);}
-.wing{position:relative;width:30px;height:24px;flex:0 0 auto;}
-.wing.lg{width:46px;height:37px;}
-.wing i{position:absolute;top:0;width:15px;height:23px;border-radius:70% 70% 62% 14%;}
-.wing.lg i{width:23px;height:35px;}
-.wing i.r{left:0;background:var(--sk-red);transform:rotate(-16deg);}
-.wing i.o{right:0;background:var(--sk-orange);transform:rotate(16deg) scaleX(-1);opacity:.95;}
 .top .rtitle{font-size:13.5px;color:var(--ink-3);font-weight:600;}
 .top .ptitle{font-size:19px;font-weight:800;letter-spacing:-.2px;}
 .top .pageno{margin-left:auto;font-size:12px;color:#fff;background:var(--grad);border-radius:20px;padding:4px 13px;font-weight:700;}
