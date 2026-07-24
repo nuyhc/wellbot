@@ -77,7 +77,10 @@ def list_conversations(emp_no: str) -> list[dict]:
 
 
 def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
-    """대화 메시지(시간순). 소유권 검증 + AGNT_ID 태깅 메시지만."""
+    """대화 메시지(시간순). 소유권 검증 + AGNT_ID 태깅 메시지만.
+
+    role='usage' 행(보조 LLM 호출 토큰 집계용)은 대화가 아니므로 제외한다.
+    """
     with get_session() as session:
         if not _verify_ownership(session, smry_id, emp_no):
             return []
@@ -86,6 +89,7 @@ def get_conversation_messages(smry_id: str, emp_no: str) -> list[dict]:
             .filter(
                 ChatMessage.chtb_tlk_smry_id == smry_id,
                 ChatMessage.agnt_id == _agnt_id(),
+                ChatMessage.msg_role_nm != "usage",
             )
             .order_by(
                 ChatMessage.chtb_tlk_seq.asc(),
@@ -201,6 +205,33 @@ def append_message(
                 raise
             continue
     return tlk_id
+
+
+def record_usage(
+    smry_id: str,
+    emp_no: str,
+    action: str,
+    input_tokens: int,
+    output_tokens: int,
+    model_name: str = "",
+) -> None:
+    """비대화(보조) LLM 호출의 토큰 사용량을 chtb_msg_d 에 role='usage' 행으로 기록.
+
+    스키마·구조를 유지하기 위해 기존 메시지 테이블·토큰 컬럼을 재사용한다(별도 usage
+    테이블 없음). role='usage' 라 대화 조회(get_conversation_messages)에서 제외되므로
+    화면엔 뜨지 않고 집계(SUM)에만 잡힌다. chtb_msg_cntt 에 action 라벨(slide 등)을 남긴다.
+    smry_id/emp_no 가 없거나 토큰이 0 이면 기록하지 않는다(best-effort).
+    """
+    if not smry_id or not emp_no:
+        return
+    if (input_tokens or 0) + (output_tokens or 0) <= 0:
+        return
+    append_message(
+        smry_id, "usage", (action or "llm")[:200], emp_no,
+        model_name=model_name,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 def delete_conversation(smry_id: str, emp_no: str) -> None:
